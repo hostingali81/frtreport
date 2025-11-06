@@ -75,7 +75,7 @@ async function scrapeWithPuppeteer(username: string, password: string) {
   const fromDateDisplay = `01-Jan-2010`;
   const todayIso = `${toYr}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-  await page.evaluate(({ fromStr, toStr, todayIsoEval }) => {
+  await page.evaluate(({ fromStr, toStr, todayIsoEval }: { fromStr: string; toStr: string; todayIsoEval: string }) => {
     const fireEvents = (el: HTMLElement) => { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('blur', { bubbles: true })); };
     const fromEl = document.getElementById('ctrl143709') as HTMLInputElement | null;
     const toEl = document.getElementById('ctrl143707') as HTMLInputElement | null;
