@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { chromium } from 'playwright';
-import chromiumLambda from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
 import { createClient } from '@supabase/supabase-js';
 
@@ -42,15 +41,12 @@ async function saveToDb(payload: any) {
 }
 
 async function scrapeWithPuppeteer(username: string, password: string) {
-  // Configure chromium lambda
-  chromiumLambda.setHeadlessMode = true;
-  chromiumLambda.setGraphicsMode = false;
-  const executablePath = await chromiumLambda.executablePath();
+  const chromium = await import('@sparticuz/chromium-min').then(m => m.default);
   const browser = await puppeteer.launch({
-    args: chromiumLambda.args,
-    defaultViewport: chromiumLambda.defaultViewport,
-    executablePath,
-    headless: true,
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath('https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar'),
+    headless: chromium.headless,
   });
   const page = await browser.newPage();
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
@@ -148,8 +144,7 @@ export async function GET(request: Request) {
       }
     }
 
-    // Ensure Playwright resolves browsers from project path on serverless
-    process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
+    // Ensure Playwright resolves browsers properly
     process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS || '1';
 
     // Validate required credentials
