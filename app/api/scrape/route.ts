@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { chromium } from 'playwright';
 import puppeteer from 'puppeteer';
+import puppeteerCore from 'puppeteer-core';
 import { createClient } from '@supabase/supabase-js';
 
 // Ensure this route runs on the Node.js runtime (Playwright is not supported on the Edge runtime)
@@ -42,11 +43,11 @@ async function saveToDb(payload: any) {
 
 async function scrapeWithPuppeteer(username: string, password: string) {
   const chromium = await import('@sparticuz/chromium').then(m => m.default);
-  await chromium.font('https://raw.githack.com/googlei18n/noto-emoji/master/fonts/NotoColorEmoji.ttf');
-  const browser = await puppeteer.launch({
+  const executablePath = await chromium.executablePath();
+  const browser = await puppeteerCore.launch({
     args: chromium.args,
     defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),
+    executablePath,
     headless: chromium.headless,
   });
   const page = await browser.newPage();
