@@ -5,6 +5,8 @@ import { chromium } from 'playwright';
 export const runtime = 'nodejs';
 // Always compute fresh data from the remote site
 export const dynamic = 'force-dynamic';
+// Allow longer execution on serverless
+export const maxDuration = 60;
 
 // In-memory cache for scraped result
 let cachedResult: any | null = null;
@@ -21,6 +23,10 @@ export async function GET(request: Request) {
     if (!refresh && cachedResult) {
       return NextResponse.json({ success: true, cached: true, cachedAt, ...cachedResult });
     }
+
+    // Ensure Playwright resolves browsers from project path on serverless
+    process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
+    process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS || '1';
 
     // Validate required credentials
     const username = process.env.FRT_USERNAME;
