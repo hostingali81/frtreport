@@ -14,6 +14,7 @@ export default function Home() {
   const [fromDT, setFromDT] = useState(''); // yyyy-mm-ddTHH:mm (datetime-local)
   const [toDT, setToDT] = useState('');   // yyyy-mm-ddTHH:mm (datetime-local)
   const [statusFilter, setStatusFilter] = useState(''); // empty = all
+  const [lastUpdated, setLastUpdated] = useState<string>('');
 
   const statusOptions = useMemo(() => {
     const set = new Set<string>();
@@ -42,6 +43,7 @@ export default function Home() {
         if (result.data && result.data.length > 0) {
           setOriginal(result.data);
           setData(result.data);
+          setLastUpdated(new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
         } else {
           setError('कोई डेटा नहीं मिला। Debug info: ' + JSON.stringify(result.debug));
         }
@@ -161,6 +163,10 @@ export default function Home() {
     setFromDT(formatDateTimeLocal(min));
     setToDT(formatDateTimeLocal(max));
   }, [original]);
+
+  useEffect(() => {
+    fetchData(false);
+  }, []);
 
   const exportBulkPDF = () => {
     if (filtered.length === 0) return;
@@ -387,23 +393,20 @@ export default function Home() {
               <p className="text-gray-500 text-sm md:text-base">Analyze, filter and export complaints with ease</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => fetchData(false)}
-              disabled={loading}
-              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
-            >
-              {loading ? (<><FiClock /> लोड हो रहा है…</>) : (<><FiDownload /> डेटा (Cache)</>)}
-            </button>
-            <button
-              onClick={() => fetchData(true)}
-              disabled={loading}
-              className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
-            >
-              <FiRefreshCw /> Refresh
-            </button>
-          </div>
+          <button
+            onClick={() => fetchData(true)}
+            disabled={loading}
+            className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
+          >
+            {loading ? (<><FiClock /> लोड हो रहा है…</>) : (<><FiRefreshCw /> Refresh</>)}
+          </button>
         </header>
+
+        {lastUpdated && (
+          <div className="bg-red-50 border-l-4 border-red-500 text-red-800 px-4 py-3 rounded">
+            <p className="font-semibold">⚠️ Data last updated on: {lastUpdated}</p>
+          </div>
+        )}
 
         {original.length > 0 && (
           <div className="bg-white rounded-xl shadow-md p-4 md:p-5 mb-6 border border-gray-100">
