@@ -1,7 +1,4 @@
 import { NextResponse } from 'next/server';
-import { chromium } from 'playwright';
-import puppeteer from 'puppeteer';
-import puppeteerCore from 'puppeteer-core';
 import { createClient } from '@supabase/supabase-js';
 
 // Ensure this route runs on the Node.js runtime (Playwright is not supported on the Edge runtime)
@@ -42,14 +39,23 @@ async function saveToDb(payload: any) {
 }
 
 async function scrapeWithPuppeteer(username: string, password: string) {
-  const chromium = await import('@sparticuz/chromium').then(m => m.default);
-  const executablePath = await chromium.executablePath();
-  const browser = await puppeteerCore.launch({
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath,
-    headless: chromium.headless,
-  });
+  const isVercel = !!process.env.VERCEL_ENV;
+  let puppeteer: any;
+  let launchOptions: any = { headless: true };
+
+  if (isVercel) {
+    const chromium = (await import('@sparticuz/chromium')).default;
+    puppeteer = await import('puppeteer-core');
+    launchOptions = {
+      ...launchOptions,
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+    };
+  } else {
+    puppeteer = await import('puppeteer');
+  }
+
+  const browser = await puppeteer.launch(launchOptions);
   const page = await browser.newPage();
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
   await page.goto('https://www.frtbarabanki.com', { timeout: 60000, waitUntil: 'networkidle0' });
@@ -159,15 +165,22 @@ export async function GET(request: Request) {
       );
     }
     
-    // If running on Vercel (serverless), use Puppeteer + lambda-chromium to avoid Playwright browser issues
-    if (process.env.VERCEL === '1' || process.env.PLAYWRIGHT_FORCE_PUPPETEER === '1') {
-      const payload = await scrapeWithPuppeteer(username, password);
-      cachedResult = payload;
-      cachedAt = Date.now();
-      try { await saveToDb(payload); } catch {}
-      return NextResponse.json({ success: true, cached: false, cachedAt, ...payload });
-    }
-
+    // Always use Puppeteer on Vercel
+    const payload = await scrapeWithPuppeteer(username, password);
+    cachedResult = payload;
+    cachedAt = Date.now();
+    try { await saveToDb(payload); } catch {}
+    return NextResponse.json({ success: true, cached: false, cachedAt, ...payload });
+  } catch (error: any) {
+    console.error('Scraping error:', error);
+    return NextResponse.json({ error: error.message, stack: error.stack }, { status: 500 });
+  }
+}
+/*
+// Old Playwright code - not used anymore
+export async function GET_OLD(request: Request) {
+  let browser;
+  try {
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     // Set a User-Agent to reduce chances of being blocked by the target site
@@ -459,19 +472,9 @@ export async function GET(request: Request) {
     });
     
     const payload = { clickedAction, ...data, pageInfo };
-    cachedResult = payload;
-    cachedAt = Date.now();
-    // save to DB cache (best-effort)
-    try { await saveToDb(payload); } catch {}
-    return NextResponse.json({ success: true, cached: false, cachedAt, ...payload });
-    
-  } catch (error: any) {
-    console.error('Scraping error:', error);
-    return NextResponse.json({ error: error.message, stack: error.stack }, { status: 500 });
-  }
-  finally {
-    if (browser) {
-      await browser.close();
-    }
+    return NextResponse.json({ success: true, ...payload });
+  } finally {
+    if (browser) await browser.close();
   }
 }
+*/

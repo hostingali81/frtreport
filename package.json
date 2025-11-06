@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "node -e \"if(!process.env.VERCEL){require('child_process').execSync('npx --yes playwright install chromium',{stdio:'inherit'})}\""
+    "postinstall": "echo 'Skipping playwright install'"
   },
   "dependencies": {
     "@sparticuz/chromium": "^123.0.0",
@@ -15,8 +15,6 @@
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.4",
     "next": "16.0.1",
-    "playwright": "^1.48.0",
-    "puppeteer": "^22.6.2",
     "puppeteer-core": "^22.6.2",
     "react": "19.2.0",
     "react-dom": "19.2.0",
@@ -29,6 +27,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.0.1",
+    "puppeteer": "^24.29.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
