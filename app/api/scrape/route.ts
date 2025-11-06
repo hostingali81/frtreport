@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { chromium } from 'playwright';
+import { createClient } from '@supabase/supabase-js';
 
 // Ensure this route runs on the Node.js runtime (Playwright is not supported on the Edge runtime)
 export const runtime = 'nodejs';
@@ -8,9 +9,35 @@ export const dynamic = 'force-dynamic';
 // Allow longer execution on serverless
 export const maxDuration = 60;
 
-// In-memory cache for scraped result
+// In-memory cache (best-effort) to avoid repeated DB hits in dev
 let cachedResult: any | null = null;
 let cachedAt: number | null = null;
+
+// Supabase client (writes require service role key)
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE;
+const supabase = supabaseUrl && supabaseServiceKey
+  ? createClient(supabaseUrl, supabaseServiceKey)
+  : null;
+
+async function loadFromDb() {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('reports')
+    .select('payload, updated_at')
+    .eq('key', 'frt_supply')
+    .maybeSingle();
+  if (error) return null;
+  if (!data) return null;
+  return { ...data.payload, cachedAt: new Date(data.updated_at).getTime(), source: 'db' };
+}
+
+async function saveToDb(payload: any) {
+  if (!supabase) return;
+  await supabase
+    .from('reports')
+    .upsert({ key: 'frt_supply', payload }, { onConflict: 'key' });
+}
 
 export async function GET(request: Request) {
   let browser;
@@ -19,9 +46,20 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const refresh = searchParams.get('refresh') === '1' || searchParams.get('refresh') === 'true';
 
-    // Serve from cache unless refresh is requested
+    // Serve from in-memory cache unless refresh is requested
     if (!refresh && cachedResult) {
       return NextResponse.json({ success: true, cached: true, cachedAt, ...cachedResult });
+    }
+
+    // Try persistent cache (Supabase) when not refreshing
+    if (!refresh) {
+      const fromDb = await loadFromDb();
+      if (fromDb) {
+        // also prime memory cache
+        cachedResult = fromDb;
+        cachedAt = fromDb.cachedAt || Date.now();
+        return NextResponse.json({ success: true, cached: true, ...fromDb });
+      }
     }
 
     // Ensure Playwright resolves browsers from project path on serverless
@@ -331,6 +369,8 @@ export async function GET(request: Request) {
     const payload = { clickedAction, ...data, pageInfo };
     cachedResult = payload;
     cachedAt = Date.now();
+    // save to DB cache (best-effort)
+    try { await saveToDb(payload); } catch {}
     return NextResponse.json({ success: true, cached: false, cachedAt, ...payload });
     
   } catch (error: any) {
