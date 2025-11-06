@@ -10,7 +10,7 @@
     "postinstall": "node -e \"if(!process.env.VERCEL){require('child_process').execSync('npx --yes playwright install chromium',{stdio:'inherit'})}\""
   },
   "dependencies": {
-    "@sparticuz/chromium": "^131.0.0",
+    "@sparticuz/chromium": "^126.0.0",
     "@supabase/supabase-js": "^2.45.0",
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.4",
