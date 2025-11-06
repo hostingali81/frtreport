@@ -15,6 +15,8 @@ export default function Home() {
   const [toDT, setToDT] = useState('');   // yyyy-mm-ddTHH:mm (datetime-local)
   const [statusFilter, setStatusFilter] = useState(''); // empty = all
   const [lastUpdated, setLastUpdated] = useState<string>('');
+  const [sortColumn, setSortColumn] = useState<string>('');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   const statusOptions = useMemo(() => {
     const set = new Set<string>();
@@ -89,6 +91,15 @@ export default function Home() {
     return formatDuration(close.getTime() - open.getTime());
   };
 
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
+
   const filtered = useMemo(() => {
     let rows = original;
     if (search.trim()) {
@@ -111,8 +122,31 @@ export default function Home() {
     if (statusFilter) {
       rows = rows.filter(row => String(row['Status'] ?? '').trim() === statusFilter);
     }
+    if (sortColumn) {
+      rows = [...rows].sort((a, b) => {
+        let aVal = String(a[sortColumn] ?? '');
+        let bVal = String(b[sortColumn] ?? '');
+        
+        // Try numeric sort
+        const aNum = parseFloat(aVal);
+        const bNum = parseFloat(bVal);
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+          return sortDirection === 'asc' ? aNum - bNum : bNum - aNum;
+        }
+        
+        // Try date sort
+        const aDate = parsePossibleDate(aVal);
+        const bDate = parsePossibleDate(bVal);
+        if (aDate && bDate) {
+          return sortDirection === 'asc' ? aDate.getTime() - bDate.getTime() : bDate.getTime() - aDate.getTime();
+        }
+        
+        // String sort
+        return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      });
+    }
     return rows;
-  }, [original, search, fromDT, toDT, statusFilter]);
+  }, [original, search, fromDT, toDT, statusFilter, sortColumn, sortDirection]);
 
   const formatDateTimeLocal = (d: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -504,8 +538,17 @@ export default function Home() {
                     if (idx >= 0) base.splice(idx + 1, 0, 'Resolution Time'); else base.push('Resolution Time');
                     return base;
                   })().map((header) => (
-                    <th key={header} className="px-4 md:px-6 py-3 text-left font-medium text-gray-700 uppercase tracking-wider">
-                      {header}
+                    <th 
+                      key={header} 
+                      onClick={() => handleSort(header)}
+                      className="px-4 md:px-6 py-3 text-left font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-200 select-none"
+                    >
+                      <div className="flex items-center gap-1">
+                        {header}
+                        {sortColumn === header && (
+                          <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </div>
                     </th>
                   ))}
                 </tr>
