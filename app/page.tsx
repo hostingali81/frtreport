@@ -278,14 +278,29 @@ export default function Home() {
     if (toDT) periodParts.push(`To: ${toDT.replace('T', ' ')}`);
     doc.text(`Generated: ${nowStr}`, 40, 54);
     doc.text(`Total Complaints: ${rows.length}`, 40, 72);
-    if (periodParts.length) doc.text(periodParts.join('   '), 40, 90);
+    if (periodParts.length) {
+      const periodText = periodParts.join('   ');
+      // Draw a subtle highlighted ribbon behind the period range
+      const x = 40;
+      const y = 104; // place below previous lines to avoid overlap
+      doc.setFontSize(12);
+      const textWidth = (doc.getTextWidth(periodText) || 0);
+      const padX = 8; const padY = 6;
+      // Professional subtle blue-gray background
+      doc.setFillColor(235, 242, 250); // #EBF2FA
+      doc.setDrawColor(209, 223, 235); // light border
+      doc.roundedRect(x - padX, y - 14 - padY / 2, textWidth + padX * 2, 22 + padY, 3, 3, 'FD');
+      doc.setTextColor(34, 62, 99); // dark slate text
+      doc.text(periodText, x, y);
+      doc.setTextColor(0, 0, 0); // reset for next content
+    }
 
     // Division summary with Total/Closed/Pending + Grand Total row
     const { rows: divRows, grand } = divisionTotals(rows);
     const tableBody = divRows.map(r => [r.division, String(r.total), String(r.closed), String(r.pending)]);
     tableBody.push([ 'Grand Total', String(grand.total), String(grand.closed), String(grand.pending) ]);
     autoTable(doc, {
-      startY: 110,
+      startY: 130,
       head: [[ 'Division', 'Total Complaints', 'Closed', 'Pending' ]],
       body: tableBody,
       theme: 'grid',
