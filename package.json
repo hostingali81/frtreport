@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "npx --yes playwright install chromium"
+    "postinstall": "node -e \"if(!process.env.VERCEL){require('child_process').execSync('npx --yes playwright install chromium',{stdio:'inherit'})}\""
   },
   "dependencies": {
     "react": "19.2.0",

@@ -42,6 +42,9 @@ async function saveToDb(payload: any) {
 }
 
 async function scrapeWithPuppeteer(username: string, password: string) {
+  // Configure chromium lambda
+  chromiumLambda.setHeadlessMode = true;
+  chromiumLambda.setGraphicsMode = false;
   const executablePath = await chromiumLambda.executablePath();
   const browser = await puppeteer.launch({
     args: chromiumLambda.args,
