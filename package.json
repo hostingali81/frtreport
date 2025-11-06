@@ -16,6 +16,7 @@
     "jspdf-autotable": "^3.8.4",
     "next": "16.0.1",
     "playwright": "^1.48.0",
+    "puppeteer": "^23.11.1",
     "puppeteer-core": "^23.0.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
