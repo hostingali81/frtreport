@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { chromium } from 'playwright';
+import chromiumLambda from '@sparticuz/chromium';
+import puppeteer from 'puppeteer-core';
 import { createClient } from '@supabase/supabase-js';
 
 // Ensure this route runs on the Node.js runtime (Playwright is not supported on the Edge runtime)
@@ -39,6 +41,87 @@ async function saveToDb(payload: any) {
     .upsert({ key: 'frt_supply', payload }, { onConflict: 'key' });
 }
 
+async function scrapeWithPuppeteer(username: string, password: string) {
+  const executablePath = await chromiumLambda.executablePath();
+  const browser = await puppeteer.launch({
+    args: chromiumLambda.args,
+    defaultViewport: chromiumLambda.defaultViewport,
+    executablePath,
+    headless: chromiumLambda.headless,
+  });
+  const page = await browser.newPage();
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
+  await page.goto('https://www.frtbarabanki.com', { timeout: 60000, waitUntil: 'networkidle0' });
+  await page.waitForSelector('#txtUserName', { timeout: 10000 });
+  await page.type('#txtUserName', username);
+  await page.type('#txtPassword', password);
+  await page.click('#btnlogin');
+  await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+  await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', { timeout: 60000, waitUntil: 'networkidle0' });
+
+  const now = new Date();
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] as const;
+  const toDay = String(now.getDate()).padStart(2, '0');
+  const toMon = monthNames[now.getMonth()];
+  const toYr = now.getFullYear();
+  const toDateDisplay = `${toDay}-${toMon}-${toYr}`;
+  const fromDateDisplay = `01-Jan-2010`;
+  const todayIso = `${toYr}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+  await page.evaluate(({ fromStr, toStr, todayIsoEval }) => {
+    const fireEvents = (el: HTMLElement) => { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('blur', { bubbles: true })); };
+    const fromEl = document.getElementById('ctrl143709') as HTMLInputElement | null;
+    const toEl = document.getElementById('ctrl143707') as HTMLInputElement | null;
+    if (fromEl) { fromEl.value = fromStr; fireEvents(fromEl); try { (window as any).$ && (window as any)('#ctrl143709').val(fromStr).trigger('change'); } catch {} }
+    if (toEl) { toEl.value = toStr; fireEvents(toEl); try { (window as any).$ && (window as any)('#ctrl143707').val(toStr).trigger('change'); } catch {} }
+    const dateInputs = Array.from(document.querySelectorAll('input[type="date"]')) as HTMLInputElement[];
+    if (dateInputs.length === 1) { dateInputs[0].value = todayIsoEval; fireEvents(dateInputs[0]); }
+    else if (dateInputs.length >= 2) { dateInputs[0].value = '2010-01-01'; fireEvents(dateInputs[0]); dateInputs[1].value = todayIsoEval; fireEvents(dateInputs[1]); }
+  }, { fromStr: fromDateDisplay, toStr: toDateDisplay, todayIsoEval: todayIso });
+
+  await page.click('#ctrl143708').catch(() => {});
+
+  await page.waitForFunction(() => {
+    const container = document.querySelector('#printablediv143706');
+    if (!container) return false;
+    const tables = Array.from(container.querySelectorAll('table')) as HTMLTableElement[];
+    if (tables.length < 2) return false;
+    const dataTable = tables[1];
+    const rows = dataTable.querySelectorAll('tbody tr').length > 0 ? Array.from(dataTable.querySelectorAll('tbody tr')) : Array.from(dataTable.querySelectorAll('tr'));
+    return rows.length >= 1;
+  }, { timeout: 20000 }).catch(() => {});
+
+  const result = await page.evaluate(() => {
+    const normalize = (s: string | null | undefined) => (s || '').trim();
+    const container = document.querySelector('#printablediv143706');
+    if (!container) return { data: [], debug: 'container not found' };
+    const tables = Array.from(container.querySelectorAll('table')) as HTMLTableElement[];
+    if (tables.length < 2) return { data: [], debug: 'tables not found' };
+    const headerTable = tables[0];
+    const dataTable = tables[1];
+    const headerRows = Array.from(headerTable.querySelectorAll('tr'));
+    const headerCells = headerRows[1] ? Array.from(headerRows[1].querySelectorAll('th, td')) as HTMLElement[] : [];
+    let headers = headerCells.map((cell, i) => normalize(cell.textContent) || `Column ${i + 1}`);
+    if (headers.length === 0) {
+      headers = ['Complaint Number','Complaint Date and Time','Division','Sub Division','Sub Station','Status','Closed By','Closed Date','Closing Remarks'];
+    }
+    const dataRows = dataTable.querySelectorAll('tbody tr').length > 0 ? Array.from(dataTable.querySelectorAll('tbody tr')) : Array.from(dataTable.querySelectorAll('tr'));
+    const mapped = dataRows.map(row => {
+      const cells = Array.from(row.querySelectorAll('td')) as HTMLElement[];
+      if (cells.length === 0) return null;
+      const rowData: Record<string, string> = {};
+      const limit = Math.min(cells.length, headers.length);
+      for (let i = 0; i < limit; i++) rowData[headers[i] || `Column ${i + 1}`] = normalize(cells[i].textContent);
+      const anyValue = Object.values(rowData).some(v => v && v.length > 0);
+      return anyValue ? rowData : null;
+    }).filter(Boolean) as Record<string, string>[];
+    return { data: mapped, debug: { mode: 'puppeteer' } };
+  });
+
+  await browser.close();
+  return { clickedAction: '#ctrl143708', ...result, pageInfo: {} };
+}
+
 export async function GET(request: Request) {
   let browser;
   
@@ -76,6 +159,15 @@ export async function GET(request: Request) {
       );
     }
     
+    // If running on Vercel (serverless), use Puppeteer + lambda-chromium to avoid Playwright browser issues
+    if (process.env.VERCEL === '1' || process.env.PLAYWRIGHT_FORCE_PUPPETEER === '1') {
+      const payload = await scrapeWithPuppeteer(username, password);
+      cachedResult = payload;
+      cachedAt = Date.now();
+      try { await saveToDb(payload); } catch {}
+      return NextResponse.json({ success: true, cached: false, cachedAt, ...payload });
+    }
+
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     // Set a User-Agent to reduce chances of being blocked by the target site
