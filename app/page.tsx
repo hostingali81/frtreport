@@ -124,24 +124,31 @@ export default function Home() {
     }
     if (sortColumn) {
       rows = [...rows].sort((a, b) => {
-        let aVal = String(a[sortColumn] ?? '');
-        let bVal = String(b[sortColumn] ?? '');
+        let aVal: any, bVal: any;
         
-        // Try numeric sort
+        if (sortColumn === 'Resolution Time') {
+          const aTime = computeResolutionTime(a);
+          const bTime = computeResolutionTime(b);
+          const aMs = aTime ? (parseInt(aTime) || 0) * (aTime.includes('d') ? 1440 : aTime.includes('h') ? 60 : 1) : 0;
+          const bMs = bTime ? (parseInt(bTime) || 0) * (bTime.includes('d') ? 1440 : bTime.includes('h') ? 60 : 1) : 0;
+          return sortDirection === 'asc' ? aMs - bMs : bMs - aMs;
+        }
+        
+        aVal = String(a[sortColumn] ?? '');
+        bVal = String(b[sortColumn] ?? '');
+        
         const aNum = parseFloat(aVal);
         const bNum = parseFloat(bVal);
         if (!isNaN(aNum) && !isNaN(bNum)) {
           return sortDirection === 'asc' ? aNum - bNum : bNum - aNum;
         }
         
-        // Try date sort
         const aDate = parsePossibleDate(aVal);
         const bDate = parsePossibleDate(bVal);
         if (aDate && bDate) {
           return sortDirection === 'asc' ? aDate.getTime() - bDate.getTime() : bDate.getTime() - aDate.getTime();
         }
         
-        // String sort
         return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
       });
     }
