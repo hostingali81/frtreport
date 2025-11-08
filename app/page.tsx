@@ -535,8 +535,9 @@ export default function Home() {
         )}
 
         {filtered.length > 0 && (
-          <div className="bg-white rounded-xl shadow-md overflow-x-auto border border-gray-100">
-            <table className="min-w-full divide-y divide-gray-200 text-xs md:text-sm">
+          <div className="bg-white rounded-xl shadow-md border border-gray-100">
+            <div className="overflow-x-auto max-h-[70vh]">
+              <table className="min-w-full divide-y divide-gray-200 text-xs md:text-sm">
               <thead className="bg-gray-100 sticky top-0 z-10">
                 <tr>
                   {(() => {
@@ -590,6 +591,7 @@ export default function Home() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>
