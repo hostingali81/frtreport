@@ -788,13 +788,13 @@ export default function Home() {
 
     // Sheet 5: Top Sub Stations
     const wsTopSS = wb.addWorksheet('Top Sub Stations', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsTopSS, 'Top Sub Stations by Complaints', `Top 20 (of ${rows.length} complaints)`);
+    addTitle(wsTopSS, 'Sub Stations by Complaints', `All Sub Stations (${rows.length} complaints)`);
     const ssMap = new Map<string, number>();
     for (const r of rows) {
       const s = String((r as any)['Sub Station'] || '').trim() || 'Unknown';
       ssMap.set(s, (ssMap.get(s) || 0) + 1);
     }
-    const topSS = Array.from(ssMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 20);
+    const topSS = Array.from(ssMap.entries()).sort((a, b) => b[1] - a[1]);
     wsTopSS.addRow(['Sub Station', 'Complaints']);
     styleHeaderRow(wsTopSS, 3);
     topSS.forEach(([name, count]) => wsTopSS.addRow([name, count]));
