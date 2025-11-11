@@ -46,7 +46,10 @@ export default function Home() {
         if (result.data && result.data.length > 0) {
           setOriginal(result.data);
           setData(result.data);
-          setLastUpdated(new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
+          // Set timestamp from API response (last scrape time)
+          if (result.lastScrapedAt) {
+            setLastUpdated(result.lastScrapedAt);
+          }
         } else {
           setError('कोई डेटा नहीं मिला। Debug info: ' + JSON.stringify(result.debug));
         }
@@ -847,7 +850,7 @@ export default function Home() {
         </header>
 
         {lastUpdated && (
-          <div className="bg-red-50 border-l-4 border-red-500 text-red-800 px-4 py-3 rounded">
+          <div className="bg-amber-50 border-l-4 border-amber-500 text-amber-800 px-4 py-3 rounded">
             <p className="font-semibold">⚠️ Data last updated on: {lastUpdated}</p>
           </div>
         )}

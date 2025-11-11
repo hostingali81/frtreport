@@ -8,10 +8,6 @@ export const dynamic = 'force-dynamic';
 // Allow longer execution on serverless
 export const maxDuration = 60;
 
-// In-memory cache (best-effort) to avoid repeated DB hits in dev
-let cachedResult: any | null = null;
-let cachedAt: number | null = null;
-
 // Supabase client (writes require service role key)
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE;
@@ -23,19 +19,23 @@ async function loadFromDb() {
   if (!supabase) return null;
   const { data, error } = await supabase
     .from('reports')
-    .select('payload, updated_at')
+    .select('payload')
     .eq('key', 'frt_supply')
     .maybeSingle();
   if (error) return null;
   if (!data) return null;
-  return { ...data.payload, cachedAt: new Date(data.updated_at).getTime(), source: 'db' };
+  return { 
+    ...data.payload,
+    source: 'supabase' 
+  };
 }
 
-async function saveToDb(payload: any) {
+async function saveToDb(payload: any, timestamp: string) {
   if (!supabase) return;
+  const dataToSave = { ...payload, lastScrapedAt: timestamp };
   await supabase
     .from('reports')
-    .upsert({ key: 'frt_supply', payload }, { onConflict: 'key' });
+    .upsert({ key: 'frt_supply', payload: dataToSave }, { onConflict: 'key' });
 }
 
 async function scrapeWithPuppeteer(username: string, password: string) {
@@ -136,18 +136,10 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const refresh = searchParams.get('refresh') === '1' || searchParams.get('refresh') === 'true';
 
-    // Serve from in-memory cache unless refresh is requested
-    if (!refresh && cachedResult) {
-      return NextResponse.json({ success: true, cached: true, cachedAt, ...cachedResult });
-    }
-
-    // Try persistent cache (Supabase) when not refreshing
+    // Load from Supabase when not refreshing
     if (!refresh) {
       const fromDb = await loadFromDb();
       if (fromDb) {
-        // also prime memory cache
-        cachedResult = fromDb;
-        cachedAt = fromDb.cachedAt || Date.now();
         return NextResponse.json({ success: true, cached: true, ...fromDb });
       }
     }
@@ -167,10 +159,9 @@ export async function GET(request: Request) {
     
     // Always use Puppeteer on Vercel
     const payload = await scrapeWithPuppeteer(username, password);
-    cachedResult = payload;
-    cachedAt = Date.now();
-    try { await saveToDb(payload); } catch {}
-    return NextResponse.json({ success: true, cached: false, cachedAt, ...payload });
+    const scrapedAt = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    try { await saveToDb(payload, scrapedAt); } catch {}
+    return NextResponse.json({ success: true, cached: false, lastScrapedAt: scrapedAt, source: 'live', ...payload });
   } catch (error: any) {
     console.error('Scraping error:', error);
     return NextResponse.json({ error: error.message, stack: error.stack }, { status: 500 });
