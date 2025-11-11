@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock, FiDatabase } from 'react-icons/fi';
+import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock } from 'react-icons/fi';
+import Image from 'next/image';
 
 export default function Home() {
   const [original, setOriginal] = useState<any[]>([]);
@@ -834,7 +835,7 @@ export default function Home() {
       <div className="max-w-7xl mx-auto space-y-6">
         <header className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-blue-600 text-white"><FiDatabase size={22} /></div>
+            <Image src="/logo.png" alt="FRT Logo" width={56} height={56} className="rounded-lg" priority />
             <div>
               <h1 className="text-xl md:text-3xl font-bold">FRT बाराबंकी - सप्लाई कंप्लेंट रिपोर्ट</h1>
               <p className="text-gray-500 text-sm md:text-base">Analyze, filter and export complaints with ease</p>
