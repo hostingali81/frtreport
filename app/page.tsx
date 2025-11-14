@@ -573,9 +573,12 @@ export default function Home() {
       }
     };
 
+    // Period subtitle for all sheets
+    const periodSubtitle = fromDT || toDT ? `Period: ${fromDT ? fromDT.replace('T',' ') : 'Start'} → ${toDT ? toDT.replace('T',' ') : 'Now'}` : 'Period: All Data';
+
     // Cover / Summary sheet
     const wsCover = wb.addWorksheet('Cover', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1 }] });
-    const periodText = fromDT || toDT ? `Period: ${fromDT ? fromDT.replace('T',' ') : ''} ${toDT ? '→ ' + toDT.replace('T',' ') : ''}` : 'Period: All';
+    const periodText = periodSubtitle;
     const statusApplied = statusFilter ? statusFilter : 'All';
     const uniqueDivisions = Array.from(new Set(rows.map(r => String((r as any)['Division'] || '').trim()).filter(Boolean))).sort();
     const uniqueStatuses = Array.from(new Set(rows.map(r => String((r as any)['Status'] || '').trim()).filter(Boolean))).sort();
@@ -599,7 +602,7 @@ export default function Home() {
 
     // Sheet 1: Bulk Data
     const wsData = wb.addWorksheet('Bulk Data', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsData, 'Supply Complaint Report (Bulk)', `Generated: ${new Date().toLocaleString()}${fromDT || toDT ? `   Period: ${fromDT ? fromDT.replace('T',' ') : ''} ${toDT ? '→ ' + toDT.replace('T',' ') : ''}` : ''}`);
+    addTitle(wsData, 'Supply Complaint Report (Bulk)', `Generated: ${new Date().toLocaleString()}   |   ${periodSubtitle}`);
 
     const baseHeaders = Object.keys(rows[0]);
     const headers = (() => {
@@ -677,7 +680,7 @@ export default function Home() {
 
     // Sheet 2: Summary by Division
     const wsSummary = wb.addWorksheet('Summary by Division', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsSummary, 'Supply Complaint Summary', `Total Complaints: ${rows.length}`);
+    addTitle(wsSummary, 'Supply Complaint Summary', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
     const { rows: divRows, grand } = divisionTotals(rows);
     const sumHeaders = ['Division', 'Total', 'Closed', 'Pending'];
     wsSummary.addRow(sumHeaders);
@@ -711,7 +714,7 @@ export default function Home() {
 
     // Sheet 3: Date-wise Counts
     const wsDate = wb.addWorksheet('Date-wise', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsDate, 'Date-wise Complaint Count', fromDT || toDT ? `Period: ${fromDT ? fromDT.replace('T',' ') : ''} ${toDT ? '→ ' + toDT.replace('T',' ') : ''}` : '');
+    addTitle(wsDate, 'Date-wise Complaint Count', periodSubtitle);
     wsDate.addRow(['Date', 'Total Complaints']);
     styleHeaderRow(wsDate, 3);
     const dateMap = new Map<string, number>();
@@ -754,7 +757,7 @@ export default function Home() {
 
     // Sheet 4: Status Breakdown
     const wsStatus = wb.addWorksheet('Status Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsStatus, 'Status Breakdown', `Total Complaints: ${rows.length}`);
+    addTitle(wsStatus, 'Status Breakdown', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
     const statusMap = new Map<string, number>();
     for (const r of rows) {
       const s = String((r as any)['Status'] || '').trim() || 'Unknown';
@@ -790,9 +793,88 @@ export default function Home() {
       cell.font = { bold: true, color: { argb: idx === 2 ? theme.info : theme.titleColor } };
     });
 
-    // Sheet 5: Top Sub Stations
+    // Sheet 5: Division Breakdown (Control Room vs FRT)
+    const wsDivBreakdown = wb.addWorksheet('Division Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
+    addTitle(wsDivBreakdown, 'Division-wise Breakdown (Control Room vs FRT)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    
+    // Calculate division-wise breakdown
+    const divBreakdownMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      
+      const entry = divBreakdownMap.get(division) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
+      entry.total += 1;
+      if (isClosed) {
+        entry.closed += 1;
+        if (isControlRoom) {
+          entry.controlRoom += 1;
+        } else {
+          entry.frt += 1;
+        }
+      }
+      divBreakdownMap.set(division, entry);
+    }
+    
+    // Calculate pending
+    for (const [k, v] of divBreakdownMap) {
+      v.pending = Math.max(0, v.total - v.closed);
+      divBreakdownMap.set(k, v);
+    }
+    
+    const divBreakdownRows = Array.from(divBreakdownMap.entries())
+      .map(([div, stats]) => ({ division: div, ...stats }))
+      .sort((a, b) => b.total - a.total);
+    
+    // Calculate grand totals
+    const grandBreakdown = rows.reduce((acc, r) => {
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      
+      acc.total += 1;
+      if (isClosed) {
+        acc.closed += 1;
+        if (isControlRoom) {
+          acc.controlRoom += 1;
+        } else {
+          acc.frt += 1;
+        }
+      }
+      return acc;
+    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
+    grandBreakdown.pending = Math.max(0, grandBreakdown.total - grandBreakdown.closed);
+    
+    wsDivBreakdown.addRow(['Division', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']);
+    styleHeaderRow(wsDivBreakdown, 3);
+    divBreakdownRows.forEach(r => wsDivBreakdown.addRow([r.division, r.total, r.closed, r.controlRoom, r.frt, r.pending]));
+    wsDivBreakdown.addRow(['Grand Total', grandBreakdown.total, grandBreakdown.closed, grandBreakdown.controlRoom, grandBreakdown.frt, grandBreakdown.pending]);
+    
+    wsDivBreakdown.getColumn(1).width = 36;
+    wsDivBreakdown.getColumn(2).width = 14;
+    wsDivBreakdown.getColumn(3).width = 14;
+    wsDivBreakdown.getColumn(4).width = 18;
+    wsDivBreakdown.getColumn(5).width = 14;
+    wsDivBreakdown.getColumn(6).width = 14;
+    
+    const divBreakEnd = wsDivBreakdown.lastRow.number;
+    for (let r = 3; r <= divBreakEnd; r++) {
+      wsDivBreakdown.getRow(r).eachCell((cell: any) => {
+        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
+        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col === 1 ? 'left' : 'center') };
+      });
+    }
+    setAlternatingRows(wsDivBreakdown, 4, divBreakEnd);
+    const divBreakGt = wsDivBreakdown.getRow(divBreakEnd);
+    divBreakGt.eachCell((cell: any) => {
+      cell.font = { bold: true, color: { argb: theme.titleColor } };
+    });
+
+    // Sheet 6: Top Sub Stations
     const wsTopSS = wb.addWorksheet('Top Sub Stations', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsTopSS, 'Sub Stations by Complaints', `All Sub Stations (${rows.length} complaints)`);
+    addTitle(wsTopSS, 'Sub Stations by Complaints', `Total: ${rows.length} complaints   |   ${periodSubtitle}`);
     const ssMap = new Map<string, number>();
     for (const r of rows) {
       const s = String((r as any)['Sub Station'] || '').trim() || 'Unknown';
