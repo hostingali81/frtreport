@@ -19,6 +19,7 @@ export default function Home() {
   const [sortColumn, setSortColumn] = useState<string>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [selectedShift, setSelectedShift] = useState<string>(''); // e.g. "Today - Morning (07:00–15:00)"
+  const [showReportModal, setShowReportModal] = useState(false);
 
   const statusOptions = useMemo(() => {
     const set = new Set<string>();
@@ -277,57 +278,1012 @@ export default function Home() {
     <div className={`animate-pulse bg-gray-200 rounded ${className}`} />
   );
 
-  const exportBulkPDF = () => {
-    if (filtered.length === 0) return;
+  const exportDivisionSummary = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-    const baseHeaders = Object.keys(filtered[0]);
-    const headers = (() => {
-      const arr = [...baseHeaders];
-      const idx = arr.indexOf('Closed Date');
-      if (idx >= 0) arr.splice(idx + 1, 0, 'Resolution Time'); else arr.push('Resolution Time');
-      return arr;
-    })();
-    const body = filtered.map(row => headers.map(h => {
-      if (h === 'Resolution Time') return computeResolutionTime(row);
-      return String((row as any)[h] ?? '');
-    }));
-
-    // Title/Header
-    doc.setFontSize(16);
-    doc.text('Supply Complaint Report (Bulk)', 40, 36);
-    doc.setFontSize(10);
-    const nowStr = new Date().toLocaleString();
-    doc.text(`Generated: ${nowStr}`, 40, 54);
-    if (selectedShift) {
-      doc.text(`Shift: ${selectedShift}`, 40, 68);
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
     }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
 
+    addHeader('Division-wise Summary');
+    const { rows: divRows, grand } = divisionTotals(rows);
+    const divBody = divRows.map(r => [r.division, String(r.total), String(r.closed), String(r.pending)]);
+    divBody.push(['Grand Total', String(grand.total), String(grand.closed), String(grand.pending)]);
     autoTable(doc, {
-      head: [headers],
-      body,
-      startY: selectedShift ? 84 : 70,
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Total', 'Closed', 'Pending']],
+      body: divBody,
       theme: 'grid',
-      styles: {
-        fontSize: 10,
-        cellPadding: 6,
-        overflow: 'linebreak',
-        valign: 'middle',
-      },
-      headStyles: {
-        fillColor: [52, 152, 219],
-        fontSize: 12,
-      },
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
       alternateRowStyles: { fillColor: [245, 247, 250] },
-      bodyStyles: { textColor: [20, 20, 20] },
-      columnStyles: {
-        0: { cellWidth: 110 }, // Complaint Number
-        1: { cellWidth: 150 }, // Complaint Date and Time
-      } as any,
-      margin: { top: 50, left: 40, right: 40, bottom: 40 },
-      rowPageBreak: 'auto',
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
       tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Division-wise Summary');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === divBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
     });
-    doc.save('report-bulk.pdf');
+
+    doc.save('division-summary.pdf');
+  };
+
+  const exportSubStationCount = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Sub Station-wise Total Complaint Count');
+    const ssMap = new Map<string, number>();
+    for (const r of rows) {
+      const s = String(r['Sub Station'] || '').trim() || 'Unknown';
+      ssMap.set(s, (ssMap.get(s) || 0) + 1);
+    }
+    const topSS = Array.from(ssMap.entries()).sort((a, b) => b[1] - a[1]);
+    const ssBody = topSS.map(([name, count]) => [name, String(count)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Sub Station', 'Total Complaints']],
+      body: ssBody,
+      theme: 'grid',
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Sub Station-wise Total Count');
+        }
+      },
+    });
+
+    doc.save('substation-count.pdf');
+  };
+
+  const exportDetailedClosedBreakdown = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Detailed Closed Breakdown');
+    const detailedMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
+      const subStation = String(r['Sub Station'] ?? '').trim() || 'Unknown';
+      const key = `${division}|${subDivision}|${subStation}`;
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      const entry = detailedMap.get(key) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
+      entry.total += 1;
+      if (isClosed) {
+        entry.closed += 1;
+        if (isControlRoom) entry.controlRoom += 1;
+        else entry.frt += 1;
+      }
+      detailedMap.set(key, entry);
+    }
+    for (const [k, v] of detailedMap) {
+      v.pending = Math.max(0, v.total - v.closed);
+      detailedMap.set(k, v);
+    }
+    const detailedRows = Array.from(detailedMap.entries())
+      .map(([key, stats]) => {
+        const [division, subDivision, subStation] = key.split('|');
+        return { division, subDivision, subStation, ...stats };
+      })
+      .sort((a, b) => {
+        if (a.division !== b.division) return a.division.localeCompare(b.division);
+        if (a.subDivision !== b.subDivision) return a.subDivision.localeCompare(b.subDivision);
+        return a.subStation.localeCompare(b.subStation);
+      });
+    const grandDetailed = rows.reduce((acc, r) => {
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      acc.total += 1;
+      if (isClosed) {
+        acc.closed += 1;
+        if (isControlRoom) acc.controlRoom += 1;
+        else acc.frt += 1;
+      }
+      return acc;
+    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
+    grandDetailed.pending = Math.max(0, grandDetailed.total - grandDetailed.closed);
+    const detailedBody = detailedRows.map(r => [r.division, r.subDivision, r.subStation, String(r.total), String(r.closed), String(r.controlRoom), String(r.frt), String(r.pending)]);
+    detailedBody.push(['Grand Total', '', '', String(grandDetailed.total), String(grandDetailed.closed), String(grandDetailed.controlRoom), String(grandDetailed.frt), String(grandDetailed.pending)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Sub Division', 'Sub Station', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']],
+      body: detailedBody,
+      theme: 'grid',
+      styles: { fontSize: 13, cellPadding: 10, halign: 'center', minCellHeight: 24 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 14, fontStyle: 'bold', halign: 'center', minCellHeight: 28 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: {
+        0: { halign: 'left' },
+        1: { halign: 'left' },
+        2: { halign: 'left' }
+      } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Detailed Closed Breakdown');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === detailedBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('detailed-closed-breakdown.pdf');
+  };
+
+  const exportDatewiseTotalCount = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Date-wise Total Complaint Count');
+    const dateTotalMap = new Map<string, number>();
+    for (const r of rows) {
+      const s = String(r['Complaint Date and Time'] || '');
+      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
+      const date = m ? m[1] : 'Unknown';
+      dateTotalMap.set(date, (dateTotalMap.get(date) || 0) + 1);
+    }
+    const dateTotalRows = Array.from(dateTotalMap.entries()).sort((a, b) => {
+      const pa = a[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      const pb = b[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
+      const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
+      return da.getTime() - db.getTime();
+    });
+    const dateTotalBody = dateTotalRows.map(([date, count]) => [date, String(count)]);
+    const dateTotalSum = dateTotalRows.reduce((acc, [, c]) => acc + (c as number), 0);
+    dateTotalBody.push(['Grand Total', String(dateTotalSum)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Date', 'Total Complaints']],
+      body: dateTotalBody,
+      theme: 'grid',
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Date-wise Total Complaint Count');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === dateTotalBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('datewise-total-count.pdf');
+  };
+
+  const exportStatusBreakdown = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Complaint Status Breakdown');
+    const statusMap = new Map<string, number>();
+    for (const r of rows) {
+      const s = String(r['Status'] || '').trim() || 'Unknown';
+      statusMap.set(s, (statusMap.get(s) || 0) + 1);
+    }
+    const statusArr = Array.from(statusMap.entries()).sort((a, b) => b[1] - a[1]);
+    const statusBody = statusArr.map(([name, count]) => [name, String(count)]);
+    statusBody.push(['Grand Total', String(rows.length)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Status', 'Count']],
+      body: statusBody,
+      theme: 'grid',
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Complaint Status Breakdown');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === statusBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('status-breakdown.pdf');
+  };
+
+  const exportDatewiseClosedBreakdown = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Date-wise Closed Breakdown');
+    const dateBreakMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
+    for (const r of rows) {
+      const s = String(r['Complaint Date and Time'] || '');
+      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
+      const date = m ? m[1] : 'Unknown';
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      const entry = dateBreakMap.get(date) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
+      entry.total += 1;
+      if (isClosed) {
+        entry.closed += 1;
+        if (isControlRoom) entry.controlRoom += 1;
+        else entry.frt += 1;
+      }
+      dateBreakMap.set(date, entry);
+    }
+    for (const [k, v] of dateBreakMap) {
+      v.pending = Math.max(0, v.total - v.closed);
+      dateBreakMap.set(k, v);
+    }
+    const dateBreakRows = Array.from(dateBreakMap.entries())
+      .map(([date, stats]) => ({ date, ...stats }))
+      .sort((a, b) => {
+        const pa = a.date.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        const pb = b.date.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
+        const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
+        return da.getTime() - db.getTime();
+      });
+    const grandDateBreak = rows.reduce((acc, r) => {
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      acc.total += 1;
+      if (isClosed) {
+        acc.closed += 1;
+        if (isControlRoom) acc.controlRoom += 1;
+        else acc.frt += 1;
+      }
+      return acc;
+    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
+    grandDateBreak.pending = Math.max(0, grandDateBreak.total - grandDateBreak.closed);
+    const dateBreakBody = dateBreakRows.map(r => [r.date, String(r.total), String(r.closed), String(r.controlRoom), String(r.frt), String(r.pending)]);
+    dateBreakBody.push(['Grand Total', String(grandDateBreak.total), String(grandDateBreak.closed), String(grandDateBreak.controlRoom), String(grandDateBreak.frt), String(grandDateBreak.pending)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Date', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']],
+      body: dateBreakBody,
+      theme: 'grid',
+      styles: { fontSize: 15, cellPadding: 11, halign: 'center', minCellHeight: 26 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 16, fontStyle: 'bold', halign: 'center', minCellHeight: 30 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Date-wise Closed Breakdown');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === dateBreakBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('datewise-closed-breakdown.pdf');
+  };
+
+  const exportDivisionClosedBreakdown = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Division Closed Breakdown');
+    const divBreakdownMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      const entry = divBreakdownMap.get(division) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
+      entry.total += 1;
+      if (isClosed) {
+        entry.closed += 1;
+        if (isControlRoom) entry.controlRoom += 1;
+        else entry.frt += 1;
+      }
+      divBreakdownMap.set(division, entry);
+    }
+    for (const [k, v] of divBreakdownMap) {
+      v.pending = Math.max(0, v.total - v.closed);
+      divBreakdownMap.set(k, v);
+    }
+    const divBreakRows = Array.from(divBreakdownMap.entries())
+      .map(([div, stats]) => ({ division: div, ...stats }))
+      .sort((a, b) => b.total - a.total);
+    const grandBreak = rows.reduce((acc, r) => {
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      acc.total += 1;
+      if (isClosed) {
+        acc.closed += 1;
+        if (isControlRoom) acc.controlRoom += 1;
+        else acc.frt += 1;
+      }
+      return acc;
+    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
+    grandBreak.pending = Math.max(0, grandBreak.total - grandBreak.closed);
+    const divBreakBody = divBreakRows.map(r => [r.division, String(r.total), String(r.closed), String(r.controlRoom), String(r.frt), String(r.pending)]);
+    divBreakBody.push(['Grand Total', String(grandBreak.total), String(grandBreak.closed), String(grandBreak.controlRoom), String(grandBreak.frt), String(grandBreak.pending)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']],
+      body: divBreakBody,
+      theme: 'grid',
+      styles: { fontSize: 15, cellPadding: 11, halign: 'center', minCellHeight: 26 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 16, fontStyle: 'bold', halign: 'center', minCellHeight: 30 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Division Closed Breakdown');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === divBreakBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('division-closed-breakdown.pdf');
+  };
+
+  const exportDetailedReportPDF = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    // Common header function
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    // Page 1: Division Summary
+    addHeader('Division-wise Summary');
+    const { rows: divRows, grand } = divisionTotals(rows);
+    const divBody = divRows.map(r => [r.division, String(r.total), String(r.closed), String(r.pending)]);
+    divBody.push(['Grand Total', String(grand.total), String(grand.closed), String(grand.pending)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Total', 'Closed', 'Pending']],
+      body: divBody,
+      theme: 'grid',
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Division-wise Summary');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === divBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    // Page 3: Division Closed Breakdown (Control Room vs FRT)
+    doc.addPage();
+    addHeader('Division Closed Breakdown');
+    const divBreakdownMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      const entry = divBreakdownMap.get(division) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
+      entry.total += 1;
+      if (isClosed) {
+        entry.closed += 1;
+        if (isControlRoom) entry.controlRoom += 1;
+        else entry.frt += 1;
+      }
+      divBreakdownMap.set(division, entry);
+    }
+    for (const [k, v] of divBreakdownMap) {
+      v.pending = Math.max(0, v.total - v.closed);
+      divBreakdownMap.set(k, v);
+    }
+    const divBreakRows = Array.from(divBreakdownMap.entries())
+      .map(([div, stats]) => ({ division: div, ...stats }))
+      .sort((a, b) => b.total - a.total);
+    const grandBreak = rows.reduce((acc, r) => {
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      acc.total += 1;
+      if (isClosed) {
+        acc.closed += 1;
+        if (isControlRoom) acc.controlRoom += 1;
+        else acc.frt += 1;
+      }
+      return acc;
+    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
+    grandBreak.pending = Math.max(0, grandBreak.total - grandBreak.closed);
+    const divBreakBody = divBreakRows.map(r => [r.division, String(r.total), String(r.closed), String(r.controlRoom), String(r.frt), String(r.pending)]);
+    divBreakBody.push(['Grand Total', String(grandBreak.total), String(grandBreak.closed), String(grandBreak.controlRoom), String(grandBreak.frt), String(grandBreak.pending)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']],
+      body: divBreakBody,
+      theme: 'grid',
+      styles: { fontSize: 15, cellPadding: 11, halign: 'center', minCellHeight: 26 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 16, fontStyle: 'bold', halign: 'center', minCellHeight: 30 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Division Closed Breakdown');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === divBreakBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    // Page 4: Date-wise Closed Breakdown
+    doc.addPage();
+    addHeader('Date-wise Closed Breakdown');
+    const dateBreakMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
+    for (const r of rows) {
+      const s = String(r['Complaint Date and Time'] || '');
+      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
+      const date = m ? m[1] : 'Unknown';
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      const entry = dateBreakMap.get(date) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
+      entry.total += 1;
+      if (isClosed) {
+        entry.closed += 1;
+        if (isControlRoom) entry.controlRoom += 1;
+        else entry.frt += 1;
+      }
+      dateBreakMap.set(date, entry);
+    }
+    for (const [k, v] of dateBreakMap) {
+      v.pending = Math.max(0, v.total - v.closed);
+      dateBreakMap.set(k, v);
+    }
+    const dateBreakRows = Array.from(dateBreakMap.entries())
+      .map(([date, stats]) => ({ date, ...stats }))
+      .sort((a, b) => {
+        const pa = a.date.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        const pb = b.date.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
+        const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
+        return da.getTime() - db.getTime();
+      });
+    const grandDateBreak = rows.reduce((acc, r) => {
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      acc.total += 1;
+      if (isClosed) {
+        acc.closed += 1;
+        if (isControlRoom) acc.controlRoom += 1;
+        else acc.frt += 1;
+      }
+      return acc;
+    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
+    grandDateBreak.pending = Math.max(0, grandDateBreak.total - grandDateBreak.closed);
+    const dateBreakBody = dateBreakRows.map(r => [r.date, String(r.total), String(r.closed), String(r.controlRoom), String(r.frt), String(r.pending)]);
+    dateBreakBody.push(['Grand Total', String(grandDateBreak.total), String(grandDateBreak.closed), String(grandDateBreak.controlRoom), String(grandDateBreak.frt), String(grandDateBreak.pending)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Date', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']],
+      body: dateBreakBody,
+      theme: 'grid',
+      styles: { fontSize: 15, cellPadding: 11, halign: 'center', minCellHeight: 26 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 16, fontStyle: 'bold', halign: 'center', minCellHeight: 30 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Date-wise Closed Breakdown');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === dateBreakBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    // Page 5: Status Breakdown
+    doc.addPage();
+    addHeader('Complaint Status Breakdown');
+    const statusMap = new Map<string, number>();
+    for (const r of rows) {
+      const s = String(r['Status'] || '').trim() || 'Unknown';
+      statusMap.set(s, (statusMap.get(s) || 0) + 1);
+    }
+    const statusArr = Array.from(statusMap.entries()).sort((a, b) => b[1] - a[1]);
+    const statusBody = statusArr.map(([name, count]) => [name, String(count)]);
+    statusBody.push(['Grand Total', String(rows.length)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Status', 'Count']],
+      body: statusBody,
+      theme: 'grid',
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Complaint Status Breakdown');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === statusBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    // Page 6: Date-wise Total Count
+    doc.addPage();
+    addHeader('Date-wise Total Complaint Count');
+    const dateTotalMap = new Map<string, number>();
+    for (const r of rows) {
+      const s = String(r['Complaint Date and Time'] || '');
+      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
+      const date = m ? m[1] : 'Unknown';
+      dateTotalMap.set(date, (dateTotalMap.get(date) || 0) + 1);
+    }
+    const dateTotalRows = Array.from(dateTotalMap.entries()).sort((a, b) => {
+      const pa = a[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      const pb = b[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
+      const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
+      return da.getTime() - db.getTime();
+    });
+    const dateTotalBody = dateTotalRows.map(([date, count]) => [date, String(count)]);
+    const dateTotalSum = dateTotalRows.reduce((acc, [, c]) => acc + (c as number), 0);
+    dateTotalBody.push(['Grand Total', String(dateTotalSum)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Date', 'Total Complaints']],
+      body: dateTotalBody,
+      theme: 'grid',
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Date-wise Total Complaint Count');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === dateTotalBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    // Page 7: Detailed Closed Breakdown (Division → Sub Division → Sub Station)
+    doc.addPage();
+    addHeader('Detailed Closed Breakdown');
+    const detailedMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
+      const subStation = String(r['Sub Station'] ?? '').trim() || 'Unknown';
+      const key = `${division}|${subDivision}|${subStation}`;
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      const entry = detailedMap.get(key) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
+      entry.total += 1;
+      if (isClosed) {
+        entry.closed += 1;
+        if (isControlRoom) entry.controlRoom += 1;
+        else entry.frt += 1;
+      }
+      detailedMap.set(key, entry);
+    }
+    for (const [k, v] of detailedMap) {
+      v.pending = Math.max(0, v.total - v.closed);
+      detailedMap.set(k, v);
+    }
+    const detailedRows = Array.from(detailedMap.entries())
+      .map(([key, stats]) => {
+        const [division, subDivision, subStation] = key.split('|');
+        return { division, subDivision, subStation, ...stats };
+      })
+      .sort((a, b) => {
+        if (a.division !== b.division) return a.division.localeCompare(b.division);
+        if (a.subDivision !== b.subDivision) return a.subDivision.localeCompare(b.subDivision);
+        return a.subStation.localeCompare(b.subStation);
+      });
+    const grandDetailed = rows.reduce((acc, r) => {
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      acc.total += 1;
+      if (isClosed) {
+        acc.closed += 1;
+        if (isControlRoom) acc.controlRoom += 1;
+        else acc.frt += 1;
+      }
+      return acc;
+    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
+    grandDetailed.pending = Math.max(0, grandDetailed.total - grandDetailed.closed);
+    const detailedBody = detailedRows.map(r => [r.division, r.subDivision, r.subStation, String(r.total), String(r.closed), String(r.controlRoom), String(r.frt), String(r.pending)]);
+    detailedBody.push(['Grand Total', '', '', String(grandDetailed.total), String(grandDetailed.closed), String(grandDetailed.controlRoom), String(grandDetailed.frt), String(grandDetailed.pending)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Sub Division', 'Sub Station', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']],
+      body: detailedBody,
+      theme: 'grid',
+      styles: { fontSize: 13, cellPadding: 10, halign: 'center', minCellHeight: 24 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 14, fontStyle: 'bold', halign: 'center', minCellHeight: 28 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: {
+        0: { halign: 'left' },
+        1: { halign: 'left' },
+        2: { halign: 'left' }
+      } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Detailed Closed Breakdown');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === detailedBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    // Page 8: Sub Station Wise Count
+    doc.addPage();
+    addHeader('Sub Station-wise Total Complaint Count');
+    const ssMap = new Map<string, number>();
+    for (const r of rows) {
+      const s = String(r['Sub Station'] || '').trim() || 'Unknown';
+      ssMap.set(s, (ssMap.get(s) || 0) + 1);
+    }
+    const topSS = Array.from(ssMap.entries()).sort((a, b) => b[1] - a[1]);
+    const ssBody = topSS.map(([name, count]) => [name, String(count)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Sub Station', 'Total Complaints']],
+      body: ssBody,
+      theme: 'grid',
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Sub Station-wise Total Count');
+        }
+      },
+    });
+
+    doc.save('detailed-report.pdf');
   };
 
   const groupCounts = (rows: any[], field: string) => {
@@ -731,62 +1687,7 @@ export default function Home() {
     doc.save('trend-charts-report.pdf');
   };
 
-  const exportDateWisePDF = () => {
-    const rows = filtered;
-    if (rows.length === 0) return;
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
 
-    // Title and meta
-    doc.setFontSize(18);
-    doc.text('Date-wise Complaint Count', 40, 36);
-    doc.setFontSize(11);
-    const nowStr = new Date().toLocaleString();
-    const periodParts: string[] = [];
-    if (fromDT) periodParts.push(`From: ${fromDT.replace('T', ' ')}`);
-    if (toDT) periodParts.push(`To: ${toDT.replace('T', ' ')}`);
-    doc.text(`Generated: ${nowStr}`, 40, 54);
-    if (selectedShift) doc.text(`Shift: ${selectedShift}`, 40, 70);
-    if (periodParts.length) doc.text(periodParts.join('   '), 40, selectedShift ? 86 : 72);
-
-    // Group by date (DD/MM/YYYY from 'Complaint Date and Time')
-    const map = new Map<string, number>();
-    for (const r of rows) {
-      const s = String(r['Complaint Date and Time'] || '');
-      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
-      const key = m ? m[1] : 'Unknown';
-      map.set(key, (map.get(key) || 0) + 1);
-    }
-    const byDate = Array.from(map.entries()).sort((a, b) => {
-      // sort by parsed date
-      const pa = a[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const pb = b[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
-      const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
-      return da.getTime() - db.getTime();
-    });
-
-    const body = byDate.map(([date, count]) => [date, String(count)]);
-    const total = byDate.reduce((acc, [, c]) => acc + (c as number), 0);
-    body.push(['Grand Total', String(total)]);
-
-    autoTable(doc, {
-      startY: selectedShift ? 114 : 100,
-      head: [[ 'Date', 'Total Complaints' ]],
-      body,
-      theme: 'grid',
-      styles: { fontSize: 12, cellPadding: 6 },
-      headStyles: { fillColor: [52, 152, 219], fontSize: 13 },
-      alternateRowStyles: { fillColor: [245, 247, 250] },
-      margin: { left: 40, right: 40 },
-      didParseCell: (data: any) => {
-        if (data.section === 'body' && data.row.index === body.length - 1) {
-          data.cell.styles.fontStyle = 'bold';
-        }
-      },
-    });
-
-    doc.save('report-datewise.pdf');
-  };
 
   const exportExcel = async () => {
     const rows = filtered;
@@ -1621,28 +2522,22 @@ export default function Home() {
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2 mt-4">
               <button
-                onClick={exportBulkPDF}
-                className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg"
-              >
-                <FiFileText /> Bulk PDF
-              </button>
-              <button
                 onClick={exportSummaryPDF}
                 className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg"
               >
                 <FiFileText /> Summary PDF
               </button>
               <button
-                onClick={exportDateWisePDF}
-                className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg"
-              >
-                <FiFileText /> Date-wise PDF
-              </button>
-              <button
                 onClick={exportTrendChartsPDF}
                 className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg"
               >
                 <FiFileText /> Trend Charts
+              </button>
+              <button
+                onClick={() => setShowReportModal(true)}
+                className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg"
+              >
+                <FiFileText /> Detailed Reports
               </button>
               <button
                 onClick={exportExcel}
@@ -1718,6 +2613,123 @@ export default function Home() {
                 ))}
               </tbody>
             </table>
+            </div>
+          </div>
+        )}
+
+        {/* Report Selection Modal */}
+        {showReportModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-gray-800">Select Report to Download</h2>
+                <button
+                  onClick={() => setShowReportModal(false)}
+                  className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-600 mb-2 px-2">📊 SUMMARY REPORTS</h3>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => { exportDivisionSummary(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                    >
+                      <FiFileText className="text-blue-600 text-xl" />
+                      <div>
+                        <div className="font-semibold text-gray-800">Division-wise Summary</div>
+                        <div className="text-sm text-gray-500">Total, Closed, Pending by Division</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { exportStatusBreakdown(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                    >
+                      <FiFileText className="text-blue-600 text-xl" />
+                      <div>
+                        <div className="font-semibold text-gray-800">Status Breakdown</div>
+                        <div className="text-sm text-gray-500">Complaint Status wise Count</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-bold text-gray-600 mb-2 px-2">🔍 CLOSED BREAKDOWN REPORTS</h3>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => { exportDivisionClosedBreakdown(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                    >
+                      <FiFileText className="text-blue-600 text-xl" />
+                      <div>
+                        <div className="font-semibold text-gray-800">Division Closed Breakdown</div>
+                        <div className="text-sm text-gray-500">Control Room vs FRT by Division</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { exportDatewiseClosedBreakdown(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                    >
+                      <FiFileText className="text-blue-600 text-xl" />
+                      <div>
+                        <div className="font-semibold text-gray-800">Date-wise Closed Breakdown</div>
+                        <div className="text-sm text-gray-500">Control Room vs FRT by Date</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { exportDetailedClosedBreakdown(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                    >
+                      <FiFileText className="text-blue-600 text-xl" />
+                      <div>
+                        <div className="font-semibold text-gray-800">Detailed Closed Breakdown</div>
+                        <div className="text-sm text-gray-500">Division → Sub Division → Sub Station</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-bold text-gray-600 mb-2 px-2">📅 COUNT REPORTS</h3>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => { exportDatewiseTotalCount(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                    >
+                      <FiFileText className="text-blue-600 text-xl" />
+                      <div>
+                        <div className="font-semibold text-gray-800">Date-wise Total Count</div>
+                        <div className="text-sm text-gray-500">Total Complaints by Date</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { exportSubStationCount(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                    >
+                      <FiFileText className="text-blue-600 text-xl" />
+                      <div>
+                        <div className="font-semibold text-gray-800">Sub Station-wise Count</div>
+                        <div className="text-sm text-gray-500">Total Complaints by Sub Station</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+                <div className="border-t border-gray-200 pt-3 mt-2"></div>
+                <button
+                  onClick={() => { exportDetailedReportPDF(); setShowReportModal(false); }}
+                  className="w-full flex items-center gap-3 p-4 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-lg transition text-left shadow-md"
+                >
+                  <FiDownload className="text-white text-xl" />
+                  <div>
+                    <div className="font-semibold">Download All Reports (Combined PDF)</div>
+                    <div className="text-sm text-emerald-100">All 7 reports in one PDF file</div>
+                  </div>
+                </button>
+              </div>
             </div>
           </div>
         )}
