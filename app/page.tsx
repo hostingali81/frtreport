@@ -441,6 +441,296 @@ export default function Home() {
     doc.save('report-summary.pdf');
   };
 
+  const exportTrendChartsPDF = async () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+
+    // Separate Control Room and FRT closed complaints
+    const controlRoomClosed = rows.filter(r => {
+      const isClosed = isClosedRow(r);
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      return isClosed && isControlRoom;
+    });
+
+    const frtClosed = rows.filter(r => {
+      const isClosed = isClosedRow(r);
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      return isClosed && !isControlRoom;
+    });
+
+    // Group Control Room by date
+    const controlRoomMap = new Map<string, number>();
+    for (const r of controlRoomClosed) {
+      const s = String(r['Complaint Date and Time'] || '');
+      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
+      const key = m ? m[1] : 'Unknown';
+      controlRoomMap.set(key, (controlRoomMap.get(key) || 0) + 1);
+    }
+
+    // Group FRT by date
+    const frtMap = new Map<string, number>();
+    for (const r of frtClosed) {
+      const s = String(r['Complaint Date and Time'] || '');
+      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
+      const key = m ? m[1] : 'Unknown';
+      frtMap.set(key, (frtMap.get(key) || 0) + 1);
+    }
+
+    // Get all unique dates
+    const allDates = new Set([...controlRoomMap.keys(), ...frtMap.keys()]);
+    const sortedDates = Array.from(allDates).sort((a, b) => {
+      const pa = a.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      const pb = b.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
+      const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
+      return da.getTime() - db.getTime();
+    });
+
+    if (sortedDates.length === 0) {
+      alert('No closed complaints found in the selected period');
+      return;
+    }
+
+    // Create chart using Chart.js
+    const { Chart } = await import('chart.js/auto');
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 400;
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) return;
+
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: sortedDates,
+        datasets: [
+          {
+            label: 'Control Room Closed',
+            data: sortedDates.map(date => controlRoomMap.get(date) || 0),
+            borderColor: 'rgb(239, 68, 68)',
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            tension: 0.3,
+            fill: true,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+          },
+          {
+            label: 'FRT Closed',
+            data: sortedDates.map(date => frtMap.get(date) || 0),
+            borderColor: 'rgb(59, 130, 246)',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            tension: 0.3,
+            fill: true,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+          }
+        ]
+      },
+      options: {
+        responsive: false,
+        plugins: {
+          title: {
+            display: true,
+            text: 'Control Room vs FRT Closed Complaints Comparison',
+            font: { size: 16, weight: 'bold' }
+          },
+          legend: {
+            display: true,
+            position: 'top'
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { stepSize: 1 },
+            title: { display: true, text: 'Number of Complaints' }
+          },
+          x: {
+            title: { display: true, text: 'Date' }
+          }
+        }
+      }
+    });
+
+    // Wait for chart to render
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Convert comparison chart to image
+    const comparisonChartImage = canvas.toDataURL('image/png');
+    chart.destroy();
+    canvas.remove();
+
+    // Create PDF
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const nowStr = new Date().toLocaleString();
+    const periodParts: string[] = [];
+    if (fromDT) periodParts.push(`From: ${fromDT.replace('T', ' ')}`);
+    if (toDT) periodParts.push(`To: ${toDT.replace('T', ' ')}`);
+
+    // Page 1: FRT Only Chart
+    
+    if (frtClosed.length > 0) {
+      const canvas2 = document.createElement('canvas');
+      canvas2.width = 800;
+      canvas2.height = 400;
+      const ctx2 = canvas2.getContext('2d');
+      if (ctx2) {
+        const chart2 = new Chart(ctx2, {
+          type: 'line',
+          data: {
+            labels: sortedDates,
+            datasets: [{
+              label: 'FRT Closed',
+              data: sortedDates.map(date => frtMap.get(date) || 0),
+              borderColor: 'rgb(59, 130, 246)',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              tension: 0.3,
+              fill: true,
+              pointRadius: 4,
+              pointHoverRadius: 6,
+            }]
+          },
+          options: {
+            responsive: false,
+            plugins: {
+              title: { display: true, text: 'FRT Closed Complaints Trend', font: { size: 16, weight: 'bold' } },
+              legend: { display: true, position: 'top' }
+            },
+            scales: {
+              y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Number of Complaints' } },
+              x: { title: { display: true, text: 'Date' } }
+            }
+          }
+        });
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const chartImage2 = canvas2.toDataURL('image/png');
+        
+        doc.setFontSize(20);
+        doc.text('FRT Closed Complaints Trend', 40, 36);
+        doc.setFontSize(11);
+        doc.text(`Generated: ${nowStr}`, 40, 54);
+        doc.text(`Total FRT Closed: ${frtClosed.length}`, 40, 70);
+        if (selectedShift) doc.text(`Shift: ${selectedShift}`, 40, 86);
+        if (periodParts.length) doc.text(periodParts.join('   '), 40, selectedShift ? 102 : 86);
+        const startY1 = selectedShift ? 120 : 104;
+        doc.addImage(chartImage2, 'PNG', 40, startY1, 760, 380);
+        
+        chart2.destroy();
+        canvas2.remove();
+      }
+    }
+
+    // Page 2: Control Room Only Chart
+    doc.addPage();
+    
+    if (controlRoomClosed.length > 0) {
+
+      const canvas3 = document.createElement('canvas');
+      canvas3.width = 800;
+      canvas3.height = 400;
+      const ctx3 = canvas3.getContext('2d');
+      if (ctx3) {
+        const chart3 = new Chart(ctx3, {
+          type: 'line',
+          data: {
+            labels: sortedDates,
+            datasets: [{
+              label: 'Control Room Closed',
+              data: sortedDates.map(date => controlRoomMap.get(date) || 0),
+              borderColor: 'rgb(239, 68, 68)',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              tension: 0.3,
+              fill: true,
+              pointRadius: 4,
+              pointHoverRadius: 6,
+            }]
+          },
+          options: {
+            responsive: false,
+            plugins: {
+              title: { display: true, text: 'Control Room Closed Complaints Trend', font: { size: 16, weight: 'bold' } },
+              legend: { display: true, position: 'top' }
+            },
+            scales: {
+              y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Number of Complaints' } },
+              x: { title: { display: true, text: 'Date' } }
+            }
+          }
+        });
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const chartImage3 = canvas3.toDataURL('image/png');
+        
+        doc.setFontSize(20);
+        doc.text('Control Room Closed Complaints Trend', 40, 36);
+        doc.setFontSize(11);
+        doc.text(`Generated: ${nowStr}`, 40, 54);
+        doc.text(`Total Control Room Closed: ${controlRoomClosed.length}`, 40, 70);
+        if (selectedShift) doc.text(`Shift: ${selectedShift}`, 40, 86);
+        if (periodParts.length) doc.text(periodParts.join('   '), 40, selectedShift ? 102 : 86);
+        const startY2 = selectedShift ? 120 : 104;
+        doc.addImage(chartImage3, 'PNG', 40, startY2, 760, 380);
+        
+        chart3.destroy();
+        canvas3.remove();
+      }
+    }
+
+    // Page 3: Comparison Chart
+    doc.addPage();
+    doc.setFontSize(20);
+    doc.text('Control Room vs FRT Comparison', 40, 36);
+    doc.setFontSize(11);
+    doc.text(`Generated: ${nowStr}`, 40, 54);
+    doc.text(`Control Room: ${controlRoomClosed.length} | FRT: ${frtClosed.length}`, 40, 70);
+    if (selectedShift) doc.text(`Shift: ${selectedShift}`, 40, 86);
+    if (periodParts.length) doc.text(periodParts.join('   '), 40, selectedShift ? 102 : 86);
+    const startY3 = selectedShift ? 120 : 104;
+    doc.addImage(comparisonChartImage, 'PNG', 40, startY3, 760, 380);
+
+    // Page 4: Data Table
+    doc.addPage();
+    doc.setFontSize(18);
+    doc.text('Detailed Data', 40, 36);
+    
+    const tableBody = sortedDates.map(date => [
+      date,
+      String(controlRoomMap.get(date) || 0),
+      String(frtMap.get(date) || 0),
+      String((controlRoomMap.get(date) || 0) + (frtMap.get(date) || 0))
+    ]);
+    const totalControlRoom = controlRoomClosed.length;
+    const totalFRT = frtClosed.length;
+    tableBody.push(['Total', String(totalControlRoom), String(totalFRT), String(totalControlRoom + totalFRT)]);
+
+    autoTable(doc, {
+      startY: 60,
+      head: [['Date', 'Control Room', 'FRT', 'Total']],
+      body: tableBody,
+      theme: 'grid',
+      styles: { fontSize: 11, cellPadding: 6 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 12 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      margin: { left: 40, right: 40 },
+      columnStyles: {
+        0: { cellWidth: 120 },
+        1: { cellWidth: 120, halign: 'center' },
+        2: { cellWidth: 120, halign: 'center' },
+        3: { cellWidth: 120, halign: 'center' }
+      } as any,
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === tableBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('trend-charts-report.pdf');
+  };
+
   const exportDateWisePDF = () => {
     const rows = filtered;
     if (rows.length === 0) return;
@@ -1086,6 +1376,12 @@ export default function Home() {
                 className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg"
               >
                 <FiFileText /> Date-wise PDF
+              </button>
+              <button
+                onClick={exportTrendChartsPDF}
+                className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg"
+              >
+                <FiFileText /> Trend Charts
               </button>
               <button
                 onClick={exportExcel}
