@@ -863,11 +863,53 @@ export default function Home() {
       }
     };
 
+    // Helper to convert datetime-local to 12-hour format
+    const convertTo12Hour = (dateTimeStr: string) => {
+      if (!dateTimeStr) return '';
+      const match = dateTimeStr.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+      if (match) {
+        const [, year, month, day, hour24, minute] = match;
+        let hours = parseInt(hour24);
+        const period = hours >= 12 ? 'PM' : 'AM';
+        hours = hours % 12 || 12;
+        return `${day}/${month}/${year} ${hours}:${minute} ${period}`;
+      }
+      return dateTimeStr.replace('T', ' ');
+    };
+
     // Period subtitle for all sheets
-    const periodSubtitle = fromDT || toDT ? `Period: ${fromDT ? fromDT.replace('T',' ') : 'Start'} → ${toDT ? toDT.replace('T',' ') : 'Now'}` : 'Period: All Data';
+    const periodSubtitle = fromDT || toDT ? `Period: ${fromDT ? convertTo12Hour(fromDT) : 'Start'} → ${toDT ? convertTo12Hour(toDT) : 'Now'}` : 'Period: All Data';
+
+    // Helper function to format date with time in 12-hour AM/PM format
+    const formatDateTime = (dateStr: string) => {
+      if (!dateStr) return '';
+      
+      // Try multiple formats
+      // Format 1: DD/MM/YYYY HH:MM (24-hour)
+      let match = dateStr.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{1,2}):(\d{2})/i);
+      if (match) {
+        const date = match[1];
+        let hours = parseInt(match[2]);
+        const minutes = match[3];
+        
+        // Convert to 12-hour format
+        const period = hours >= 12 ? 'PM' : 'AM';
+        hours = hours % 12 || 12;
+        
+        return `${date} ${hours}:${minutes} ${period}`;
+      }
+      
+      // Format 2: DD/MM/YYYY HH:MM AM/PM (already in 12-hour)
+      match = dateStr.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{1,2}:\d{2})\s*(AM|PM)/i);
+      if (match) {
+        return `${match[1]} ${match[2]} ${match[3]}`;
+      }
+      
+      return dateStr;
+    };
 
     // Cover / Summary sheet
-    const wsCover = wb.addWorksheet('Cover', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1 }] });
+    const wsCover = wb.addWorksheet('1. Cover Page', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1 }] });
     const periodText = periodSubtitle;
     const statusApplied = statusFilter ? statusFilter : 'All';
     const uniqueDivisions = Array.from(new Set(rows.map(r => String((r as any)['Division'] || '').trim()).filter(Boolean))).sort();
@@ -891,8 +933,8 @@ export default function Home() {
 
 
     // Sheet 1: Bulk Data
-    const wsData = wb.addWorksheet('Bulk Data', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsData, 'Supply Complaint Report (Bulk)', `Generated: ${new Date().toLocaleString()}   |   ${periodSubtitle}`);
+    const wsData = wb.addWorksheet('2. All Complaints Data', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
+    addTitle(wsData, 'All Complaints - Complete Data', `Generated: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}   |   ${periodSubtitle}`);
 
     const baseHeaders = Object.keys(rows[0]);
     const headers = (() => {
@@ -911,9 +953,48 @@ export default function Home() {
     for (const r of rows) {
       const rowVals = headers.map(h => {
         if (h === 'Resolution Time') return computeResolutionTime(r);
+        if (h === 'Complaint Date and Time') return formatDateTime(String((r as any)[h] ?? ''));
+        if (h === 'Closed Date') return formatDateTime(String((r as any)[h] ?? ''));
         return String((r as any)[h] ?? '');
       });
       const excelRow = wsData.addRow(rowVals);
+      
+      // Make time bold in date columns
+      const dateTimeColIndex = headers.indexOf('Complaint Date and Time') + 1;
+      const closedDateColIndex = headers.indexOf('Closed Date') + 1;
+      
+      if (dateTimeColIndex > 0) {
+        const cell = excelRow.getCell(dateTimeColIndex);
+        const val = String(cell.value || '');
+        const timeMatch = val.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+        if (timeMatch) {
+          const datepart = val.substring(0, val.indexOf(timeMatch[1]));
+          const timepart = timeMatch[1];
+          cell.value = {
+            richText: [
+              { text: datepart },
+              { font: { bold: true, size: 11 }, text: timepart }
+            ]
+          };
+        }
+      }
+      
+      if (closedDateColIndex > 0) {
+        const cell = excelRow.getCell(closedDateColIndex);
+        const val = String(cell.value || '');
+        const timeMatch = val.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+        if (timeMatch) {
+          const datepart = val.substring(0, val.indexOf(timeMatch[1]));
+          const timepart = timeMatch[1];
+          cell.value = {
+            richText: [
+              { text: datepart },
+              { font: { bold: true, size: 11 }, text: timepart }
+            ]
+          };
+        }
+      }
+      
       // Color-code Status cell
       if (statusColIndex > 0) {
         const statusCell = excelRow.getCell(statusColIndex);
@@ -969,8 +1050,8 @@ export default function Home() {
     };
 
     // Sheet 2: Summary by Division
-    const wsSummary = wb.addWorksheet('Summary by Division', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsSummary, 'Supply Complaint Summary', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsSummary = wb.addWorksheet('3. Division Summary', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
+    addTitle(wsSummary, 'Division-wise Complaint Summary', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
     const { rows: divRows, grand } = divisionTotals(rows);
     const sumHeaders = ['Division', 'Total', 'Closed', 'Pending'];
     wsSummary.addRow(sumHeaders);
@@ -1003,8 +1084,8 @@ export default function Home() {
     });
 
     // Sheet 3: Date-wise Counts
-    const wsDate = wb.addWorksheet('Date-wise', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsDate, 'Date-wise Complaint Count', periodSubtitle);
+    const wsDate = wb.addWorksheet('4. Date-wise Total Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
+    addTitle(wsDate, 'Date-wise Total Complaint Count', periodSubtitle);
     wsDate.addRow(['Date', 'Total Complaints']);
     styleHeaderRow(wsDate, 3);
     const dateMap = new Map<string, number>();
@@ -1046,8 +1127,8 @@ export default function Home() {
     wsDate.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: 2 } };
 
     // Sheet 4: Status Breakdown
-    const wsStatus = wb.addWorksheet('Status Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsStatus, 'Status Breakdown', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsStatus = wb.addWorksheet('5. Status Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
+    addTitle(wsStatus, 'Complaint Status Breakdown', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
     const statusMap = new Map<string, number>();
     for (const r of rows) {
       const s = String((r as any)['Status'] || '').trim() || 'Unknown';
@@ -1084,8 +1165,8 @@ export default function Home() {
     });
 
     // Sheet 5: Division Breakdown (Control Room vs FRT)
-    const wsDivBreakdown = wb.addWorksheet('Division Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsDivBreakdown, 'Division-wise Breakdown (Control Room vs FRT)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsDivBreakdown = wb.addWorksheet('6. Division Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
+    addTitle(wsDivBreakdown, 'Division-wise Closed Complaints (Control Room vs FRT)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
     
     // Calculate division-wise breakdown
     const divBreakdownMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
@@ -1162,9 +1243,189 @@ export default function Home() {
       cell.font = { bold: true, color: { argb: theme.titleColor } };
     });
 
-    // Sheet 6: Top Sub Stations
-    const wsTopSS = wb.addWorksheet('Top Sub Stations', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsTopSS, 'Sub Stations by Complaints', `Total: ${rows.length} complaints   |   ${periodSubtitle}`);
+    // Sheet 6: Detailed Breakdown (Division + Sub Division + Sub Station)
+    const wsDetailedBreakdown = wb.addWorksheet('7. Detailed Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
+    addTitle(wsDetailedBreakdown, 'Detailed Closed Breakdown (Division → Sub Division → Sub Station)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    
+    // Calculate detailed breakdown
+    const detailedMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
+      const subStation = String(r['Sub Station'] ?? '').trim() || 'Unknown';
+      const key = `${division}|${subDivision}|${subStation}`;
+      
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      
+      const entry = detailedMap.get(key) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
+      entry.total += 1;
+      if (isClosed) {
+        entry.closed += 1;
+        if (isControlRoom) {
+          entry.controlRoom += 1;
+        } else {
+          entry.frt += 1;
+        }
+      }
+      detailedMap.set(key, entry);
+    }
+    
+    // Calculate pending
+    for (const [k, v] of detailedMap) {
+      v.pending = Math.max(0, v.total - v.closed);
+      detailedMap.set(k, v);
+    }
+    
+    const detailedRows = Array.from(detailedMap.entries())
+      .map(([key, stats]) => {
+        const [division, subDivision, subStation] = key.split('|');
+        return { division, subDivision, subStation, ...stats };
+      })
+      .sort((a, b) => {
+        if (a.division !== b.division) return a.division.localeCompare(b.division);
+        if (a.subDivision !== b.subDivision) return a.subDivision.localeCompare(b.subDivision);
+        return a.subStation.localeCompare(b.subStation);
+      });
+    
+    // Calculate grand totals
+    const grandDetailed = rows.reduce((acc, r) => {
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      
+      acc.total += 1;
+      if (isClosed) {
+        acc.closed += 1;
+        if (isControlRoom) {
+          acc.controlRoom += 1;
+        } else {
+          acc.frt += 1;
+        }
+      }
+      return acc;
+    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
+    grandDetailed.pending = Math.max(0, grandDetailed.total - grandDetailed.closed);
+    
+    wsDetailedBreakdown.addRow(['Division', 'Sub Division', 'Sub Station', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']);
+    styleHeaderRow(wsDetailedBreakdown, 3);
+    detailedRows.forEach(r => wsDetailedBreakdown.addRow([r.division, r.subDivision, r.subStation, r.total, r.closed, r.controlRoom, r.frt, r.pending]));
+    wsDetailedBreakdown.addRow(['Grand Total', '', '', grandDetailed.total, grandDetailed.closed, grandDetailed.controlRoom, grandDetailed.frt, grandDetailed.pending]);
+    
+    wsDetailedBreakdown.getColumn(1).width = 24;
+    wsDetailedBreakdown.getColumn(2).width = 24;
+    wsDetailedBreakdown.getColumn(3).width = 28;
+    wsDetailedBreakdown.getColumn(4).width = 12;
+    wsDetailedBreakdown.getColumn(5).width = 12;
+    wsDetailedBreakdown.getColumn(6).width = 16;
+    wsDetailedBreakdown.getColumn(7).width = 12;
+    wsDetailedBreakdown.getColumn(8).width = 12;
+    
+    const detailedEnd = wsDetailedBreakdown.lastRow.number;
+    for (let r = 3; r <= detailedEnd; r++) {
+      wsDetailedBreakdown.getRow(r).eachCell((cell: any) => {
+        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
+        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col <= 3 ? 'left' : 'center') };
+      });
+    }
+    setAlternatingRows(wsDetailedBreakdown, 4, detailedEnd);
+    const detailedGt = wsDetailedBreakdown.getRow(detailedEnd);
+    detailedGt.eachCell((cell: any) => {
+      cell.font = { bold: true, color: { argb: theme.titleColor } };
+    });
+
+    // Sheet 7: Date-wise Breakdown (Control Room vs FRT)
+    const wsDateBreakdown = wb.addWorksheet('8. Date-wise Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
+    addTitle(wsDateBreakdown, 'Date-wise Closed Complaints (Control Room vs FRT)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    
+    // Calculate date-wise breakdown
+    const dateBreakdownMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
+    for (const r of rows) {
+      const s = String(r['Complaint Date and Time'] || '');
+      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
+      const date = m ? m[1] : 'Unknown';
+      
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      
+      const entry = dateBreakdownMap.get(date) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
+      entry.total += 1;
+      if (isClosed) {
+        entry.closed += 1;
+        if (isControlRoom) {
+          entry.controlRoom += 1;
+        } else {
+          entry.frt += 1;
+        }
+      }
+      dateBreakdownMap.set(date, entry);
+    }
+    
+    // Calculate pending
+    for (const [k, v] of dateBreakdownMap) {
+      v.pending = Math.max(0, v.total - v.closed);
+      dateBreakdownMap.set(k, v);
+    }
+    
+    const dateBreakdownRows = Array.from(dateBreakdownMap.entries())
+      .map(([date, stats]) => ({ date, ...stats }))
+      .sort((a, b) => {
+        const pa = a.date.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        const pb = b.date.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
+        const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
+        return da.getTime() - db.getTime();
+      });
+    
+    // Calculate grand totals
+    const grandDateBreakdown = rows.reduce((acc, r) => {
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      
+      acc.total += 1;
+      if (isClosed) {
+        acc.closed += 1;
+        if (isControlRoom) {
+          acc.controlRoom += 1;
+        } else {
+          acc.frt += 1;
+        }
+      }
+      return acc;
+    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
+    grandDateBreakdown.pending = Math.max(0, grandDateBreakdown.total - grandDateBreakdown.closed);
+    
+    wsDateBreakdown.addRow(['Date', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']);
+    styleHeaderRow(wsDateBreakdown, 3);
+    dateBreakdownRows.forEach(r => wsDateBreakdown.addRow([r.date, r.total, r.closed, r.controlRoom, r.frt, r.pending]));
+    wsDateBreakdown.addRow(['Grand Total', grandDateBreakdown.total, grandDateBreakdown.closed, grandDateBreakdown.controlRoom, grandDateBreakdown.frt, grandDateBreakdown.pending]);
+    
+    wsDateBreakdown.getColumn(1).width = 20;
+    wsDateBreakdown.getColumn(2).width = 14;
+    wsDateBreakdown.getColumn(3).width = 14;
+    wsDateBreakdown.getColumn(4).width = 18;
+    wsDateBreakdown.getColumn(5).width = 14;
+    wsDateBreakdown.getColumn(6).width = 14;
+    
+    const dateBreakEnd = wsDateBreakdown.lastRow.number;
+    for (let r = 3; r <= dateBreakEnd; r++) {
+      wsDateBreakdown.getRow(r).eachCell((cell: any) => {
+        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
+        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col === 1 ? 'left' : 'center') };
+      });
+    }
+    setAlternatingRows(wsDateBreakdown, 4, dateBreakEnd);
+    const dateBreakGt = wsDateBreakdown.getRow(dateBreakEnd);
+    dateBreakGt.eachCell((cell: any) => {
+      cell.font = { bold: true, color: { argb: theme.titleColor } };
+    });
+
+    // Sheet 8: Top Sub Stations
+    const wsTopSS = wb.addWorksheet('9. Sub Station Wise Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
+    addTitle(wsTopSS, 'Sub Station-wise Total Complaint Count', `Total: ${rows.length} complaints   |   ${periodSubtitle}`);
     const ssMap = new Map<string, number>();
     for (const r of rows) {
       const s = String((r as any)['Sub Station'] || '').trim() || 'Unknown';
