@@ -229,10 +229,10 @@ export default function Home() {
     setSelectedShift(labelMap[shift]);
   };
 
-  const applyPreset = (type: 'from2010ToNow' | 'today' | 'last24h' | 'thisMonth' | 'clear' | 'toNow') => {
+  const applyPreset = (type: 'fromNov2025ToNow' | 'today' | 'last24h' | 'thisMonth' | 'clear' | 'toNow') => {
     const now = new Date();
-    if (type === 'from2010ToNow') {
-      setFromDT('2010-01-01T00:00');
+    if (type === 'fromNov2025ToNow') {
+      setFromDT('2025-11-01T00:00');
       setToDT(formatDateTimeLocal(now));
     } else if (type === 'today') {
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
@@ -2545,7 +2545,7 @@ export default function Home() {
               <div className="border-t border-gray-100 pt-3">
                 <div className="text-xs font-semibold text-gray-600 mb-2">Presets</div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={() => applyPreset('from2010ToNow')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">2010 → Now</button>
+                  <button onClick={() => applyPreset('fromNov2025ToNow')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Nov-2025 → Now</button>
                   <button onClick={() => applyPreset('today')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Today</button>
                   <button onClick={() => applyPreset('last24h')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Last 24h</button>
                   <button onClick={() => applyPreset('thisMonth')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">This Month</button>
