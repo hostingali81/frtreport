@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock } from 'react-icons/fi';
+import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers } from 'react-icons/fi';
 import Image from 'next/image';
 
 export default function Home() {
@@ -1341,55 +1341,63 @@ export default function Home() {
     const rows = filtered;
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-
-    // Title and meta
-    doc.setFontSize(22);
-    doc.text('Supply Complaint Summary', 40, 36);
-    doc.setFontSize(13);
-    const nowStr = new Date().toLocaleString();
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
     const periodParts: string[] = [];
-    if (fromDT) periodParts.push(`From: ${fromDT.replace('T', ' ')}`);
-    if (toDT) periodParts.push(`To: ${toDT.replace('T', ' ')}`);
-    doc.text(`Generated: ${nowStr}`, 40, 54);
-    doc.text(`Total Complaints: ${rows.length}`, 40, 72);
-    if (selectedShift) {
-      doc.text(`Shift: ${selectedShift}`, 40, 90);
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
     }
-    if (periodParts.length) {
-      const periodText = periodParts.join('   ');
-      // Draw a subtle highlighted ribbon behind the period range
-      const x = 40;
-      const y = selectedShift ? 122 : 104; // place below previous lines to avoid overlap
-      doc.setFontSize(12);
-      const textWidth = (doc.getTextWidth(periodText) || 0);
-      const padX = 8; const padY = 6;
-      // Professional subtle blue-gray background
-      doc.setFillColor(235, 242, 250); // #EBF2FA
-      doc.setDrawColor(209, 223, 235); // light border
-      doc.roundedRect(x - padX, y - 14 - padY / 2, textWidth + padX * 2, 22 + padY, 3, 3, 'FD');
-      doc.setTextColor(34, 62, 99); // dark slate text
-      doc.text(periodText, x, y);
-      doc.setTextColor(0, 0, 0); // reset for next content
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
     }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
 
-    // Division summary with Total/Closed/Pending + Grand Total row
+    addHeader('Division-wise Summary');
     const { rows: divRows, grand } = divisionTotals(rows);
     const tableBody = divRows.map(r => [r.division, String(r.total), String(r.closed), String(r.pending)]);
-    tableBody.push([ 'Grand Total', String(grand.total), String(grand.closed), String(grand.pending) ]);
+    tableBody.push(['Grand Total', String(grand.total), String(grand.closed), String(grand.pending)]);
     autoTable(doc, {
-      startY: 130,
-      head: [[ 'Division', 'Total Complaints', 'Closed', 'Pending' ]],
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Total', 'Closed', 'Pending']],
       body: tableBody,
       theme: 'grid',
-      styles: { fontSize: 14, cellPadding: 7 },
-      headStyles: { fillColor: [39, 174, 96], fontSize: 15 },
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
       alternateRowStyles: { fillColor: [245, 247, 250] },
-      margin: { left: 40, right: 40 },
-      columnStyles: { 0: { cellWidth: 360 } } as any,
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Division-wise Summary');
+        }
+      },
       didParseCell: (data: any) => {
-        // Make Grand Total row bold
         if (data.section === 'body' && data.row.index === tableBody.length - 1) {
           data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
         }
       },
     });
@@ -1521,10 +1529,20 @@ export default function Home() {
 
     // Create PDF
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-    const nowStr = new Date().toLocaleString();
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
     const periodParts: string[] = [];
-    if (fromDT) periodParts.push(`From: ${fromDT.replace('T', ' ')}`);
-    if (toDT) periodParts.push(`To: ${toDT.replace('T', ' ')}`);
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
 
     // Page 1: FRT Only Chart
     
@@ -1565,13 +1583,21 @@ export default function Home() {
         const chartImage2 = canvas2.toDataURL('image/png');
         
         doc.setFontSize(20);
-        doc.text('FRT Closed Complaints Trend', 40, 36);
+        doc.setFont('helvetica', 'bold');
+        doc.text('FRT Closed Complaints Trend', 40, 40);
+        doc.setFont('helvetica', 'normal');
         doc.setFontSize(11);
-        doc.text(`Generated: ${nowStr}`, 40, 54);
-        doc.text(`Total FRT Closed: ${frtClosed.length}`, 40, 70);
-        if (selectedShift) doc.text(`Shift: ${selectedShift}`, 40, 86);
-        if (periodParts.length) doc.text(periodParts.join('   '), 40, selectedShift ? 102 : 86);
-        const startY1 = selectedShift ? 120 : 104;
+        let yPos = 58;
+        doc.text(`Generated: ${nowStr}`, 40, yPos);
+        yPos += 15;
+        doc.text(`Period: ${periodText}`, 40, yPos);
+        yPos += 15;
+        doc.text(`Total FRT Closed: ${frtClosed.length}`, 40, yPos);
+        if (selectedShift) {
+          yPos += 15;
+          doc.text(`Shift: ${selectedShift}`, 40, yPos);
+        }
+        const startY1 = selectedShift ? 130 : 115;
         doc.addImage(chartImage2, 'PNG', 40, startY1, 760, 380);
         
         chart2.destroy();
@@ -1620,13 +1646,21 @@ export default function Home() {
         const chartImage3 = canvas3.toDataURL('image/png');
         
         doc.setFontSize(20);
-        doc.text('Control Room Closed Complaints Trend', 40, 36);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Control Room Closed Complaints Trend', 40, 40);
+        doc.setFont('helvetica', 'normal');
         doc.setFontSize(11);
-        doc.text(`Generated: ${nowStr}`, 40, 54);
-        doc.text(`Total Control Room Closed: ${controlRoomClosed.length}`, 40, 70);
-        if (selectedShift) doc.text(`Shift: ${selectedShift}`, 40, 86);
-        if (periodParts.length) doc.text(periodParts.join('   '), 40, selectedShift ? 102 : 86);
-        const startY2 = selectedShift ? 120 : 104;
+        let yPos = 58;
+        doc.text(`Generated: ${nowStr}`, 40, yPos);
+        yPos += 15;
+        doc.text(`Period: ${periodText}`, 40, yPos);
+        yPos += 15;
+        doc.text(`Total Control Room Closed: ${controlRoomClosed.length}`, 40, yPos);
+        if (selectedShift) {
+          yPos += 15;
+          doc.text(`Shift: ${selectedShift}`, 40, yPos);
+        }
+        const startY2 = selectedShift ? 130 : 115;
         doc.addImage(chartImage3, 'PNG', 40, startY2, 760, 380);
         
         chart3.destroy();
@@ -1637,19 +1671,40 @@ export default function Home() {
     // Page 3: Comparison Chart
     doc.addPage();
     doc.setFontSize(20);
-    doc.text('Control Room vs FRT Comparison', 40, 36);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Control Room vs FRT Comparison', 40, 40);
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
-    doc.text(`Generated: ${nowStr}`, 40, 54);
-    doc.text(`Control Room: ${controlRoomClosed.length} | FRT: ${frtClosed.length}`, 40, 70);
-    if (selectedShift) doc.text(`Shift: ${selectedShift}`, 40, 86);
-    if (periodParts.length) doc.text(periodParts.join('   '), 40, selectedShift ? 102 : 86);
-    const startY3 = selectedShift ? 120 : 104;
+    let yPos3 = 58;
+    doc.text(`Generated: ${nowStr}`, 40, yPos3);
+    yPos3 += 15;
+    doc.text(`Period: ${periodText}`, 40, yPos3);
+    yPos3 += 15;
+    doc.text(`Control Room: ${controlRoomClosed.length} | FRT: ${frtClosed.length}`, 40, yPos3);
+    if (selectedShift) {
+      yPos3 += 15;
+      doc.text(`Shift: ${selectedShift}`, 40, yPos3);
+    }
+    const startY3 = selectedShift ? 130 : 115;
     doc.addImage(comparisonChartImage, 'PNG', 40, startY3, 760, 380);
 
     // Page 4: Data Table
     doc.addPage();
-    doc.setFontSize(18);
-    doc.text('Detailed Data', 40, 36);
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Detailed Data', 40, 40);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    let yPos4 = 58;
+    doc.text(`Generated: ${nowStr}`, 40, yPos4);
+    yPos4 += 15;
+    doc.text(`Period: ${periodText}`, 40, yPos4);
+    yPos4 += 15;
+    doc.text(`Total Complaints: ${rows.length}`, 40, yPos4);
+    if (selectedShift) {
+      yPos4 += 15;
+      doc.text(`Shift: ${selectedShift}`, 40, yPos4);
+    }
     
     const tableBody = sortedDates.map(date => [
       date,
@@ -1662,19 +1717,17 @@ export default function Home() {
     tableBody.push(['Total', String(totalControlRoom), String(totalFRT), String(totalControlRoom + totalFRT)]);
 
     autoTable(doc, {
-      startY: 60,
+      startY: selectedShift ? 130 : 115,
       head: [['Date', 'Control Room', 'FRT', 'Total']],
       body: tableBody,
       theme: 'grid',
-      styles: { fontSize: 11, cellPadding: 6 },
-      headStyles: { fillColor: [59, 130, 246], fontSize: 12 },
+      styles: { fontSize: 15, cellPadding: 11, halign: 'center', minCellHeight: 26 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 16, fontStyle: 'bold', halign: 'center', minCellHeight: 30 },
       alternateRowStyles: { fillColor: [245, 247, 250] },
-      margin: { left: 40, right: 40 },
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
       columnStyles: {
-        0: { cellWidth: 120 },
-        1: { cellWidth: 120, halign: 'center' },
-        2: { cellWidth: 120, halign: 'center' },
-        3: { cellWidth: 120, halign: 'center' }
+        0: { halign: 'left' }
       } as any,
       didParseCell: (data: any) => {
         if (data.section === 'body' && data.row.index === tableBody.length - 1) {
@@ -2520,30 +2573,30 @@ export default function Home() {
               </div>
               {/* Export buttons moved to separate action row below */}
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2 mt-4">
+            <div className="flex flex-wrap items-center justify-end gap-3 mt-4">
               <button
                 onClick={exportSummaryPDF}
-                className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg"
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-semibold py-2.5 px-5 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-105"
               >
-                <FiFileText /> Summary PDF
+                <FiBarChart2 className="text-lg" /> Summary PDF
               </button>
               <button
                 onClick={exportTrendChartsPDF}
-                className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg"
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-semibold py-2.5 px-5 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-105"
               >
-                <FiFileText /> Trend Charts
+                <FiTrendingUp className="text-lg" /> Trend Charts
               </button>
               <button
                 onClick={() => setShowReportModal(true)}
-                className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg"
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white font-semibold py-2.5 px-5 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-105"
               >
-                <FiFileText /> Detailed Reports
+                <FiLayers className="text-lg" /> Detailed Reports
               </button>
               <button
                 onClick={exportExcel}
-                className="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg"
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white font-semibold py-2.5 px-5 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-105"
               >
-                <FiDownload /> Excel (.xlsx)
+                <FiDownload className="text-lg" /> Excel (.xlsx)
               </button>
             </div>
             <div className="text-sm text-gray-500 mt-2">Showing {filtered.length} of {original.length} rows</div>
@@ -2632,101 +2685,123 @@ export default function Home() {
               </div>
               <div className="p-6 space-y-4">
                 <div>
-                  <h3 className="text-sm font-bold text-gray-600 mb-2 px-2">📊 SUMMARY REPORTS</h3>
+                  <h3 className="text-xs font-bold text-indigo-700 uppercase tracking-wider mb-3 px-2 flex items-center gap-2">
+                    <span className="text-lg">📊</span> Summary Reports
+                  </h3>
                   <div className="space-y-2">
                     <button
                       onClick={() => { exportDivisionSummary(); setShowReportModal(false); }}
-                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <FiFileText className="text-blue-600 text-xl" />
-                      <div>
-                        <div className="font-semibold text-gray-800">Division-wise Summary</div>
-                        <div className="text-sm text-gray-500">Total, Closed, Pending by Division</div>
+                      <div className="bg-indigo-500 p-3 rounded-lg group-hover:bg-indigo-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-indigo-700 transition">Division-wise Summary</div>
+                        <div className="text-xs text-gray-600">Total, Closed, Pending by Division</div>
                       </div>
                     </button>
                     <button
                       onClick={() => { exportStatusBreakdown(); setShowReportModal(false); }}
-                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <FiFileText className="text-blue-600 text-xl" />
-                      <div>
-                        <div className="font-semibold text-gray-800">Status Breakdown</div>
-                        <div className="text-sm text-gray-500">Complaint Status wise Count</div>
+                      <div className="bg-indigo-500 p-3 rounded-lg group-hover:bg-indigo-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-indigo-700 transition">Status Breakdown</div>
+                        <div className="text-xs text-gray-600">Complaint Status wise Count</div>
                       </div>
                     </button>
                   </div>
                 </div>
 
                 <div>
-                  <h3 className="text-sm font-bold text-gray-600 mb-2 px-2">🔍 CLOSED BREAKDOWN REPORTS</h3>
+                  <h3 className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-3 px-2 flex items-center gap-2">
+                    <span className="text-lg">🔍</span> Closed Breakdown Reports
+                  </h3>
                   <div className="space-y-2">
                     <button
                       onClick={() => { exportDivisionClosedBreakdown(); setShowReportModal(false); }}
-                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-emerald-50 to-green-50 border-2 border-emerald-200 hover:border-emerald-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <FiFileText className="text-blue-600 text-xl" />
-                      <div>
-                        <div className="font-semibold text-gray-800">Division Closed Breakdown</div>
-                        <div className="text-sm text-gray-500">Control Room vs FRT by Division</div>
+                      <div className="bg-emerald-500 p-3 rounded-lg group-hover:bg-emerald-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-emerald-700 transition">Division Closed Breakdown</div>
+                        <div className="text-xs text-gray-600">Control Room vs FRT by Division</div>
                       </div>
                     </button>
                     <button
                       onClick={() => { exportDatewiseClosedBreakdown(); setShowReportModal(false); }}
-                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-emerald-50 to-green-50 border-2 border-emerald-200 hover:border-emerald-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <FiFileText className="text-blue-600 text-xl" />
-                      <div>
-                        <div className="font-semibold text-gray-800">Date-wise Closed Breakdown</div>
-                        <div className="text-sm text-gray-500">Control Room vs FRT by Date</div>
+                      <div className="bg-emerald-500 p-3 rounded-lg group-hover:bg-emerald-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-emerald-700 transition">Date-wise Closed Breakdown</div>
+                        <div className="text-xs text-gray-600">Control Room vs FRT by Date</div>
                       </div>
                     </button>
                     <button
                       onClick={() => { exportDetailedClosedBreakdown(); setShowReportModal(false); }}
-                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-emerald-50 to-green-50 border-2 border-emerald-200 hover:border-emerald-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <FiFileText className="text-blue-600 text-xl" />
-                      <div>
-                        <div className="font-semibold text-gray-800">Detailed Closed Breakdown</div>
-                        <div className="text-sm text-gray-500">Division → Sub Division → Sub Station</div>
+                      <div className="bg-emerald-500 p-3 rounded-lg group-hover:bg-emerald-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-emerald-700 transition">Detailed Closed Breakdown</div>
+                        <div className="text-xs text-gray-600">Division → Sub Division → Sub Station</div>
                       </div>
                     </button>
                   </div>
                 </div>
 
                 <div>
-                  <h3 className="text-sm font-bold text-gray-600 mb-2 px-2">📅 COUNT REPORTS</h3>
+                  <h3 className="text-xs font-bold text-purple-700 uppercase tracking-wider mb-3 px-2 flex items-center gap-2">
+                    <span className="text-lg">📅</span> Count Reports
+                  </h3>
                   <div className="space-y-2">
                     <button
                       onClick={() => { exportDatewiseTotalCount(); setShowReportModal(false); }}
-                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 hover:border-purple-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <FiFileText className="text-blue-600 text-xl" />
-                      <div>
-                        <div className="font-semibold text-gray-800">Date-wise Total Count</div>
-                        <div className="text-sm text-gray-500">Total Complaints by Date</div>
+                      <div className="bg-purple-500 p-3 rounded-lg group-hover:bg-purple-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-purple-700 transition">Date-wise Total Count</div>
+                        <div className="text-xs text-gray-600">Total Complaints by Date</div>
                       </div>
                     </button>
                     <button
                       onClick={() => { exportSubStationCount(); setShowReportModal(false); }}
-                      className="w-full flex items-center gap-3 p-4 bg-white border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition text-left"
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 hover:border-purple-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <FiFileText className="text-blue-600 text-xl" />
-                      <div>
-                        <div className="font-semibold text-gray-800">Sub Station-wise Count</div>
-                        <div className="text-sm text-gray-500">Total Complaints by Sub Station</div>
+                      <div className="bg-purple-500 p-3 rounded-lg group-hover:bg-purple-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-purple-700 transition">Sub Station-wise Count</div>
+                        <div className="text-xs text-gray-600">Total Complaints by Sub Station</div>
                       </div>
                     </button>
                   </div>
                 </div>
-                <div className="border-t border-gray-200 pt-3 mt-2"></div>
+                <div className="border-t-2 border-gray-300 pt-4 mt-2"></div>
                 <button
                   onClick={() => { exportDetailedReportPDF(); setShowReportModal(false); }}
-                  className="w-full flex items-center gap-3 p-4 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-lg transition text-left shadow-md"
+                  className="w-full flex items-center gap-4 p-5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl transition-all shadow-lg hover:shadow-xl transform hover:scale-[1.02] group"
                 >
-                  <FiDownload className="text-white text-xl" />
-                  <div>
-                    <div className="font-semibold">Download All Reports (Combined PDF)</div>
-                    <div className="text-sm text-emerald-100">All 7 reports in one PDF file</div>
+                  <div className="bg-white/20 p-3 rounded-lg group-hover:bg-white/30 transition">
+                    <FiDownload className="text-white text-2xl" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-lg">Download All Reports</div>
+                    <div className="text-sm text-blue-100">Combined PDF with all 7 reports</div>
                   </div>
                 </button>
               </div>
