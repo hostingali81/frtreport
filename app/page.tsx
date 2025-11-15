@@ -5,6 +5,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers } from 'react-icons/fi';
 import Image from 'next/image';
+import Select from 'react-select';
 
 export default function Home() {
   const [original, setOriginal] = useState<any[]>([]);
@@ -15,6 +16,9 @@ export default function Home() {
   const [fromDT, setFromDT] = useState(''); // yyyy-mm-ddTHH:mm (datetime-local)
   const [toDT, setToDT] = useState('');   // yyyy-mm-ddTHH:mm (datetime-local)
   const [statusFilter, setStatusFilter] = useState(''); // empty = all
+  const [divisionFilter, setDivisionFilter] = useState('');
+  const [subDivisionFilter, setSubDivisionFilter] = useState('');
+  const [subStationFilter, setSubStationFilter] = useState('');
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [sortColumn, setSortColumn] = useState<string>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -29,6 +33,54 @@ export default function Home() {
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [original]);
+
+  const divisionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of original) {
+      const s = String((r as any)['Division'] ?? '').trim();
+      if (s) set.add(s);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [original]);
+
+  const subDivisionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of original) {
+      const s = String((r as any)['Sub Division'] ?? '').trim();
+      if (s) set.add(s);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [original]);
+
+  const subStationOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of original) {
+      const s = String((r as any)['Sub Station'] ?? '').trim();
+      if (s) set.add(s);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [original]);
+
+  // Helper function to find parent Division and Sub Division for a Sub Station
+  const findParentsForSubStation = (subStation: string) => {
+    const record = original.find(r => String((r as any)['Sub Station'] ?? '').trim() === subStation);
+    if (record) {
+      return {
+        division: String((record as any)['Division'] ?? '').trim(),
+        subDivision: String((record as any)['Sub Division'] ?? '').trim()
+      };
+    }
+    return null;
+  };
+
+  // Helper function to find parent Division for a Sub Division
+  const findParentForSubDivision = (subDivision: string) => {
+    const record = original.find(r => String((r as any)['Sub Division'] ?? '').trim() === subDivision);
+    if (record) {
+      return String((record as any)['Division'] ?? '').trim();
+    }
+    return '';
+  };
 
   const fetchData = async (refresh = false) => {
     setLoading(true);
@@ -128,6 +180,15 @@ export default function Home() {
     if (statusFilter) {
       rows = rows.filter(row => String(row['Status'] ?? '').trim() === statusFilter);
     }
+    if (divisionFilter) {
+      rows = rows.filter(row => String(row['Division'] ?? '').trim() === divisionFilter);
+    }
+    if (subDivisionFilter) {
+      rows = rows.filter(row => String(row['Sub Division'] ?? '').trim() === subDivisionFilter);
+    }
+    if (subStationFilter) {
+      rows = rows.filter(row => String(row['Sub Station'] ?? '').trim() === subStationFilter);
+    }
     if (sortColumn) {
       rows = [...rows].sort((a, b) => {
         let aVal: any, bVal: any;
@@ -159,7 +220,7 @@ export default function Home() {
       });
     }
     return rows;
-  }, [original, search, fromDT, toDT, statusFilter, sortColumn, sortDirection]);
+  }, [original, search, fromDT, toDT, statusFilter, divisionFilter, subDivisionFilter, subStationFilter, sortColumn, sortDirection]);
 
   const formatDateTimeLocal = (d: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -229,7 +290,7 @@ export default function Home() {
     setSelectedShift(labelMap[shift]);
   };
 
-  const applyPreset = (type: 'fromNov2025ToNow' | 'today' | 'last24h' | 'thisMonth' | 'clear' | 'toNow') => {
+  const applyPreset = (type: 'fromNov2025ToNow' | 'today' | 'last24h' | 'thisMonth' | 'toNow') => {
     const now = new Date();
     if (type === 'fromNov2025ToNow') {
       setFromDT('2025-11-01T00:00');
@@ -248,11 +309,18 @@ export default function Home() {
       setToDT(formatDateTimeLocal(now));
     } else if (type === 'toNow') {
       setToDT(formatDateTimeLocal(now));
-    } else if (type === 'clear') {
-      setFromDT('');
-      setToDT('');
-      setSelectedShift('');
     }
+  };
+
+  const clearAllFilters = () => {
+    setSearch('');
+    setDivisionFilter('');
+    setSubDivisionFilter('');
+    setSubStationFilter('');
+    setStatusFilter('');
+    setFromDT('');
+    setToDT('');
+    setSelectedShift('');
   };
 
   // Auto-fill From/To with oldest and latest dates from loaded data
@@ -2492,10 +2560,18 @@ export default function Home() {
 
         {original.length > 0 && !loading && (
           <div className="bg-white rounded-xl shadow-md p-4 md:p-5 mb-6 border border-gray-100">
-            <div className="flex items-center gap-2 mb-3 text-gray-700"><FiFilter /> <span className="font-semibold">Filters</span></div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2 text-gray-700"><FiFilter /> <span className="font-semibold">Filters</span></div>
+              <button
+                onClick={clearAllFilters}
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white text-sm font-semibold py-2 px-4 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-105"
+              >
+                <FiFilter className="text-base" /> Clear All
+              </button>
+            </div>
             <div className="space-y-3">
               <div className="text-xs font-semibold text-gray-600">Basic Filters</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                 <div className="flex flex-col lg:col-span-2 min-w-0">
                 <label className="text-xs text-gray-500 mb-1">Search</label>
                 <input
@@ -2505,18 +2581,86 @@ export default function Home() {
                   className="border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none w-full"
                 />
                 </div>
-                <div className="flex flex-col lg:col-span-1 min-w-0">
+                <div className="flex flex-col min-w-0">
+                  <label className="text-xs text-gray-500 mb-1">Division</label>
+                  <Select
+                    value={divisionFilter ? { value: divisionFilter, label: divisionFilter } : null}
+                    onChange={(option) => {
+                      setDivisionFilter(option?.value || '');
+                    }}
+                    options={[{ value: '', label: 'All' }, ...divisionOptions.map(s => ({ value: s, label: s }))]}
+                    isClearable
+                    placeholder="All"
+                    className="text-sm"
+                    styles={{
+                      control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
+                      menu: (base) => ({ ...base, fontSize: '14px' })
+                    }}
+                  />
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <label className="text-xs text-gray-500 mb-1">Sub Division</label>
+                  <Select
+                    value={subDivisionFilter ? { value: subDivisionFilter, label: subDivisionFilter } : null}
+                    onChange={(option) => {
+                      const selectedSubDiv = option?.value || '';
+                      setSubDivisionFilter(selectedSubDiv);
+                      if (selectedSubDiv) {
+                        const parentDiv = findParentForSubDivision(selectedSubDiv);
+                        if (parentDiv) setDivisionFilter(parentDiv);
+                      }
+                    }}
+                    options={[{ value: '', label: 'All' }, ...subDivisionOptions.map(s => ({ value: s, label: s }))]}
+                    isClearable
+                    placeholder="All"
+                    className="text-sm"
+                    styles={{
+                      control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
+                      menu: (base) => ({ ...base, fontSize: '14px' })
+                    }}
+                  />
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <label className="text-xs text-gray-500 mb-1">Sub Station</label>
+                  <Select
+                    value={subStationFilter ? { value: subStationFilter, label: subStationFilter } : null}
+                    onChange={(option) => {
+                      const selectedSubStn = option?.value || '';
+                      setSubStationFilter(selectedSubStn);
+                      if (selectedSubStn) {
+                        const parents = findParentsForSubStation(selectedSubStn);
+                        if (parents) {
+                          setDivisionFilter(parents.division);
+                          setSubDivisionFilter(parents.subDivision);
+                        }
+                      }
+                    }}
+                    options={[{ value: '', label: 'All' }, ...subStationOptions.map(s => ({ value: s, label: s }))]}
+                    isClearable
+                    placeholder="All"
+                    className="text-sm"
+                    styles={{
+                      control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
+                      menu: (base) => ({ ...base, fontSize: '14px' })
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mt-3">
+                <div className="flex flex-col min-w-0">
                   <label className="text-xs text-gray-500 mb-1">Status</label>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="border rounded px-3 py-2 text-sm w-full focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  >
-                    <option value="">All</option>
-                    {statusOptions.map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
+                  <Select
+                    value={statusFilter ? { value: statusFilter, label: statusFilter } : null}
+                    onChange={(option) => setStatusFilter(option?.value || '')}
+                    options={[{ value: '', label: 'All' }, ...statusOptions.map(s => ({ value: s, label: s }))]}
+                    isClearable
+                    placeholder="All"
+                    className="text-sm"
+                    styles={{
+                      control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
+                      menu: (base) => ({ ...base, fontSize: '14px' })
+                    }}
+                  />
                 </div>
               </div>
               <div className="border-t border-gray-100 pt-3">
@@ -2550,7 +2694,6 @@ export default function Home() {
                   <button onClick={() => applyPreset('last24h')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Last 24h</button>
                   <button onClick={() => applyPreset('thisMonth')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">This Month</button>
                   <button onClick={() => applyPreset('toNow')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Set To = Now</button>
-                  <button onClick={() => applyPreset('clear')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Clear</button>
                 </div>
               </div>
               <div className="border-t border-gray-100 pt-3">
