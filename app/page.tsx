@@ -463,7 +463,7 @@ export default function Home() {
     const topSS = Array.from(ssMap.entries())
       .map(([key, count]) => {
         const [division, subDivision, subStation] = key.split('|');
-        return { division, subDivision, subStation, count };
+        return { count, division, subDivision, subStation };
       })
       .sort((a, b) => b.count - a.count);
     const ssBody = topSS.map(r => [r.division, r.subDivision, r.subStation, String(r.count)]);
@@ -551,7 +551,7 @@ export default function Home() {
     const detailedRows = Array.from(detailedMap.entries())
       .map(([key, stats]) => {
         const [division, subDivision, subStation] = key.split('|');
-        return { division, subDivision, subStation, ...stats };
+        return { ...stats, division, subDivision, subStation };
       })
       .sort((a, b) => {
         if (a.division !== b.division) return a.division.localeCompare(b.division);
@@ -726,7 +726,7 @@ export default function Home() {
     const subDivRows = Array.from(subDivMap.entries())
       .map(([key, count]) => {
         const [division, subDivision] = key.split('|');
-        return { division, subDivision, count };
+        return { count, division, subDivision };
       })
       .sort((a, b) => b.count - a.count);
     const subDivBody = subDivRows.map(r => [r.division, r.subDivision, String(r.count)]);
@@ -895,8 +895,8 @@ export default function Home() {
     }
     const subDivRows = Array.from(subDivMap.entries())
       .map(([key, v]) => {
-        const [division, subDivision] = key.split('|');
-        return { division, subDivision, ...v };
+        const [, subDivision] = key.split('|');
+        return { subDivision, ...v };
       })
       .sort((a, b) => b.total - a.total);
     const grandSubDiv = rows.reduce((acc, r) => {
@@ -990,7 +990,7 @@ export default function Home() {
     const subStnRows = Array.from(subStnMap.entries())
       .map(([key, v]) => {
         const [division, subDivision, subStation] = key.split('|');
-        return { division, subDivision, subStation, ...v };
+        return { ...v, division, subDivision, subStation };
       })
       .sort((a, b) => b.total - a.total);
     const grandSubStn = rows.reduce((acc, r) => {
@@ -1163,7 +1163,7 @@ export default function Home() {
     const subDivBreakRows = Array.from(subDivBreakdownMap.entries())
       .map(([key, stats]) => {
         const [division, subDivision] = key.split('|');
-        return { division, subDivision, ...stats };
+        return { ...stats, division, subDivision };
       })
       .sort((a, b) => b.total - a.total);
     const grandSubDivBreak = rows.reduce((acc, r) => {
@@ -1730,7 +1730,7 @@ export default function Home() {
     const detailedRows = Array.from(detailedMap.entries())
       .map(([key, stats]) => {
         const [division, subDivision, subStation] = key.split('|');
-        return { division, subDivision, subStation, ...stats };
+        return { ...stats, division, subDivision, subStation };
       })
       .sort((a, b) => {
         if (a.division !== b.division) return a.division.localeCompare(b.division);
@@ -2760,7 +2760,7 @@ export default function Home() {
     const detailedRows = Array.from(detailedMap.entries())
       .map(([key, stats]) => {
         const [division, subDivision, subStation] = key.split('|');
-        return { division, subDivision, subStation, ...stats };
+        return { ...stats, division, subDivision, subStation };
       })
       .sort((a, b) => {
         if (a.division !== b.division) return a.division.localeCompare(b.division);
@@ -3472,3 +3472,8 @@ export default function Home() {
     </div>
   );
 }
+
+
+
+
+
