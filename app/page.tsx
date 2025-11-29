@@ -454,20 +454,28 @@ export default function Home() {
     addHeader('Sub Station-wise Total Complaint Count');
     const ssMap = new Map<string, number>();
     for (const r of rows) {
-      const s = String(r['Sub Station'] || '').trim() || 'Unknown';
-      ssMap.set(s, (ssMap.get(s) || 0) + 1);
+      const division = String(r['Division'] || '').trim() || 'Unknown';
+      const subDivision = String(r['Sub Division'] || '').trim() || 'Unknown';
+      const subStation = String(r['Sub Station'] || '').trim() || 'Unknown';
+      const key = `${division}|${subDivision}|${subStation}`;
+      ssMap.set(key, (ssMap.get(key) || 0) + 1);
     }
-    const topSS = Array.from(ssMap.entries()).sort((a, b) => b[1] - a[1]);
-    const ssBody = topSS.map(([name, count]) => [name, String(count)]);
+    const topSS = Array.from(ssMap.entries())
+      .map(([key, count]) => {
+        const [division, subDivision, subStation] = key.split('|');
+        return { division, subDivision, subStation, count };
+      })
+      .sort((a, b) => b.count - a.count);
+    const ssBody = topSS.map(r => [r.division, r.subDivision, r.subStation, String(r.count)]);
     autoTable(doc, {
       startY: selectedShift ? 130 : 115,
-      head: [['Sub Station', 'Total Complaints']],
+      head: [['Division', 'Sub Division', 'Sub Station', 'Total Complaints']],
       body: ssBody,
       theme: 'grid',
-      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
-      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
+      styles: { fontSize: 14, cellPadding: 10, halign: 'center', minCellHeight: 24 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 15, fontStyle: 'bold', halign: 'center', minCellHeight: 28 },
       alternateRowStyles: { fillColor: [245, 247, 250] },
-      columnStyles: { 0: { halign: 'left' } } as any,
+      columnStyles: { 0: { halign: 'left' }, 1: { halign: 'left' }, 2: { halign: 'left' } } as any,
       margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
       tableWidth: 'auto',
       didDrawPage: (data: any) => {
@@ -596,6 +604,161 @@ export default function Home() {
     doc.save('detailed-closed-breakdown.pdf');
   };
 
+  const exportDivisionCount = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Division-wise Total Complaint Count');
+    const divMap = new Map<string, number>();
+    for (const r of rows) {
+      const s = String(r['Division'] || '').trim() || 'Unknown';
+      divMap.set(s, (divMap.get(s) || 0) + 1);
+    }
+    const divRows = Array.from(divMap.entries()).sort((a, b) => b[1] - a[1]);
+    const divBody = divRows.map(([name, count]) => [name, String(count)]);
+    const divSum = divRows.reduce((acc, [, c]) => acc + (c as number), 0);
+    divBody.push(['Grand Total', String(divSum)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Total Complaints']],
+      body: divBody,
+      theme: 'grid',
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Division-wise Total Complaint Count');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === divBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('division-count.pdf');
+  };
+
+  const exportSubDivisionCount = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Sub Division-wise Total Complaint Count');
+    const subDivMap = new Map<string, number>();
+    for (const r of rows) {
+      const division = String(r['Division'] || '').trim() || 'Unknown';
+      const subDivision = String(r['Sub Division'] || '').trim() || 'Unknown';
+      const key = `${division}|${subDivision}`;
+      subDivMap.set(key, (subDivMap.get(key) || 0) + 1);
+    }
+    const subDivRows = Array.from(subDivMap.entries())
+      .map(([key, count]) => {
+        const [division, subDivision] = key.split('|');
+        return { division, subDivision, count };
+      })
+      .sort((a, b) => b.count - a.count);
+    const subDivBody = subDivRows.map(r => [r.division, r.subDivision, String(r.count)]);
+    const subDivSum = subDivRows.reduce((acc, r) => acc + r.count, 0);
+    subDivBody.push(['Grand Total', '', String(subDivSum)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Sub Division', 'Total Complaints']],
+      body: subDivBody,
+      theme: 'grid',
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' }, 1: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Sub Division-wise Total Complaint Count');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === subDivBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('subdivision-count.pdf');
+  };
+
   const exportDatewiseTotalCount = () => {
     const rows = filtered;
     if (rows.length === 0) return;
@@ -678,6 +841,193 @@ export default function Home() {
     doc.save('datewise-total-count.pdf');
   };
 
+  const exportSubDivisionSummary = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Sub Division-wise Summary');
+    const subDivMap = new Map<string, { division: string; total: number; closed: number; pending: number }>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
+      const key = `${division}|${subDivision}`;
+      const entry = subDivMap.get(key) || { division, total: 0, closed: 0, pending: 0 };
+      entry.total += 1;
+      if (isClosedRow(r)) entry.closed += 1;
+      subDivMap.set(key, entry);
+    }
+    for (const [k, v] of subDivMap) {
+      v.pending = Math.max(0, v.total - v.closed);
+      subDivMap.set(k, v);
+    }
+    const subDivRows = Array.from(subDivMap.entries())
+      .map(([key, v]) => {
+        const [division, subDivision] = key.split('|');
+        return { division, subDivision, ...v };
+      })
+      .sort((a, b) => b.total - a.total);
+    const grandSubDiv = rows.reduce((acc, r) => {
+      acc.total += 1;
+      if (isClosedRow(r)) acc.closed += 1;
+      return acc;
+    }, { total: 0, closed: 0 });
+    const grandSubDivPending = Math.max(0, grandSubDiv.total - grandSubDiv.closed);
+    const subDivBody = subDivRows.map(r => [r.division, r.subDivision, String(r.total), String(r.closed), String(r.pending)]);
+    subDivBody.push(['Grand Total', '', String(grandSubDiv.total), String(grandSubDiv.closed), String(grandSubDivPending)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Sub Division', 'Total', 'Closed', 'Pending']],
+      body: subDivBody,
+      theme: 'grid',
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' }, 1: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Sub Division-wise Summary');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === subDivBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('subdivision-summary.pdf');
+  };
+
+  const exportSubStationSummary = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Sub Station-wise Summary');
+    const subStnMap = new Map<string, { division: string; subDivision: string; total: number; closed: number; pending: number }>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
+      const subStation = String(r['Sub Station'] ?? '').trim() || 'Unknown';
+      const key = `${division}|${subDivision}|${subStation}`;
+      const entry = subStnMap.get(key) || { division, subDivision, total: 0, closed: 0, pending: 0 };
+      entry.total += 1;
+      if (isClosedRow(r)) entry.closed += 1;
+      subStnMap.set(key, entry);
+    }
+    for (const [k, v] of subStnMap) {
+      v.pending = Math.max(0, v.total - v.closed);
+      subStnMap.set(k, v);
+    }
+    const subStnRows = Array.from(subStnMap.entries())
+      .map(([key, v]) => {
+        const [division, subDivision, subStation] = key.split('|');
+        return { division, subDivision, subStation, ...v };
+      })
+      .sort((a, b) => b.total - a.total);
+    const grandSubStn = rows.reduce((acc, r) => {
+      acc.total += 1;
+      if (isClosedRow(r)) acc.closed += 1;
+      return acc;
+    }, { total: 0, closed: 0 });
+    const grandSubStnPending = Math.max(0, grandSubStn.total - grandSubStn.closed);
+    const subStnBody = subStnRows.map(r => [r.division, r.subDivision, r.subStation, String(r.total), String(r.closed), String(r.pending)]);
+    subStnBody.push(['Grand Total', '', '', String(grandSubStn.total), String(grandSubStn.closed), String(grandSubStnPending)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Sub Division', 'Sub Station', 'Total', 'Closed', 'Pending']],
+      body: subStnBody,
+      theme: 'grid',
+      styles: { fontSize: 14, cellPadding: 10, halign: 'center', minCellHeight: 24 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 15, fontStyle: 'bold', halign: 'center', minCellHeight: 28 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' }, 1: { halign: 'left' }, 2: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Sub Station-wise Summary');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === subStnBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('substation-summary.pdf');
+  };
+
   const exportStatusBreakdown = () => {
     const rows = filtered;
     if (rows.length === 0) return;
@@ -749,6 +1099,113 @@ export default function Home() {
     });
 
     doc.save('status-breakdown.pdf');
+  };
+
+  const exportSubDivisionClosedBreakdown = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Sub Division Closed Breakdown');
+    const subDivBreakdownMap = new Map<string, { division: string; total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
+      const key = `${division}|${subDivision}`;
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      const entry = subDivBreakdownMap.get(key) || { division, total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
+      entry.total += 1;
+      if (isClosed) {
+        entry.closed += 1;
+        if (isControlRoom) entry.controlRoom += 1;
+        else entry.frt += 1;
+      }
+      subDivBreakdownMap.set(key, entry);
+    }
+    for (const [k, v] of subDivBreakdownMap) {
+      v.pending = Math.max(0, v.total - v.closed);
+      subDivBreakdownMap.set(k, v);
+    }
+    const subDivBreakRows = Array.from(subDivBreakdownMap.entries())
+      .map(([key, stats]) => {
+        const [division, subDivision] = key.split('|');
+        return { division, subDivision, ...stats };
+      })
+      .sort((a, b) => b.total - a.total);
+    const grandSubDivBreak = rows.reduce((acc, r) => {
+      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
+      const isClosed = isClosedRow(r);
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      acc.total += 1;
+      if (isClosed) {
+        acc.closed += 1;
+        if (isControlRoom) acc.controlRoom += 1;
+        else acc.frt += 1;
+      }
+      return acc;
+    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
+    grandSubDivBreak.pending = Math.max(0, grandSubDivBreak.total - grandSubDivBreak.closed);
+    const subDivBreakBody = subDivBreakRows.map(r => [r.division, r.subDivision, String(r.total), String(r.closed), String(r.controlRoom), String(r.frt), String(r.pending)]);
+    subDivBreakBody.push(['Grand Total', '', String(grandSubDivBreak.total), String(grandSubDivBreak.closed), String(grandSubDivBreak.controlRoom), String(grandSubDivBreak.frt), String(grandSubDivBreak.pending)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Sub Division', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']],
+      body: subDivBreakBody,
+      theme: 'grid',
+      styles: { fontSize: 14, cellPadding: 10, halign: 'center', minCellHeight: 24 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 15, fontStyle: 'bold', halign: 'center', minCellHeight: 28 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' }, 1: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Sub Division Closed Breakdown');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === subDivBreakBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('subdivision-closed-breakdown.pdf');
   };
 
   const exportDatewiseClosedBreakdown = () => {
@@ -2845,6 +3302,30 @@ export default function Home() {
                       </div>
                     </button>
                     <button
+                      onClick={() => { exportSubDivisionSummary(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-md rounded-lg transition-all text-left group"
+                    >
+                      <div className="bg-indigo-500 p-3 rounded-lg group-hover:bg-indigo-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-indigo-700 transition">Sub Division-wise Summary</div>
+                        <div className="text-xs text-gray-600">Total, Closed, Pending by Sub Division</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { exportSubStationSummary(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-md rounded-lg transition-all text-left group"
+                    >
+                      <div className="bg-indigo-500 p-3 rounded-lg group-hover:bg-indigo-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-indigo-700 transition">Sub Station-wise Summary</div>
+                        <div className="text-xs text-gray-600">Total, Closed, Pending by Sub Station</div>
+                      </div>
+                    </button>
+                    <button
                       onClick={() => { exportStatusBreakdown(); setShowReportModal(false); }}
                       className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
@@ -2874,6 +3355,18 @@ export default function Home() {
                       <div className="flex-1">
                         <div className="font-semibold text-gray-800 group-hover:text-emerald-700 transition">Division Closed Breakdown</div>
                         <div className="text-xs text-gray-600">Control Room vs FRT by Division</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { exportSubDivisionClosedBreakdown(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-emerald-50 to-green-50 border-2 border-emerald-200 hover:border-emerald-400 hover:shadow-md rounded-lg transition-all text-left group"
+                    >
+                      <div className="bg-emerald-500 p-3 rounded-lg group-hover:bg-emerald-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-emerald-700 transition">Sub Division Closed Breakdown</div>
+                        <div className="text-xs text-gray-600">Control Room vs FRT by Sub Division</div>
                       </div>
                     </button>
                     <button
@@ -2908,6 +3401,30 @@ export default function Home() {
                     <span className="text-lg">📅</span> Count Reports
                   </h3>
                   <div className="space-y-2">
+                    <button
+                      onClick={() => { exportDivisionCount(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 hover:border-purple-400 hover:shadow-md rounded-lg transition-all text-left group"
+                    >
+                      <div className="bg-purple-500 p-3 rounded-lg group-hover:bg-purple-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-purple-700 transition">Division-wise Count</div>
+                        <div className="text-xs text-gray-600">Total Complaints by Division</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { exportSubDivisionCount(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 hover:border-purple-400 hover:shadow-md rounded-lg transition-all text-left group"
+                    >
+                      <div className="bg-purple-500 p-3 rounded-lg group-hover:bg-purple-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-purple-700 transition">Sub Division-wise Count</div>
+                        <div className="text-xs text-gray-600">Total Complaints by Sub Division</div>
+                      </div>
+                    </button>
                     <button
                       onClick={() => { exportDatewiseTotalCount(); setShowReportModal(false); }}
                       className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 hover:border-purple-400 hover:shadow-md rounded-lg transition-all text-left group"
@@ -2944,7 +3461,7 @@ export default function Home() {
                   </div>
                   <div className="flex-1">
                     <div className="font-bold text-lg">Download All Reports</div>
-                    <div className="text-sm text-blue-100">Combined PDF with all 7 reports</div>
+                    <div className="text-sm text-blue-100">Combined PDF with all 12 reports</div>
                   </div>
                 </button>
               </div>
