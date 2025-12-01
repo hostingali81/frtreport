@@ -1028,7 +1028,7 @@ export default function Home() {
     doc.save('substation-summary.pdf');
   };
 
-  const exportClosedStatusBreakdown = () => {
+  const exportClosedStatusDivision = () => {
     const rows = filtered;
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
@@ -1065,7 +1065,7 @@ export default function Home() {
       }
     };
 
-    addHeader('Closed Status Breakdown (Division-wise)');
+    addHeader('Closed Status - Division-wise');
     const csMap = new Map<string, { total: number; closedWithin: number; closedBeyond: number }>();
     for (const r of rows) {
       const division = String(r['Division'] ?? '').trim() || 'Unknown';
@@ -1101,7 +1101,7 @@ export default function Home() {
       tableWidth: 'auto',
       didDrawPage: (data: any) => {
         if (data.pageNumber > 1) {
-          addHeader('Closed Status Breakdown (Division-wise)');
+          addHeader('Closed Status - Division-wise');
         }
       },
       didParseCell: (data: any) => {
@@ -1112,7 +1112,192 @@ export default function Home() {
       },
     });
 
-    doc.save('closed-status-breakdown.pdf');
+    doc.save('closed-status-division.pdf');
+  };
+
+  const exportClosedStatusSubDivision = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Closed Status - Sub Division-wise');
+    const csMap = new Map<string, { total: number; closedWithin: number; closedBeyond: number }>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
+      const key = `${division}|${subDivision}`;
+      const closedStatus = String(r['Closed Status'] ?? '').trim();
+      const entry = csMap.get(key) || { total: 0, closedWithin: 0, closedBeyond: 0 };
+      entry.total += 1;
+      if (closedStatus === 'Closed Within') entry.closedWithin += 1;
+      else if (closedStatus === 'Closed Beyond') entry.closedBeyond += 1;
+      csMap.set(key, entry);
+    }
+    const csRows = Array.from(csMap.entries())
+      .map(([key, stats]) => {
+        const [division, subDivision] = key.split('|');
+        return { division, subDivision, ...stats };
+      })
+      .sort((a, b) => b.total - a.total);
+    const csGrand = rows.reduce((acc, r) => {
+      const closedStatus = String(r['Closed Status'] ?? '').trim();
+      acc.total += 1;
+      if (closedStatus === 'Closed Within') acc.closedWithin += 1;
+      else if (closedStatus === 'Closed Beyond') acc.closedBeyond += 1;
+      return acc;
+    }, { total: 0, closedWithin: 0, closedBeyond: 0 });
+    const csBody = csRows.map(r => [r.division, r.subDivision, String(r.total), String(r.closedWithin), String(r.closedBeyond)]);
+    csBody.push(['Grand Total', '', String(csGrand.total), String(csGrand.closedWithin), String(csGrand.closedBeyond)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Sub Division', 'Total', 'Closed Within', 'Closed Beyond']],
+      body: csBody,
+      theme: 'grid',
+      styles: { fontSize: 15, cellPadding: 11, halign: 'center', minCellHeight: 26 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 16, fontStyle: 'bold', halign: 'center', minCellHeight: 30 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' }, 1: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Closed Status - Sub Division-wise');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === csBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('closed-status-subdivision.pdf');
+  };
+
+  const exportClosedStatusSubStation = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Closed Status - Sub Station-wise');
+    const csMap = new Map<string, { total: number; closedWithin: number; closedBeyond: number }>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
+      const subStation = String(r['Sub Station'] ?? '').trim() || 'Unknown';
+      const key = `${division}|${subDivision}|${subStation}`;
+      const closedStatus = String(r['Closed Status'] ?? '').trim();
+      const entry = csMap.get(key) || { total: 0, closedWithin: 0, closedBeyond: 0 };
+      entry.total += 1;
+      if (closedStatus === 'Closed Within') entry.closedWithin += 1;
+      else if (closedStatus === 'Closed Beyond') entry.closedBeyond += 1;
+      csMap.set(key, entry);
+    }
+    const csRows = Array.from(csMap.entries())
+      .map(([key, stats]) => {
+        const [division, subDivision, subStation] = key.split('|');
+        return { division, subDivision, subStation, ...stats };
+      })
+      .sort((a, b) => b.total - a.total);
+    const csGrand = rows.reduce((acc, r) => {
+      const closedStatus = String(r['Closed Status'] ?? '').trim();
+      acc.total += 1;
+      if (closedStatus === 'Closed Within') acc.closedWithin += 1;
+      else if (closedStatus === 'Closed Beyond') acc.closedBeyond += 1;
+      return acc;
+    }, { total: 0, closedWithin: 0, closedBeyond: 0 });
+    const csBody = csRows.map(r => [r.division, r.subDivision, r.subStation, String(r.total), String(r.closedWithin), String(r.closedBeyond)]);
+    csBody.push(['Grand Total', '', '', String(csGrand.total), String(csGrand.closedWithin), String(csGrand.closedBeyond)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Sub Division', 'Sub Station', 'Total', 'Closed Within', 'Closed Beyond']],
+      body: csBody,
+      theme: 'grid',
+      styles: { fontSize: 13, cellPadding: 10, halign: 'center', minCellHeight: 24 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 14, fontStyle: 'bold', halign: 'center', minCellHeight: 28 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' }, 1: { halign: 'left' }, 2: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Closed Status - Sub Station-wise');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === csBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('closed-status-substation.pdf');
   };
 
   const exportAreaTypeBreakdown = () => {
@@ -3527,15 +3712,39 @@ export default function Home() {
                   </h3>
                   <div className="space-y-2">
                     <button
-                      onClick={() => { exportClosedStatusBreakdown(); setShowReportModal(false); }}
+                      onClick={() => { exportClosedStatusDivision(); setShowReportModal(false); }}
                       className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-orange-50 to-amber-50 border-2 border-orange-200 hover:border-orange-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
                       <div className="bg-orange-500 p-3 rounded-lg group-hover:bg-orange-600 transition">
                         <FiFileText className="text-white text-xl" />
                       </div>
                       <div className="flex-1">
-                        <div className="font-semibold text-gray-800 group-hover:text-orange-700 transition">Closed Status Breakdown</div>
+                        <div className="font-semibold text-gray-800 group-hover:text-orange-700 transition">Closed Status - Division</div>
                         <div className="text-xs text-gray-600">Closed Within vs Closed Beyond by Division</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { exportClosedStatusSubDivision(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-orange-50 to-amber-50 border-2 border-orange-200 hover:border-orange-400 hover:shadow-md rounded-lg transition-all text-left group"
+                    >
+                      <div className="bg-orange-500 p-3 rounded-lg group-hover:bg-orange-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-orange-700 transition">Closed Status - Sub Division</div>
+                        <div className="text-xs text-gray-600">Closed Within vs Closed Beyond by Sub Division</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { exportClosedStatusSubStation(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-orange-50 to-amber-50 border-2 border-orange-200 hover:border-orange-400 hover:shadow-md rounded-lg transition-all text-left group"
+                    >
+                      <div className="bg-orange-500 p-3 rounded-lg group-hover:bg-orange-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-orange-700 transition">Closed Status - Sub Station</div>
+                        <div className="text-xs text-gray-600">Closed Within vs Closed Beyond by Sub Station</div>
                       </div>
                     </button>
                     <button
