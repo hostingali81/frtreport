@@ -1028,6 +1028,187 @@ export default function Home() {
     doc.save('substation-summary.pdf');
   };
 
+  const exportClosedStatusBreakdown = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Closed Status Breakdown (Division-wise)');
+    const csMap = new Map<string, { total: number; closedWithin: number; closedBeyond: number }>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const closedStatus = String(r['Closed Status'] ?? '').trim();
+      const entry = csMap.get(division) || { total: 0, closedWithin: 0, closedBeyond: 0 };
+      entry.total += 1;
+      if (closedStatus === 'Closed Within') entry.closedWithin += 1;
+      else if (closedStatus === 'Closed Beyond') entry.closedBeyond += 1;
+      csMap.set(division, entry);
+    }
+    const csRows = Array.from(csMap.entries())
+      .map(([div, stats]) => ({ division: div, ...stats }))
+      .sort((a, b) => b.total - a.total);
+    const csGrand = rows.reduce((acc, r) => {
+      const closedStatus = String(r['Closed Status'] ?? '').trim();
+      acc.total += 1;
+      if (closedStatus === 'Closed Within') acc.closedWithin += 1;
+      else if (closedStatus === 'Closed Beyond') acc.closedBeyond += 1;
+      return acc;
+    }, { total: 0, closedWithin: 0, closedBeyond: 0 });
+    const csBody = csRows.map(r => [r.division, String(r.total), String(r.closedWithin), String(r.closedBeyond)]);
+    csBody.push(['Grand Total', String(csGrand.total), String(csGrand.closedWithin), String(csGrand.closedBeyond)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [['Division', 'Total', 'Closed Within', 'Closed Beyond']],
+      body: csBody,
+      theme: 'grid',
+      styles: { fontSize: 16, cellPadding: 12, halign: 'center', minCellHeight: 28 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 17, fontStyle: 'bold', halign: 'center', minCellHeight: 32 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Closed Status Breakdown (Division-wise)');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === csBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('closed-status-breakdown.pdf');
+  };
+
+  const exportAreaTypeBreakdown = () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+    const periodParts: string[] = [];
+    if (fromDT) {
+      const d = new Date(fromDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`From: ${formatted}`);
+    }
+    if (toDT) {
+      const d = new Date(toDT);
+      const formatted = d.toLocaleString('en-IN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/am/gi, 'AM').replace(/pm/gi, 'PM');
+      periodParts.push(`To: ${formatted}`);
+    }
+    const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
+    
+    const addHeader = (title: string) => {
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, 40, 40);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      let yPos = 58;
+      doc.text(`Generated: ${nowStr}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Period: ${periodText}`, 40, yPos);
+      yPos += 15;
+      doc.text(`Total Complaints: ${rows.length}`, 40, yPos);
+      if (selectedShift) {
+        yPos += 15;
+        doc.text(`Shift: ${selectedShift}`, 40, yPos);
+      }
+    };
+
+    addHeader('Area Type Breakdown (Division-wise)');
+    const atMap = new Map<string, Map<string, number>>();
+    const areaTypes = new Set<string>();
+    for (const r of rows) {
+      const division = String(r['Division'] ?? '').trim() || 'Unknown';
+      const areaType = String(r['Area Type'] ?? '').trim() || 'Unknown';
+      areaTypes.add(areaType);
+      if (!atMap.has(division)) atMap.set(division, new Map());
+      const divMap = atMap.get(division)!;
+      divMap.set(areaType, (divMap.get(areaType) || 0) + 1);
+    }
+    const sortedAreaTypes = Array.from(areaTypes).sort();
+    const atRows = Array.from(atMap.entries())
+      .map(([div, typeMap]) => {
+        const row: any = { division: div, total: 0 };
+        sortedAreaTypes.forEach(at => {
+          row[at] = typeMap.get(at) || 0;
+          row.total += row[at];
+        });
+        return row;
+      })
+      .sort((a, b) => b.total - a.total);
+    const atGrand: any = { division: 'Grand Total', total: 0 };
+    sortedAreaTypes.forEach(at => {
+      atGrand[at] = rows.filter(r => String(r['Area Type'] ?? '').trim() === at).length;
+      atGrand.total += atGrand[at];
+    });
+    const headers = ['Division', ...sortedAreaTypes, 'Total'];
+    const atBody = atRows.map(r => [r.division, ...sortedAreaTypes.map(at => String(r[at])), String(r.total)]);
+    atBody.push(['Grand Total', ...sortedAreaTypes.map(at => String(atGrand[at])), String(atGrand.total)]);
+    autoTable(doc, {
+      startY: selectedShift ? 130 : 115,
+      head: [headers],
+      body: atBody,
+      theme: 'grid',
+      styles: { fontSize: 14, cellPadding: 10, halign: 'center', minCellHeight: 24 },
+      headStyles: { fillColor: [59, 130, 246], fontSize: 15, fontStyle: 'bold', halign: 'center', minCellHeight: 28 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: { 0: { halign: 'left' } } as any,
+      margin: { top: selectedShift ? 130 : 115, left: 40, right: 40 },
+      tableWidth: 'auto',
+      didDrawPage: (data: any) => {
+        if (data.pageNumber > 1) {
+          addHeader('Area Type Breakdown (Division-wise)');
+        }
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.row.index === atBody.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 252, 231];
+        }
+      },
+    });
+
+    doc.save('area-type-breakdown.pdf');
+  };
+
   const exportStatusBreakdown = () => {
     const rows = filtered;
     if (rows.length === 0) return;
@@ -3335,6 +3516,30 @@ export default function Home() {
                       <div className="flex-1">
                         <div className="font-semibold text-gray-800 group-hover:text-indigo-700 transition">Status Breakdown</div>
                         <div className="text-xs text-gray-600">Complaint Status wise Count</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { exportClosedStatusBreakdown(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-md rounded-lg transition-all text-left group"
+                    >
+                      <div className="bg-indigo-500 p-3 rounded-lg group-hover:bg-indigo-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-indigo-700 transition">Closed Status Breakdown</div>
+                        <div className="text-xs text-gray-600">Closed Within vs Closed Beyond by Division</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { exportAreaTypeBreakdown(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-md rounded-lg transition-all text-left group"
+                    >
+                      <div className="bg-indigo-500 p-3 rounded-lg group-hover:bg-indigo-600 transition">
+                        <FiFileText className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-indigo-700 transition">Area Type Breakdown</div>
+                        <div className="text-xs text-gray-600">Area Type wise Count by Division</div>
                       </div>
                     </button>
                   </div>
