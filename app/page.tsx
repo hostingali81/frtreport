@@ -1337,39 +1337,49 @@ export default function Home() {
       }
     };
 
-    addHeader('Area Type Breakdown (Division-wise)');
-    const atMap = new Map<string, Map<string, number>>();
-    const areaTypes = new Set<string>();
+    addHeader('Area Type Breakdown with Closed Status');
+    const atMap = new Map<string, { within: number; beyond: number }>();
     for (const r of rows) {
-      const division = String(r['Division'] ?? '').trim() || 'Unknown';
       const areaType = String(r['Area Type'] ?? '').trim() || 'Unknown';
-      areaTypes.add(areaType);
-      if (!atMap.has(division)) atMap.set(division, new Map());
-      const divMap = atMap.get(division)!;
-      divMap.set(areaType, (divMap.get(areaType) || 0) + 1);
+      const closedStatus = String(r['Closed Status'] ?? '').trim();
+      const entry = atMap.get(areaType) || { within: 0, beyond: 0 };
+      if (closedStatus === 'Closed Within') entry.within += 1;
+      else if (closedStatus === 'Closed Beyond') entry.beyond += 1;
+      atMap.set(areaType, entry);
     }
-    const sortedAreaTypes = Array.from(areaTypes).sort();
+    
     const atRows = Array.from(atMap.entries())
-      .map(([div, typeMap]) => {
-        const row: any = { division: div, total: 0 };
-        sortedAreaTypes.forEach(at => {
-          row[at] = typeMap.get(at) || 0;
-          row.total += row[at];
-        });
-        return row;
-      })
+      .map(([area, stats]) => ({
+        area,
+        within: stats.within,
+        beyond: stats.beyond,
+        total: stats.within + stats.beyond
+      }))
       .sort((a, b) => b.total - a.total);
-    const atGrand: any = { division: 'Grand Total', total: 0 };
-    sortedAreaTypes.forEach(at => {
-      atGrand[at] = rows.filter(r => String(r['Area Type'] ?? '').trim() === at).length;
-      atGrand.total += atGrand[at];
-    });
-    const headers = ['Division', ...sortedAreaTypes, 'Total'];
-    const atBody = atRows.map(r => [r.division, ...sortedAreaTypes.map(at => String(r[at])), String(r.total)]);
-    atBody.push(['Grand Total', ...sortedAreaTypes.map(at => String(atGrand[at])), String(atGrand.total)]);
+    
+    const atGrand = rows.reduce((acc, r) => {
+      const closedStatus = String(r['Closed Status'] ?? '').trim();
+      if (closedStatus === 'Closed Within') acc.within += 1;
+      else if (closedStatus === 'Closed Beyond') acc.beyond += 1;
+      return acc;
+    }, { within: 0, beyond: 0 });
+    
+    const atBody = atRows.map(r => [
+      r.area,
+      String(r.within),
+      String(r.beyond),
+      String(r.total)
+    ]);
+    atBody.push([
+      'Grand Total',
+      String(atGrand.within),
+      String(atGrand.beyond),
+      String(atGrand.within + atGrand.beyond)
+    ]);
+    
     autoTable(doc, {
       startY: selectedShift ? 130 : 115,
-      head: [headers],
+      head: [['Area Type', 'Closed Within', 'Closed Beyond', 'Total']],
       body: atBody,
       theme: 'grid',
       styles: { fontSize: 14, cellPadding: 10, halign: 'center', minCellHeight: 24 },
@@ -1380,7 +1390,7 @@ export default function Home() {
       tableWidth: 'auto',
       didDrawPage: (data: any) => {
         if (data.pageNumber > 1) {
-          addHeader('Area Type Breakdown (Division-wise)');
+          addHeader('Area Type Breakdown with Closed Status');
         }
       },
       didParseCell: (data: any) => {
