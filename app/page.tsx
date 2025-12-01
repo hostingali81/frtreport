@@ -3518,27 +3518,35 @@ export default function Home() {
                         <div className="text-xs text-gray-600">Complaint Status wise Count</div>
                       </div>
                     </button>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-bold text-orange-700 uppercase tracking-wider mb-3 px-2 flex items-center gap-2">
+                    <span className="text-lg">📋</span> Closed Status & Area Type Reports
+                  </h3>
+                  <div className="space-y-2">
                     <button
                       onClick={() => { exportClosedStatusBreakdown(); setShowReportModal(false); }}
-                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-md rounded-lg transition-all text-left group"
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-orange-50 to-amber-50 border-2 border-orange-200 hover:border-orange-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <div className="bg-indigo-500 p-3 rounded-lg group-hover:bg-indigo-600 transition">
+                      <div className="bg-orange-500 p-3 rounded-lg group-hover:bg-orange-600 transition">
                         <FiFileText className="text-white text-xl" />
                       </div>
                       <div className="flex-1">
-                        <div className="font-semibold text-gray-800 group-hover:text-indigo-700 transition">Closed Status Breakdown</div>
+                        <div className="font-semibold text-gray-800 group-hover:text-orange-700 transition">Closed Status Breakdown</div>
                         <div className="text-xs text-gray-600">Closed Within vs Closed Beyond by Division</div>
                       </div>
                     </button>
                     <button
                       onClick={() => { exportAreaTypeBreakdown(); setShowReportModal(false); }}
-                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-md rounded-lg transition-all text-left group"
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-orange-50 to-amber-50 border-2 border-orange-200 hover:border-orange-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <div className="bg-indigo-500 p-3 rounded-lg group-hover:bg-indigo-600 transition">
+                      <div className="bg-orange-500 p-3 rounded-lg group-hover:bg-orange-600 transition">
                         <FiFileText className="text-white text-xl" />
                       </div>
                       <div className="flex-1">
-                        <div className="font-semibold text-gray-800 group-hover:text-indigo-700 transition">Area Type Breakdown</div>
+                        <div className="font-semibold text-gray-800 group-hover:text-orange-700 transition">Area Type Breakdown</div>
                         <div className="text-xs text-gray-600">Area Type wise Count by Division</div>
                       </div>
                     </button>
