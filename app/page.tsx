@@ -25,6 +25,7 @@ export default function Home() {
   const [selectedShift, setSelectedShift] = useState<string>(''); // e.g. "Today - Morning (07:00–15:00)"
   const [showReportModal, setShowReportModal] = useState(false);
   const [customDate, setCustomDate] = useState<string>('');
+  const [activePreset, setActivePreset] = useState<string>(''); // Track active preset
 
   const statusOptions = useMemo(() => {
     const set = new Set<string>();
@@ -234,6 +235,7 @@ export default function Home() {
   };
 
   const applyShiftPreset = (shift: 'today_morning' | 'today_day' | 'today_night' | 'yesterday_morning' | 'yesterday_day' | 'yesterday_night' | 'today_field_a' | 'today_field_b' | 'today_field_c' | 'yesterday_field_a' | 'yesterday_field_b' | 'yesterday_field_c') => {
+    setActivePreset(''); // Clear active preset when shift is selected
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
@@ -339,6 +341,7 @@ export default function Home() {
       alert('⚠️ Please select a date first!');
       return;
     }
+    setActivePreset(''); // Clear active preset
     const date = new Date(customDate);
     const labelMap: Record<string, string> = {
       morning: `${customDate} - Control Room Morning (07:00 AM–03:00 PM)`,
@@ -400,20 +403,25 @@ export default function Home() {
     if (type === 'fromNov2025ToNow') {
       setFromDT('2025-11-01T00:00');
       setToDT(formatDateTimeLocal(now));
+      setActivePreset('fromNov2025ToNow');
     } else if (type === 'today') {
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
       setFromDT(formatDateTimeLocal(start));
       setToDT(formatDateTimeLocal(now));
+      setActivePreset('today');
     } else if (type === 'last24h') {
       const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       setFromDT(formatDateTimeLocal(start));
       setToDT(formatDateTimeLocal(now));
+      setActivePreset('last24h');
     } else if (type === 'thisMonth') {
       const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
       setFromDT(formatDateTimeLocal(start));
       setToDT(formatDateTimeLocal(now));
+      setActivePreset('thisMonth');
     } else if (type === 'toNow') {
       setToDT(formatDateTimeLocal(now));
+      setActivePreset('toNow');
     }
   };
 
@@ -426,6 +434,7 @@ export default function Home() {
     setFromDT('');
     setToDT('');
     setSelectedShift('');
+    setActivePreset('');
   };
 
   // Auto-fill From/To with oldest and latest dates from loaded data
@@ -448,7 +457,7 @@ export default function Home() {
   }, []);
 
   const SkeletonBlock = ({ className = '' }: { className?: string }) => (
-    <div className={`animate-pulse bg-gray-200 rounded ${className}`} />
+    <div className={`animate-pulse bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 rounded ${className}`} style={{ backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite' }} />
   );
 
   const exportDivisionSummary = () => {
@@ -3924,44 +3933,51 @@ export default function Home() {
         )}
 
         {loading && (
-          <div className="space-y-4">
-            <div className="bg-white rounded-xl shadow-md p-4 md:p-5 border border-gray-100">
-              <div className="flex items-center gap-2 mb-3 text-gray-700"><FiFilter /> <span className="font-semibold">Filters</span></div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-                <SkeletonBlock className="h-9 lg:col-span-2" />
-                <SkeletonBlock className="h-9 lg:col-span-1" />
-                <SkeletonBlock className="h-9 lg:col-span-1" />
-                <SkeletonBlock className="h-9 lg:col-span-1" />
+          <div className="space-y-6">
+            <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg p-6 border border-gray-200">
+              <div className="flex items-center gap-3 mb-6">
+                <SkeletonBlock className="h-12 w-12 rounded-lg" />
+                <div className="flex-1">
+                  <SkeletonBlock className="h-6 w-48 mb-2" />
+                  <SkeletonBlock className="h-4 w-32" />
+                </div>
+                <SkeletonBlock className="h-10 w-28 rounded-xl" />
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <SkeletonBlock className="h-6 w-24" />
-                <SkeletonBlock className="h-6 w-20" />
-                <SkeletonBlock className="h-6 w-24" />
-                <SkeletonBlock className="h-6 w-28" />
-                <SkeletonBlock className="h-6 w-24" />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2 justify-end">
-                <SkeletonBlock className="h-9 w-28" />
-                <SkeletonBlock className="h-9 w-32" />
-                <SkeletonBlock className="h-9 w-32" />
-                <SkeletonBlock className="h-9 w-32" />
+              <div className="space-y-5">
+                <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-200">
+                  <SkeletonBlock className="h-5 w-32 mb-4" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                    <SkeletonBlock className="h-10 lg:col-span-2" />
+                    <SkeletonBlock className="h-10" />
+                    <SkeletonBlock className="h-10" />
+                    <SkeletonBlock className="h-10" />
+                  </div>
+                </div>
+                <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-200">
+                  <SkeletonBlock className="h-5 w-40 mb-4" />
+                  <div className="flex flex-wrap gap-2">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <SkeletonBlock key={i} className="h-8 w-24 rounded-lg" />
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
             <div className="bg-white rounded-xl shadow-md border border-gray-100">
-              <div className="p-4">
-                <div className="flex gap-2 mb-3">
-                  <SkeletonBlock className="h-6 w-40" />
-                  <SkeletonBlock className="h-6 w-20" />
+              <div className="p-6">
+                <div className="flex gap-3 mb-4">
+                  <SkeletonBlock className="h-7 w-48" />
+                  <SkeletonBlock className="h-7 w-24 rounded-full" />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="grid grid-cols-6 gap-2 items-center">
-                      <SkeletonBlock className="h-5 col-span-1" />
-                      <SkeletonBlock className="h-5 col-span-1" />
-                      <SkeletonBlock className="h-5 col-span-1" />
-                      <SkeletonBlock className="h-5 col-span-1" />
-                      <SkeletonBlock className="h-5 col-span-1" />
-                      <SkeletonBlock className="h-5 col-span-1" />
+                    <div key={i} className="grid grid-cols-6 gap-3 items-center">
+                      <SkeletonBlock className="h-6 col-span-1" />
+                      <SkeletonBlock className="h-6 col-span-1" />
+                      <SkeletonBlock className="h-6 col-span-1" />
+                      <SkeletonBlock className="h-6 col-span-1" />
+                      <SkeletonBlock className="h-6 col-span-1" />
+                      <SkeletonBlock className="h-6 col-span-1" />
                     </div>
                   ))}
                 </div>
@@ -3971,30 +3987,51 @@ export default function Home() {
         )}
 
         {original.length > 0 && !loading && (
-          <div className="bg-white rounded-xl shadow-md p-4 md:p-5 mb-6 border border-gray-100">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2 text-gray-700"><FiFilter /> <span className="font-semibold">Filters</span></div>
+          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg p-6 mb-6 border border-gray-200">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="bg-blue-500 p-2.5 rounded-lg">
+                  <FiFilter className="text-white text-xl" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xl font-bold text-gray-800">Filters & Presets</h2>
+                    {(search || statusFilter || divisionFilter || subDivisionFilter || subStationFilter || fromDT || toDT || selectedShift) && (
+                      <span className="bg-blue-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">
+                        {[search, statusFilter, divisionFilter, subDivisionFilter, subStationFilter, fromDT, toDT, selectedShift].filter(Boolean).length}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500">Refine your data view</p>
+                </div>
+              </div>
               <button
                 onClick={clearAllFilters}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white text-sm font-semibold py-2 px-4 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-105"
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
               >
-                <FiFilter className="text-base" /> Clear All
+                <FiFilter className="text-lg" /> <span>Clear All</span>
               </button>
             </div>
-            <div className="space-y-3">
-              <div className="text-xs font-semibold text-gray-600">Basic Filters</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="space-y-5">
+              <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-200">
+                <div className="flex items-center gap-2 mb-4">
+                  <FiSearch className="text-blue-500 text-lg" />
+                  <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Basic Filters</h3>
+                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 <div className="flex flex-col lg:col-span-2 min-w-0">
-                <label className="text-xs text-gray-500 mb-1">Search</label>
+                <label className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
+                  <FiSearch className="text-gray-400" /> Search
+                </label>
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search keywords"
-                  className="border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none w-full"
+                  placeholder="Search keywords..."
+                  className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none w-full transition-all"
                 />
                 </div>
                 <div className="flex flex-col min-w-0">
-                  <label className="text-xs text-gray-500 mb-1">Division</label>
+                  <label className="text-xs font-semibold text-gray-600 mb-2">Division</label>
                   <Select
                     value={divisionFilter ? { value: divisionFilter, label: divisionFilter } : null}
                     onChange={(option) => {
@@ -4011,7 +4048,7 @@ export default function Home() {
                   />
                 </div>
                 <div className="flex flex-col min-w-0">
-                  <label className="text-xs text-gray-500 mb-1">Sub Division</label>
+                  <label className="text-xs font-semibold text-gray-600 mb-2">Sub Division</label>
                   <Select
                     value={subDivisionFilter ? { value: subDivisionFilter, label: subDivisionFilter } : null}
                     onChange={(option) => {
@@ -4033,7 +4070,7 @@ export default function Home() {
                   />
                 </div>
                 <div className="flex flex-col min-w-0">
-                  <label className="text-xs text-gray-500 mb-1">Sub Station</label>
+                  <label className="text-xs font-semibold text-gray-600 mb-2">Sub Station</label>
                   <Select
                     value={subStationFilter ? { value: subStationFilter, label: subStationFilter } : null}
                     onChange={(option) => {
@@ -4058,9 +4095,9 @@ export default function Home() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mt-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-4">
                 <div className="flex flex-col min-w-0">
-                  <label className="text-xs text-gray-500 mb-1">Status</label>
+                  <label className="text-xs font-semibold text-gray-600 mb-2">Status</label>
                   <Select
                     value={statusFilter ? { value: statusFilter, label: statusFilter } : null}
                     onChange={(option) => setStatusFilter(option?.value || '')}
@@ -4075,131 +4112,190 @@ export default function Home() {
                   />
                 </div>
               </div>
-              <div className="border-t border-gray-100 pt-3">
-                <div className="text-xs font-semibold text-gray-600 mb-2">Date Range</div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+              <div className="border-t border-gray-200 pt-4 mt-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <FiClock className="text-blue-500 text-lg" />
+                  <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Date Range</h3>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
                   <div className="flex flex-col lg:col-span-1 min-w-0">
-                    <label className="text-xs text-gray-500 mb-1">From (Date & Time)</label>
+                    <label className="text-xs font-semibold text-gray-600 mb-2">From (Date & Time)</label>
                     <input
                       type="datetime-local"
                       value={fromDT}
                       onChange={(e) => setFromDT(e.target.value)}
-                      className="border rounded px-3 py-2 text-sm w-full focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
                     />
                   </div>
                   <div className="flex flex-col lg:col-span-1 min-w-0">
-                    <label className="text-xs text-gray-500 mb-1">To (Date & Time)</label>
+                    <label className="text-xs font-semibold text-gray-600 mb-2">To (Date & Time)</label>
                     <input
                       type="datetime-local"
                       value={toDT}
                       onChange={(e) => setToDT(e.target.value)}
-                      className="border rounded px-3 py-2 text-sm w-full focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
                     />
                   </div>
                 </div>
               </div>
-              <div className="border-t border-gray-100 pt-3">
-                <div className="text-xs font-semibold text-gray-600 mb-2">Presets</div>
+              </div>
+              <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-200">
+                <div className="flex items-center gap-2 mb-4">
+                  <FiClock className="text-purple-500 text-lg" />
+                  <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Quick Presets</h3>
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={() => applyPreset('fromNov2025ToNow')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Nov-2025 → Now</button>
-                  <button onClick={() => applyPreset('today')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Today</button>
-                  <button onClick={() => applyPreset('last24h')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Last 24h</button>
-                  <button onClick={() => applyPreset('thisMonth')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">This Month</button>
-                  <button onClick={() => applyPreset('toNow')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Set To = Now</button>
+                  <button onClick={() => { applyPreset('fromNov2025ToNow'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'fromNov2025ToNow' && !selectedShift ? 'bg-purple-600 text-white border-purple-700 shadow-lg' : 'bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-700 border-purple-200 hover:shadow-md'}`}>📅 Nov-2025 → Now</button>
+                  <button onClick={() => { applyPreset('today'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'today' && !selectedShift ? 'bg-purple-600 text-white border-purple-700 shadow-lg' : 'bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-700 border-purple-200 hover:shadow-md'}`}>📆 Today</button>
+                  <button onClick={() => { applyPreset('last24h'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'last24h' && !selectedShift ? 'bg-purple-600 text-white border-purple-700 shadow-lg' : 'bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-700 border-purple-200 hover:shadow-md'}`}>⏰ Last 24h</button>
+                  <button onClick={() => { applyPreset('thisMonth'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'thisMonth' && !selectedShift ? 'bg-purple-600 text-white border-purple-700 shadow-lg' : 'bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-700 border-purple-200 hover:shadow-md'}`}>📊 This Month</button>
+                  <button onClick={() => { applyPreset('toNow'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'toNow' && !selectedShift ? 'bg-purple-600 text-white border-purple-700 shadow-lg' : 'bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-700 border-purple-200 hover:shadow-md'}`}>⚡ Set To = Now</button>
                 </div>
               </div>
-              <div className="border-t border-gray-100 pt-3">
-                <div className="text-xs font-semibold text-gray-600 mb-2">Control Room Shifts</div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-gray-600 mr-1">Yesterday:</span>
-                  <button onClick={() => applyShiftPreset('yesterday_morning')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Morning (7AM–3PM)</button>
-                  <button onClick={() => applyShiftPreset('yesterday_day')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Day (3PM–11PM)</button>
-                  <button onClick={() => applyShiftPreset('yesterday_night')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Night (11PM–7AM)</button>
+              <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-200">
+                <div className="flex items-center gap-2 mb-5">
+                  <div className="bg-gradient-to-r from-blue-500 to-green-500 p-1.5 rounded-lg">
+                    <FiLayers className="text-white text-base" />
+                  </div>
+                  <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Shift Presets</h3>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 mt-2">
-                  <span className="text-xs text-gray-600 mr-1">Today:</span>
-                  <button onClick={() => applyShiftPreset('today_morning')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Morning (7AM–3PM)</button>
-                  <button onClick={() => applyShiftPreset('today_day')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Day (3PM–11PM)</button>
-                  <button onClick={() => applyShiftPreset('today_night')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Night (11PM–7AM)</button>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Control Room Shifts - Left Column */}
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="bg-blue-500 w-3 h-3 rounded-full"></div>
+                      <h4 className="text-sm font-bold text-blue-700">Control Room Shifts</h4>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-gray-500 mb-2">🔙 Yesterday</div>
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={() => applyShiftPreset('yesterday_morning')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Control Room Morning') ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-200'}`}>🌅 Morning (7AM–3PM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_day')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Control Room Day') ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-200'}`}>☀️ Day (3PM–11PM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_night')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Control Room Night') ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-200'}`}>🌙 Night (11PM–7AM)</button>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-gray-500 mb-2">📅 Today</div>
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={() => applyShiftPreset('today_morning')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Control Room Morning') ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-200'}`}>🌅 Morning (7AM–3PM)</button>
+                        <button onClick={() => applyShiftPreset('today_day')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Control Room Day') ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-200'}`}>☀️ Day (3PM–11PM)</button>
+                        <button onClick={() => applyShiftPreset('today_night')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Control Room Night') ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-200'}`}>🌙 Night (11PM–7AM)</button>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Field Shifts - Right Column */}
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="bg-green-500 w-3 h-3 rounded-full"></div>
+                      <h4 className="text-sm font-bold text-green-700">Field Shifts</h4>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-gray-500 mb-2">🔙 Yesterday</div>
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={() => applyShiftPreset('yesterday_field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift A') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}>🅰️ Shift A (8AM–4PM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift B') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}>🅱️ Shift B (4PM–12AM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift C') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}>Ⓒ Shift C (12AM–8AM)</button>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-gray-500 mb-2">📅 Today</div>
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={() => applyShiftPreset('today_field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift A') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}>🅰️ Shift A (8AM–4PM)</button>
+                        <button onClick={() => applyShiftPreset('today_field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift B') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}>🅱️ Shift B (4PM–12AM)</button>
+                        <button onClick={() => applyShiftPreset('today_field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift C') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}>Ⓒ Shift C (12AM–8AM)</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="border-t border-gray-100 pt-3 mt-3">
-                <div className="text-xs font-semibold text-gray-600 mb-2">Field Shifts</div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-gray-600 mr-1">Yesterday:</span>
-                  <button onClick={() => applyShiftPreset('yesterday_field_a')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift A (8AM–4PM)</button>
-                  <button onClick={() => applyShiftPreset('yesterday_field_b')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift B (4PM–12AM)</button>
-                  <button onClick={() => applyShiftPreset('yesterday_field_c')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift C (12AM–8AM)</button>
+              <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-5 shadow-sm border-2 border-orange-200">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="bg-orange-500 p-1.5 rounded-lg">
+                    <FiClock className="text-white text-base" />
+                  </div>
+                  <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Custom Date Shift Selector</h3>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 mt-2">
-                  <span className="text-xs text-gray-600 mr-1">Today:</span>
-                  <button onClick={() => applyShiftPreset('today_field_a')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift A (8AM–4PM)</button>
-                  <button onClick={() => applyShiftPreset('today_field_b')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift B (4PM–12AM)</button>
-                  <button onClick={() => applyShiftPreset('today_field_c')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift C (12AM–8AM)</button>
-                </div>
-              </div>
-              <div className="border-t border-gray-100 pt-3 mt-3">
-                <div className="text-xs font-semibold text-gray-600 mb-2">Custom Date Shift Selector</div>
-                <div className="flex flex-col gap-3">
+                <div className="space-y-4">
                   <div className="flex flex-col">
-                    <label className="text-xs text-gray-500 mb-1">Select Date</label>
+                    <label className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
+                      📅 Select Date
+                    </label>
                     <input
                       type="date"
                       value={customDate}
                       onChange={(e) => setCustomDate(e.target.value)}
-                      className="border rounded px-3 py-2 text-sm w-full max-w-xs focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                      className="border-2 border-orange-200 rounded-lg px-4 py-2.5 text-sm w-full max-w-xs focus:ring-2 focus:ring-orange-500 focus:border-orange-500 focus:outline-none bg-white transition-all"
                     />
                   </div>
                   <div>
-                    <div className="text-xs text-gray-500 mb-1">Control Room:</div>
+                    <div className="text-xs font-semibold text-blue-600 mb-2 flex items-center gap-1">
+                      <div className="bg-blue-500 w-2 h-2 rounded-full"></div> Control Room Shifts
+                    </div>
                     <div className="flex flex-wrap gap-2">
-                      <button onClick={() => applyCustomDateShift('morning')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Morning (7AM–3PM)</button>
-                      <button onClick={() => applyCustomDateShift('day')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Day (3PM–11PM)</button>
-                      <button onClick={() => applyCustomDateShift('night')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Night (11PM–7AM)</button>
+                      <button onClick={() => applyCustomDateShift('morning')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Control Room Morning') && selectedShift.includes(customDate) ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-300'}`}>🌅 Morning (7AM–3PM)</button>
+                      <button onClick={() => applyCustomDateShift('day')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Control Room Day') && selectedShift.includes(customDate) ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-300'}`}>☀️ Day (3PM–11PM)</button>
+                      <button onClick={() => applyCustomDateShift('night')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Control Room Night') && selectedShift.includes(customDate) ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-300'}`}>🌙 Night (11PM–7AM)</button>
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-gray-500 mb-1">Field:</div>
+                    <div className="text-xs font-semibold text-green-600 mb-2 flex items-center gap-1">
+                      <div className="bg-green-500 w-2 h-2 rounded-full"></div> Field Shifts
+                    </div>
                     <div className="flex flex-wrap gap-2">
-                      <button onClick={() => applyCustomDateShift('field_a')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift A (8AM–4PM)</button>
-                      <button onClick={() => applyCustomDateShift('field_b')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift B (4PM–12AM)</button>
-                      <button onClick={() => applyCustomDateShift('field_c')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift C (12AM–8AM)</button>
+                      <button onClick={() => applyCustomDateShift('field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Field Shift A') && selectedShift.includes(customDate) ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-white hover:bg-green-50 text-green-700 border-green-200 hover:border-green-300'}`}>🅰️ Shift A (8AM–4PM)</button>
+                      <button onClick={() => applyCustomDateShift('field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Field Shift B') && selectedShift.includes(customDate) ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-white hover:bg-green-50 text-green-700 border-green-200 hover:border-green-300'}`}>🅱️ Shift B (4PM–12AM)</button>
+                      <button onClick={() => applyCustomDateShift('field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Field Shift C') && selectedShift.includes(customDate) ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-white hover:bg-green-50 text-green-700 border-green-200 hover:border-green-300'}`}>Ⓒ Shift C (12AM–8AM)</button>
                     </div>
                   </div>
                 </div>
               </div>
               {selectedShift && (
-                <div className="text-xs text-gray-600 mt-3 pt-3 border-t border-gray-100">Selected Shift: <span className="font-semibold text-gray-800">{selectedShift}</span></div>
+                <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-4 border-2 border-indigo-200">
+                  <div className="flex items-center gap-2">
+                    <div className="bg-indigo-500 p-1.5 rounded-lg">
+                      <FiClock className="text-white text-sm" />
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500 font-medium">Active Shift</div>
+                      <div className="text-sm font-bold text-indigo-700">{selectedShift}</div>
+                    </div>
+                  </div>
+                </div>
               )}
-              {/* Export buttons moved to separate action row below */}
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-3 mt-4">
+
+            <div className="flex flex-wrap items-center justify-between gap-3 mt-6 pt-5 border-t-2 border-gray-200">
+              <div className="flex items-center gap-2 text-sm">
+                <FiBarChart2 className="text-blue-500 text-lg" />
+                <span className="font-semibold text-gray-700">Showing {filtered.length} of {original.length} complaints</span>
+              </div>
+              <div className="flex flex-wrap gap-3">
               <button
                 onClick={exportSummaryPDF}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-semibold py-2.5 px-5 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-105"
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
               >
-                <FiBarChart2 className="text-lg" /> Summary PDF
+                <FiBarChart2 className="text-xl" /> <span>Summary PDF</span>
               </button>
               <button
                 onClick={exportTrendChartsPDF}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-semibold py-2.5 px-5 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-105"
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
               >
-                <FiTrendingUp className="text-lg" /> Trend Charts
+                <FiTrendingUp className="text-xl" /> <span>Trend Charts</span>
               </button>
               <button
                 onClick={() => setShowReportModal(true)}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white font-semibold py-2.5 px-5 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-105"
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
               >
-                <FiLayers className="text-lg" /> Detailed Reports
+                <FiLayers className="text-xl" /> <span>Detailed Reports</span>
               </button>
               <button
                 onClick={exportExcel}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white font-semibold py-2.5 px-5 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-105"
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
               >
-                <FiDownload className="text-lg" /> Excel (.xlsx)
+                <FiDownload className="text-xl" /> <span>Excel (.xlsx)</span>
               </button>
+              </div>
             </div>
-            <div className="text-sm text-gray-500 mt-2">Showing {filtered.length} of {original.length} rows</div>
           </div>
         )}
 
@@ -4211,9 +4307,9 @@ export default function Home() {
 
         {filtered.length > 0 && (
           <div className="bg-white rounded-xl shadow-md border border-gray-100">
-            <div className="overflow-x-auto max-h-[70vh]">
+            <div className="overflow-x-auto max-h-[70vh] relative">
               <table className="min-w-full divide-y divide-gray-200 text-xs md:text-sm">
-              <thead className="bg-gray-100 sticky top-0 z-10">
+              <thead className="bg-gradient-to-r from-gray-100 to-gray-50 sticky top-0 z-10 shadow-sm">
                 <tr>
                   {(() => {
                     const base = Object.keys(filtered[0]);
