@@ -24,6 +24,7 @@ export default function Home() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [selectedShift, setSelectedShift] = useState<string>(''); // e.g. "Today - Morning (07:00–15:00)"
   const [showReportModal, setShowReportModal] = useState(false);
+  const [customDate, setCustomDate] = useState<string>('');
 
   const statusOptions = useMemo(() => {
     const set = new Set<string>();
@@ -232,17 +233,23 @@ export default function Home() {
     return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
   };
 
-  const applyShiftPreset = (shift: 'today_morning' | 'today_day' | 'today_night' | 'yesterday_morning' | 'yesterday_day' | 'yesterday_night') => {
+  const applyShiftPreset = (shift: 'today_morning' | 'today_day' | 'today_night' | 'yesterday_morning' | 'yesterday_day' | 'yesterday_night' | 'today_field_a' | 'today_field_b' | 'today_field_c' | 'yesterday_field_a' | 'yesterday_field_b' | 'yesterday_field_c') => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
     const labelMap: Record<string, string> = {
-      today_morning: 'Today - Morning (07:00–15:00)',
-      today_day: 'Today - Day (15:00–23:00)',
-      today_night: 'Today - Night (23:00–07:00)',
-      yesterday_morning: 'Yesterday - Morning (07:00–15:00)',
-      yesterday_day: 'Yesterday - Day (15:00–23:00)',
-      yesterday_night: 'Yesterday - Night (23:00–07:00)',
+      today_morning: 'Today - Control Room Morning (07:00 AM–03:00 PM)',
+      today_day: 'Today - Control Room Day (03:00 PM–11:00 PM)',
+      today_night: 'Today - Control Room Night (11:00 PM–07:00 AM)',
+      yesterday_morning: 'Yesterday - Control Room Morning (07:00 AM–03:00 PM)',
+      yesterday_day: 'Yesterday - Control Room Day (03:00 PM–11:00 PM)',
+      yesterday_night: 'Yesterday - Control Room Night (11:00 PM–07:00 AM)',
+      today_field_a: 'Today - Field Shift A (08:00 AM–04:00 PM)',
+      today_field_b: 'Today - Field Shift B (04:00 PM–12:00 AM)',
+      today_field_c: 'Today - Field Shift C (12:00 AM–08:00 AM)',
+      yesterday_field_a: 'Yesterday - Field Shift A (08:00 AM–04:00 PM)',
+      yesterday_field_b: 'Yesterday - Field Shift B (04:00 PM–12:00 AM)',
+      yesterday_field_c: 'Yesterday - Field Shift C (12:00 AM–08:00 AM)',
     };
     const setRange = (start: Date, end: Date) => {
       setFromDT(formatDateTimeLocal(start));
@@ -286,8 +293,106 @@ export default function Home() {
         setRange(start, end);
         break;
       }
+      case 'today_field_a': {
+        const start = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 8, 0, 0);
+        const end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 16, 0, 0);
+        setRange(start, end);
+        break;
+      }
+      case 'today_field_b': {
+        const start = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 16, 0, 0);
+        const end = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+        end.setHours(0, 0, 0, 0);
+        setRange(start, end);
+        break;
+      }
+      case 'today_field_c': {
+        const start = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
+        const end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 8, 0, 0);
+        setRange(start, end);
+        break;
+      }
+      case 'yesterday_field_a': {
+        const start = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 8, 0, 0);
+        const end = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 16, 0, 0);
+        setRange(start, end);
+        break;
+      }
+      case 'yesterday_field_b': {
+        const start = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 16, 0, 0);
+        const end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
+        setRange(start, end);
+        break;
+      }
+      case 'yesterday_field_c': {
+        const start = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0);
+        const end = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 8, 0, 0);
+        setRange(start, end);
+        break;
+      }
     }
     setSelectedShift(labelMap[shift]);
+  };
+
+  const applyCustomDateShift = (shiftType: 'morning' | 'day' | 'night' | 'field_a' | 'field_b' | 'field_c') => {
+    if (!customDate) {
+      alert('⚠️ Please select a date first!');
+      return;
+    }
+    const date = new Date(customDate);
+    const labelMap: Record<string, string> = {
+      morning: `${customDate} - Control Room Morning (07:00 AM–03:00 PM)`,
+      day: `${customDate} - Control Room Day (03:00 PM–11:00 PM)`,
+      night: `${customDate} - Control Room Night (11:00 PM–07:00 AM)`,
+      field_a: `${customDate} - Field Shift A (08:00 AM–04:00 PM)`,
+      field_b: `${customDate} - Field Shift B (04:00 PM–12:00 AM)`,
+      field_c: `${customDate} - Field Shift C (12:00 AM–08:00 AM)`,
+    };
+    const setRange = (start: Date, end: Date) => {
+      setFromDT(formatDateTimeLocal(start));
+      setToDT(formatDateTimeLocal(end));
+    };
+    switch (shiftType) {
+      case 'morning': {
+        const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 7, 0, 0);
+        const end = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 15, 0, 0);
+        setRange(start, end);
+        break;
+      }
+      case 'day': {
+        const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 15, 0, 0);
+        const end = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 0, 0);
+        setRange(start, end);
+        break;
+      }
+      case 'night': {
+        const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 0, 0);
+        const nextDay = new Date(date.getTime() + 24 * 60 * 60 * 1000);
+        nextDay.setHours(7, 0, 0, 0);
+        setRange(start, nextDay);
+        break;
+      }
+      case 'field_a': {
+        const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 8, 0, 0);
+        const end = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 16, 0, 0);
+        setRange(start, end);
+        break;
+      }
+      case 'field_b': {
+        const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 16, 0, 0);
+        const nextDay = new Date(date.getTime() + 24 * 60 * 60 * 1000);
+        nextDay.setHours(0, 0, 0, 0);
+        setRange(start, nextDay);
+        break;
+      }
+      case 'field_c': {
+        const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0);
+        const end = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 8, 0, 0);
+        setRange(start, end);
+        break;
+      }
+    }
+    setSelectedShift(labelMap[shiftType]);
   };
 
   const applyPreset = (type: 'fromNov2025ToNow' | 'today' | 'last24h' | 'thisMonth' | 'toNow') => {
@@ -4004,23 +4109,68 @@ export default function Home() {
                 </div>
               </div>
               <div className="border-t border-gray-100 pt-3">
-                <div className="text-xs font-semibold text-gray-600 mb-2">Shift Presets</div>
+                <div className="text-xs font-semibold text-gray-600 mb-2">Control Room Shifts</div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs text-gray-600 mr-1">Yesterday:</span>
-                  <button onClick={() => applyShiftPreset('yesterday_morning')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Morning (07–15)</button>
-                  <button onClick={() => applyShiftPreset('yesterday_day')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Day (15–23)</button>
-                  <button onClick={() => applyShiftPreset('yesterday_night')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Night (23–07)</button>
+                  <button onClick={() => applyShiftPreset('yesterday_morning')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Morning (7AM–3PM)</button>
+                  <button onClick={() => applyShiftPreset('yesterday_day')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Day (3PM–11PM)</button>
+                  <button onClick={() => applyShiftPreset('yesterday_night')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Night (11PM–7AM)</button>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mt-2">
                   <span className="text-xs text-gray-600 mr-1">Today:</span>
-                  <button onClick={() => applyShiftPreset('today_morning')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Morning (07–15)</button>
-                  <button onClick={() => applyShiftPreset('today_day')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Day (15–23)</button>
-                  <button onClick={() => applyShiftPreset('today_night')} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">Night (23–07)</button>
+                  <button onClick={() => applyShiftPreset('today_morning')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Morning (7AM–3PM)</button>
+                  <button onClick={() => applyShiftPreset('today_day')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Day (3PM–11PM)</button>
+                  <button onClick={() => applyShiftPreset('today_night')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Night (11PM–7AM)</button>
                 </div>
-                {selectedShift && (
-                  <div className="text-xs text-gray-600 mt-2">Selected Shift: <span className="font-semibold text-gray-800">{selectedShift}</span></div>
-                )}
               </div>
+              <div className="border-t border-gray-100 pt-3 mt-3">
+                <div className="text-xs font-semibold text-gray-600 mb-2">Field Shifts</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-gray-600 mr-1">Yesterday:</span>
+                  <button onClick={() => applyShiftPreset('yesterday_field_a')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift A (8AM–4PM)</button>
+                  <button onClick={() => applyShiftPreset('yesterday_field_b')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift B (4PM–12AM)</button>
+                  <button onClick={() => applyShiftPreset('yesterday_field_c')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift C (12AM–8AM)</button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 mt-2">
+                  <span className="text-xs text-gray-600 mr-1">Today:</span>
+                  <button onClick={() => applyShiftPreset('today_field_a')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift A (8AM–4PM)</button>
+                  <button onClick={() => applyShiftPreset('today_field_b')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift B (4PM–12AM)</button>
+                  <button onClick={() => applyShiftPreset('today_field_c')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift C (12AM–8AM)</button>
+                </div>
+              </div>
+              <div className="border-t border-gray-100 pt-3 mt-3">
+                <div className="text-xs font-semibold text-gray-600 mb-2">Custom Date Shift Selector</div>
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col">
+                    <label className="text-xs text-gray-500 mb-1">Select Date</label>
+                    <input
+                      type="date"
+                      value={customDate}
+                      onChange={(e) => setCustomDate(e.target.value)}
+                      className="border rounded px-3 py-2 text-sm w-full max-w-xs focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 mb-1">Control Room:</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => applyCustomDateShift('morning')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Morning (7AM–3PM)</button>
+                      <button onClick={() => applyCustomDateShift('day')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Day (3PM–11PM)</button>
+                      <button onClick={() => applyCustomDateShift('night')} className="text-xs bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded">Night (11PM–7AM)</button>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 mb-1">Field:</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => applyCustomDateShift('field_a')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift A (8AM–4PM)</button>
+                      <button onClick={() => applyCustomDateShift('field_b')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift B (4PM–12AM)</button>
+                      <button onClick={() => applyCustomDateShift('field_c')} className="text-xs bg-green-100 hover:bg-green-200 px-2 py-1 rounded">Shift C (12AM–8AM)</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {selectedShift && (
+                <div className="text-xs text-gray-600 mt-3 pt-3 border-t border-gray-100">Selected Shift: <span className="font-semibold text-gray-800">{selectedShift}</span></div>
+              )}
               {/* Export buttons moved to separate action row below */}
             </div>
             <div className="flex flex-wrap items-center justify-end gap-3 mt-4">
