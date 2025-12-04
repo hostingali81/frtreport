@@ -6,8 +6,10 @@ import autoTable from 'jspdf-autotable';
 import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers } from 'react-icons/fi';
 import Image from 'next/image';
 import Select from 'react-select';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
+  const router = useRouter();
   const [original, setOriginal] = useState<any[]>([]);
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -4277,10 +4279,16 @@ export default function Home() {
                 <FiBarChart2 className="text-xl" /> <span>Summary PDF</span>
               </button>
               <button
-                onClick={exportTrendChartsPDF}
+                onClick={() => router.push('/charts')}
                 className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
               >
-                <FiTrendingUp className="text-xl" /> <span>Trend Charts</span>
+                <FiBarChart2 className="text-xl" /> <span>View Charts</span>
+              </button>
+              <button
+                onClick={exportTrendChartsPDF}
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
+              >
+                <FiTrendingUp className="text-xl" /> <span>Charts PDF</span>
               </button>
               <button
                 onClick={() => setShowReportModal(true)}
