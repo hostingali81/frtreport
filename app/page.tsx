@@ -9,6 +9,12 @@ import Select from 'react-select';
 import { useRouter } from 'next/navigation';
 
 export default function Home() {
+  const ShiftBadge = ({ letter }: { letter: string }) => (
+    <span className="inline-flex items-center justify-center w-5 h-5 bg-gradient-to-br from-rose-500 to-red-600 text-white text-xs font-bold rounded-md mr-2 shadow-sm border border-rose-400/50">
+      {letter}
+    </span>
+  );
+
   const router = useRouter();
   const [original, setOriginal] = useState<any[]>([]);
   const [data, setData] = useState<any[]>([]);
@@ -93,13 +99,13 @@ export default function Home() {
       setOriginal([]);
       setData([]);
     }
-    
+
     try {
       const response = await fetch(`/api/scrape${refresh ? '?refresh=1' : ''}`);
       const result = await response.json();
-      
+
       console.log('API Response:', result);
-      
+
       if (result.success) {
         if (result.data && result.data.length > 0) {
           setOriginal(result.data);
@@ -196,7 +202,7 @@ export default function Home() {
     if (sortColumn) {
       rows = [...rows].sort((a, b) => {
         let aVal: any, bVal: any;
-        
+
         if (sortColumn === 'Resolution Time') {
           const aTime = computeResolutionTime(a);
           const bTime = computeResolutionTime(b);
@@ -204,22 +210,22 @@ export default function Home() {
           const bMs = bTime ? (parseInt(bTime) || 0) * (bTime.includes('d') ? 1440 : bTime.includes('h') ? 60 : 1) : 0;
           return sortDirection === 'asc' ? aMs - bMs : bMs - aMs;
         }
-        
+
         aVal = String(a[sortColumn] ?? '');
         bVal = String(b[sortColumn] ?? '');
-        
+
         const aNum = parseFloat(aVal);
         const bNum = parseFloat(bVal);
         if (!isNaN(aNum) && !isNaN(bNum)) {
           return sortDirection === 'asc' ? aNum - bNum : bNum - aNum;
         }
-        
+
         const aDate = parsePossibleDate(aVal);
         const bDate = parsePossibleDate(bVal);
         if (aDate && bDate) {
           return sortDirection === 'asc' ? aDate.getTime() - bDate.getTime() : bDate.getTime() - aDate.getTime();
         }
-        
+
         return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
       });
     }
@@ -480,7 +486,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -548,7 +554,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -622,7 +628,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -738,7 +744,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -812,7 +818,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -893,7 +899,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -975,7 +981,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -1068,7 +1074,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -1162,7 +1168,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -1249,7 +1255,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -1341,7 +1347,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -1434,7 +1440,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -1463,7 +1469,7 @@ export default function Home() {
       else if (closedStatus === 'Closed Beyond') entry.beyond += 1;
       atMap.set(areaType, entry);
     }
-    
+
     const atRows = Array.from(atMap.entries())
       .map(([area, stats]) => ({
         area,
@@ -1472,14 +1478,14 @@ export default function Home() {
         total: stats.within + stats.beyond
       }))
       .sort((a, b) => b.total - a.total);
-    
+
     const atGrand = rows.reduce((acc, r) => {
       const closedStatus = String(r['Closed Status'] ?? '').trim();
       if (closedStatus === 'Closed Within') acc.within += 1;
       else if (closedStatus === 'Closed Beyond') acc.beyond += 1;
       return acc;
     }, { within: 0, beyond: 0 });
-    
+
     const atBody = atRows.map(r => [
       r.area,
       String(r.within),
@@ -1492,7 +1498,7 @@ export default function Home() {
       String(atGrand.beyond),
       String(atGrand.within + atGrand.beyond)
     ]);
-    
+
     autoTable(doc, {
       startY: selectedShift ? 130 : 115,
       head: [['Area Type', 'Closed Within', 'Closed Beyond', 'Total']],
@@ -1538,7 +1544,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -1611,7 +1617,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -1718,7 +1724,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -1828,7 +1834,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -1930,7 +1936,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     // Common header function
     const addHeader = (title: string) => {
       doc.setFontSize(20);
@@ -2372,7 +2378,7 @@ export default function Home() {
       periodParts.push(`To: ${formatted}`);
     }
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
-    
+
     const addHeader = (title: string) => {
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
@@ -2562,7 +2568,7 @@ export default function Home() {
     const periodText = periodParts.length ? periodParts.join(' | ') : 'All Data';
 
     // Page 1: FRT Only Chart
-    
+
     if (frtClosed.length > 0) {
       const canvas2 = document.createElement('canvas');
       canvas2.width = 800;
@@ -2598,7 +2604,7 @@ export default function Home() {
         });
         await new Promise(resolve => setTimeout(resolve, 500));
         const chartImage2 = canvas2.toDataURL('image/png');
-        
+
         doc.setFontSize(20);
         doc.setFont('helvetica', 'bold');
         doc.text('FRT Closed Complaints Trend', 40, 40);
@@ -2616,7 +2622,7 @@ export default function Home() {
         }
         const startY1 = selectedShift ? 130 : 115;
         doc.addImage(chartImage2, 'PNG', 40, startY1, 760, 380);
-        
+
         chart2.destroy();
         canvas2.remove();
       }
@@ -2624,7 +2630,7 @@ export default function Home() {
 
     // Page 2: Control Room Only Chart
     doc.addPage();
-    
+
     if (controlRoomClosed.length > 0) {
 
       const canvas3 = document.createElement('canvas');
@@ -2661,7 +2667,7 @@ export default function Home() {
         });
         await new Promise(resolve => setTimeout(resolve, 500));
         const chartImage3 = canvas3.toDataURL('image/png');
-        
+
         doc.setFontSize(20);
         doc.setFont('helvetica', 'bold');
         doc.text('Control Room Closed Complaints Trend', 40, 40);
@@ -2679,7 +2685,7 @@ export default function Home() {
         }
         const startY2 = selectedShift ? 130 : 115;
         doc.addImage(chartImage3, 'PNG', 40, startY2, 760, 380);
-        
+
         chart3.destroy();
         canvas3.remove();
       }
@@ -2722,7 +2728,7 @@ export default function Home() {
       yPos4 += 15;
       doc.text(`Shift: ${selectedShift}`, 40, yPos4);
     }
-    
+
     const tableBody = sortedDates.map(date => [
       date,
       String(controlRoomMap.get(date) || 0),
@@ -2854,7 +2860,7 @@ export default function Home() {
     // Helper function to format date with time in 12-hour AM/PM format
     const formatDateTime = (dateStr: string) => {
       if (!dateStr) return '';
-      
+
       // Try multiple formats
       // Format 1: DD/MM/YYYY HH:MM (24-hour)
       let match = dateStr.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{1,2}):(\d{2})/i);
@@ -2862,20 +2868,20 @@ export default function Home() {
         const date = match[1];
         let hours = parseInt(match[2]);
         const minutes = match[3];
-        
+
         // Convert to 12-hour format
         const period = hours >= 12 ? 'PM' : 'AM';
         hours = hours % 12 || 12;
-        
+
         return `${date} ${hours}:${minutes} ${period}`;
       }
-      
+
       // Format 2: DD/MM/YYYY HH:MM AM/PM (already in 12-hour)
       match = dateStr.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{1,2}:\d{2})\s*(AM|PM)/i);
       if (match) {
         return `${match[1]} ${match[2]} ${match[3]}`;
       }
-      
+
       return dateStr;
     };
 
@@ -2959,11 +2965,11 @@ export default function Home() {
         return String((r as any)[h] ?? '');
       });
       const excelRow = wsData.addRow(rowVals);
-      
+
       // Make time bold in date columns
       const dateTimeColIndex = headers.indexOf('Complaint Date and Time') + 1;
       const closedDateColIndex = headers.indexOf('Closed Date') + 1;
-      
+
       if (dateTimeColIndex > 0) {
         const cell = excelRow.getCell(dateTimeColIndex);
         const val = String(cell.value || '');
@@ -2979,7 +2985,7 @@ export default function Home() {
           };
         }
       }
-      
+
       if (closedDateColIndex > 0) {
         const cell = excelRow.getCell(closedDateColIndex);
         const val = String(cell.value || '');
@@ -2995,7 +3001,7 @@ export default function Home() {
           };
         }
       }
-      
+
       // Color-code Status cell
       if (statusColIndex > 0) {
         const statusCell = excelRow.getCell(statusColIndex);
@@ -3172,7 +3178,7 @@ export default function Home() {
     // Sheet 5: Division Breakdown (Control Room vs FRT)
     const wsDivBreakdown = wb.addWorksheet('6. Division Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
     addTitle(wsDivBreakdown, 'Division-wise Closed Complaints (Control Room vs FRT)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
-    
+
     // Calculate division-wise breakdown
     const divBreakdownMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
     for (const r of rows) {
@@ -3180,7 +3186,7 @@ export default function Home() {
       const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
       const isClosed = isClosedRow(r);
       const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-      
+
       const entry = divBreakdownMap.get(division) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
       entry.total += 1;
       if (isClosed) {
@@ -3193,23 +3199,23 @@ export default function Home() {
       }
       divBreakdownMap.set(division, entry);
     }
-    
+
     // Calculate pending
     for (const [k, v] of divBreakdownMap) {
       v.pending = Math.max(0, v.total - v.closed);
       divBreakdownMap.set(k, v);
     }
-    
+
     const divBreakdownRows = Array.from(divBreakdownMap.entries())
       .map(([div, stats]) => ({ division: div, ...stats }))
       .sort((a, b) => b.total - a.total);
-    
+
     // Calculate grand totals
     const grandBreakdown = rows.reduce((acc, r) => {
       const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
       const isClosed = isClosedRow(r);
       const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-      
+
       acc.total += 1;
       if (isClosed) {
         acc.closed += 1;
@@ -3222,19 +3228,19 @@ export default function Home() {
       return acc;
     }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
     grandBreakdown.pending = Math.max(0, grandBreakdown.total - grandBreakdown.closed);
-    
+
     wsDivBreakdown.addRow(['Division', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']);
     styleHeaderRow(wsDivBreakdown, 3);
     divBreakdownRows.forEach(r => wsDivBreakdown.addRow([r.division, r.total, r.closed, r.controlRoom, r.frt, r.pending]));
     wsDivBreakdown.addRow(['Grand Total', grandBreakdown.total, grandBreakdown.closed, grandBreakdown.controlRoom, grandBreakdown.frt, grandBreakdown.pending]);
-    
+
     wsDivBreakdown.getColumn(1).width = 36;
     wsDivBreakdown.getColumn(2).width = 14;
     wsDivBreakdown.getColumn(3).width = 14;
     wsDivBreakdown.getColumn(4).width = 18;
     wsDivBreakdown.getColumn(5).width = 14;
     wsDivBreakdown.getColumn(6).width = 14;
-    
+
     const divBreakEnd = wsDivBreakdown.lastRow.number;
     for (let r = 3; r <= divBreakEnd; r++) {
       wsDivBreakdown.getRow(r).eachCell((cell: any) => {
@@ -3251,7 +3257,7 @@ export default function Home() {
     // Sheet 6: Detailed Breakdown (Division + Sub Division + Sub Station)
     const wsDetailedBreakdown = wb.addWorksheet('7. Detailed Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
     addTitle(wsDetailedBreakdown, 'Detailed Closed Breakdown (Division → Sub Division → Sub Station)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
-    
+
     // Calculate detailed breakdown
     const detailedMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
     for (const r of rows) {
@@ -3259,11 +3265,11 @@ export default function Home() {
       const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
       const subStation = String(r['Sub Station'] ?? '').trim() || 'Unknown';
       const key = `${division}|${subDivision}|${subStation}`;
-      
+
       const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
       const isClosed = isClosedRow(r);
       const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-      
+
       const entry = detailedMap.get(key) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
       entry.total += 1;
       if (isClosed) {
@@ -3276,13 +3282,13 @@ export default function Home() {
       }
       detailedMap.set(key, entry);
     }
-    
+
     // Calculate pending
     for (const [k, v] of detailedMap) {
       v.pending = Math.max(0, v.total - v.closed);
       detailedMap.set(k, v);
     }
-    
+
     const detailedRows = Array.from(detailedMap.entries())
       .map(([key, stats]) => {
         const [division, subDivision, subStation] = key.split('|');
@@ -3293,13 +3299,13 @@ export default function Home() {
         if (a.subDivision !== b.subDivision) return a.subDivision.localeCompare(b.subDivision);
         return a.subStation.localeCompare(b.subStation);
       });
-    
+
     // Calculate grand totals
     const grandDetailed = rows.reduce((acc, r) => {
       const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
       const isClosed = isClosedRow(r);
       const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-      
+
       acc.total += 1;
       if (isClosed) {
         acc.closed += 1;
@@ -3312,12 +3318,12 @@ export default function Home() {
       return acc;
     }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
     grandDetailed.pending = Math.max(0, grandDetailed.total - grandDetailed.closed);
-    
+
     wsDetailedBreakdown.addRow(['Division', 'Sub Division', 'Sub Station', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']);
     styleHeaderRow(wsDetailedBreakdown, 3);
     detailedRows.forEach(r => wsDetailedBreakdown.addRow([r.division, r.subDivision, r.subStation, r.total, r.closed, r.controlRoom, r.frt, r.pending]));
     wsDetailedBreakdown.addRow(['Grand Total', '', '', grandDetailed.total, grandDetailed.closed, grandDetailed.controlRoom, grandDetailed.frt, grandDetailed.pending]);
-    
+
     wsDetailedBreakdown.getColumn(1).width = 24;
     wsDetailedBreakdown.getColumn(2).width = 24;
     wsDetailedBreakdown.getColumn(3).width = 28;
@@ -3326,7 +3332,7 @@ export default function Home() {
     wsDetailedBreakdown.getColumn(6).width = 16;
     wsDetailedBreakdown.getColumn(7).width = 12;
     wsDetailedBreakdown.getColumn(8).width = 12;
-    
+
     const detailedEnd = wsDetailedBreakdown.lastRow.number;
     for (let r = 3; r <= detailedEnd; r++) {
       wsDetailedBreakdown.getRow(r).eachCell((cell: any) => {
@@ -3343,18 +3349,18 @@ export default function Home() {
     // Sheet 7: Date-wise Breakdown (Control Room vs FRT)
     const wsDateBreakdown = wb.addWorksheet('8. Date-wise Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
     addTitle(wsDateBreakdown, 'Date-wise Closed Complaints (Control Room vs FRT)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
-    
+
     // Calculate date-wise breakdown
     const dateBreakdownMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
     for (const r of rows) {
       const s = String(r['Complaint Date and Time'] || '');
       const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
       const date = m ? m[1] : 'Unknown';
-      
+
       const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
       const isClosed = isClosedRow(r);
       const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-      
+
       const entry = dateBreakdownMap.get(date) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
       entry.total += 1;
       if (isClosed) {
@@ -3367,13 +3373,13 @@ export default function Home() {
       }
       dateBreakdownMap.set(date, entry);
     }
-    
+
     // Calculate pending
     for (const [k, v] of dateBreakdownMap) {
       v.pending = Math.max(0, v.total - v.closed);
       dateBreakdownMap.set(k, v);
     }
-    
+
     const dateBreakdownRows = Array.from(dateBreakdownMap.entries())
       .map(([date, stats]) => ({ date, ...stats }))
       .sort((a, b) => {
@@ -3383,13 +3389,13 @@ export default function Home() {
         const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
         return da.getTime() - db.getTime();
       });
-    
+
     // Calculate grand totals
     const grandDateBreakdown = rows.reduce((acc, r) => {
       const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
       const isClosed = isClosedRow(r);
       const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-      
+
       acc.total += 1;
       if (isClosed) {
         acc.closed += 1;
@@ -3402,19 +3408,19 @@ export default function Home() {
       return acc;
     }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
     grandDateBreakdown.pending = Math.max(0, grandDateBreakdown.total - grandDateBreakdown.closed);
-    
+
     wsDateBreakdown.addRow(['Date', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']);
     styleHeaderRow(wsDateBreakdown, 3);
     dateBreakdownRows.forEach(r => wsDateBreakdown.addRow([r.date, r.total, r.closed, r.controlRoom, r.frt, r.pending]));
     wsDateBreakdown.addRow(['Grand Total', grandDateBreakdown.total, grandDateBreakdown.closed, grandDateBreakdown.controlRoom, grandDateBreakdown.frt, grandDateBreakdown.pending]);
-    
+
     wsDateBreakdown.getColumn(1).width = 20;
     wsDateBreakdown.getColumn(2).width = 14;
     wsDateBreakdown.getColumn(3).width = 14;
     wsDateBreakdown.getColumn(4).width = 18;
     wsDateBreakdown.getColumn(5).width = 14;
     wsDateBreakdown.getColumn(6).width = 14;
-    
+
     const dateBreakEnd = wsDateBreakdown.lastRow.number;
     for (let r = 3; r <= dateBreakEnd; r++) {
       wsDateBreakdown.getRow(r).eachCell((cell: any) => {
@@ -4020,126 +4026,126 @@ export default function Home() {
                   <FiSearch className="text-blue-500 text-lg" />
                   <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Basic Filters</h3>
                 </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                <div className="flex flex-col lg:col-span-2 min-w-0">
-                <label className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
-                  <FiSearch className="text-gray-400" /> Search
-                </label>
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search keywords..."
-                  className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none w-full transition-all"
-                />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <label className="text-xs font-semibold text-gray-600 mb-2">Division</label>
-                  <Select
-                    value={divisionFilter ? { value: divisionFilter, label: divisionFilter } : null}
-                    onChange={(option) => {
-                      setDivisionFilter(option?.value || '');
-                    }}
-                    options={[{ value: '', label: 'All' }, ...divisionOptions.map(s => ({ value: s, label: s }))]}
-                    isClearable
-                    placeholder="All"
-                    className="text-sm"
-                    styles={{
-                      control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
-                      menu: (base) => ({ ...base, fontSize: '14px' })
-                    }}
-                  />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <label className="text-xs font-semibold text-gray-600 mb-2">Sub Division</label>
-                  <Select
-                    value={subDivisionFilter ? { value: subDivisionFilter, label: subDivisionFilter } : null}
-                    onChange={(option) => {
-                      const selectedSubDiv = option?.value || '';
-                      setSubDivisionFilter(selectedSubDiv);
-                      if (selectedSubDiv) {
-                        const parentDiv = findParentForSubDivision(selectedSubDiv);
-                        if (parentDiv) setDivisionFilter(parentDiv);
-                      }
-                    }}
-                    options={[{ value: '', label: 'All' }, ...subDivisionOptions.map(s => ({ value: s, label: s }))]}
-                    isClearable
-                    placeholder="All"
-                    className="text-sm"
-                    styles={{
-                      control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
-                      menu: (base) => ({ ...base, fontSize: '14px' })
-                    }}
-                  />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <label className="text-xs font-semibold text-gray-600 mb-2">Sub Station</label>
-                  <Select
-                    value={subStationFilter ? { value: subStationFilter, label: subStationFilter } : null}
-                    onChange={(option) => {
-                      const selectedSubStn = option?.value || '';
-                      setSubStationFilter(selectedSubStn);
-                      if (selectedSubStn) {
-                        const parents = findParentsForSubStation(selectedSubStn);
-                        if (parents) {
-                          setDivisionFilter(parents.division);
-                          setSubDivisionFilter(parents.subDivision);
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                  <div className="flex flex-col lg:col-span-2 min-w-0">
+                    <label className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
+                      <FiSearch className="text-gray-400" /> Search
+                    </label>
+                    <input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Search keywords..."
+                      className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none w-full transition-all"
+                    />
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <label className="text-xs font-semibold text-gray-600 mb-2">Division</label>
+                    <Select
+                      value={divisionFilter ? { value: divisionFilter, label: divisionFilter } : null}
+                      onChange={(option) => {
+                        setDivisionFilter(option?.value || '');
+                      }}
+                      options={[{ value: '', label: 'All' }, ...divisionOptions.map(s => ({ value: s, label: s }))]}
+                      isClearable
+                      placeholder="All"
+                      className="text-sm"
+                      styles={{
+                        control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
+                        menu: (base) => ({ ...base, fontSize: '14px' })
+                      }}
+                    />
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <label className="text-xs font-semibold text-gray-600 mb-2">Sub Division</label>
+                    <Select
+                      value={subDivisionFilter ? { value: subDivisionFilter, label: subDivisionFilter } : null}
+                      onChange={(option) => {
+                        const selectedSubDiv = option?.value || '';
+                        setSubDivisionFilter(selectedSubDiv);
+                        if (selectedSubDiv) {
+                          const parentDiv = findParentForSubDivision(selectedSubDiv);
+                          if (parentDiv) setDivisionFilter(parentDiv);
                         }
-                      }
-                    }}
-                    options={[{ value: '', label: 'All' }, ...subStationOptions.map(s => ({ value: s, label: s }))]}
-                    isClearable
-                    placeholder="All"
-                    className="text-sm"
-                    styles={{
-                      control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
-                      menu: (base) => ({ ...base, fontSize: '14px' })
-                    }}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-4">
-                <div className="flex flex-col min-w-0">
-                  <label className="text-xs font-semibold text-gray-600 mb-2">Status</label>
-                  <Select
-                    value={statusFilter ? { value: statusFilter, label: statusFilter } : null}
-                    onChange={(option) => setStatusFilter(option?.value || '')}
-                    options={[{ value: '', label: 'All' }, ...statusOptions.map(s => ({ value: s, label: s }))]}
-                    isClearable
-                    placeholder="All"
-                    className="text-sm"
-                    styles={{
-                      control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
-                      menu: (base) => ({ ...base, fontSize: '14px' })
-                    }}
-                  />
-                </div>
-              </div>
-              <div className="border-t border-gray-200 pt-4 mt-4">
-                <div className="flex items-center gap-2 mb-4">
-                  <FiClock className="text-blue-500 text-lg" />
-                  <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Date Range</h3>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
-                  <div className="flex flex-col lg:col-span-1 min-w-0">
-                    <label className="text-xs font-semibold text-gray-600 mb-2">From (Date & Time)</label>
-                    <input
-                      type="datetime-local"
-                      value={fromDT}
-                      onChange={(e) => setFromDT(e.target.value)}
-                      className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
+                      }}
+                      options={[{ value: '', label: 'All' }, ...subDivisionOptions.map(s => ({ value: s, label: s }))]}
+                      isClearable
+                      placeholder="All"
+                      className="text-sm"
+                      styles={{
+                        control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
+                        menu: (base) => ({ ...base, fontSize: '14px' })
+                      }}
                     />
                   </div>
-                  <div className="flex flex-col lg:col-span-1 min-w-0">
-                    <label className="text-xs font-semibold text-gray-600 mb-2">To (Date & Time)</label>
-                    <input
-                      type="datetime-local"
-                      value={toDT}
-                      onChange={(e) => setToDT(e.target.value)}
-                      className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
+                  <div className="flex flex-col min-w-0">
+                    <label className="text-xs font-semibold text-gray-600 mb-2">Sub Station</label>
+                    <Select
+                      value={subStationFilter ? { value: subStationFilter, label: subStationFilter } : null}
+                      onChange={(option) => {
+                        const selectedSubStn = option?.value || '';
+                        setSubStationFilter(selectedSubStn);
+                        if (selectedSubStn) {
+                          const parents = findParentsForSubStation(selectedSubStn);
+                          if (parents) {
+                            setDivisionFilter(parents.division);
+                            setSubDivisionFilter(parents.subDivision);
+                          }
+                        }
+                      }}
+                      options={[{ value: '', label: 'All' }, ...subStationOptions.map(s => ({ value: s, label: s }))]}
+                      isClearable
+                      placeholder="All"
+                      className="text-sm"
+                      styles={{
+                        control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
+                        menu: (base) => ({ ...base, fontSize: '14px' })
+                      }}
                     />
                   </div>
                 </div>
-              </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-4">
+                  <div className="flex flex-col min-w-0">
+                    <label className="text-xs font-semibold text-gray-600 mb-2">Status</label>
+                    <Select
+                      value={statusFilter ? { value: statusFilter, label: statusFilter } : null}
+                      onChange={(option) => setStatusFilter(option?.value || '')}
+                      options={[{ value: '', label: 'All' }, ...statusOptions.map(s => ({ value: s, label: s }))]}
+                      isClearable
+                      placeholder="All"
+                      className="text-sm"
+                      styles={{
+                        control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
+                        menu: (base) => ({ ...base, fontSize: '14px' })
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="border-t border-gray-200 pt-4 mt-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <FiClock className="text-blue-500 text-lg" />
+                    <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Date Range</h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+                    <div className="flex flex-col lg:col-span-1 min-w-0">
+                      <label className="text-xs font-semibold text-gray-600 mb-2">From (Date & Time)</label>
+                      <input
+                        type="datetime-local"
+                        value={fromDT}
+                        onChange={(e) => setFromDT(e.target.value)}
+                        className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
+                      />
+                    </div>
+                    <div className="flex flex-col lg:col-span-1 min-w-0">
+                      <label className="text-xs font-semibold text-gray-600 mb-2">To (Date & Time)</label>
+                      <input
+                        type="datetime-local"
+                        value={toDT}
+                        onChange={(e) => setToDT(e.target.value)}
+                        className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
               <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-200">
                 <div className="flex items-center gap-2 mb-4">
@@ -4194,17 +4200,17 @@ export default function Home() {
                     <div>
                       <div className="text-xs font-semibold text-gray-500 mb-2">🔙 Yesterday</div>
                       <div className="flex flex-wrap gap-2">
-                        <button onClick={() => applyShiftPreset('yesterday_field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift A') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}>🅰️ Shift A (8AM–4PM)</button>
-                        <button onClick={() => applyShiftPreset('yesterday_field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift B') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}>🅱️ Shift B (4PM–12AM)</button>
-                        <button onClick={() => applyShiftPreset('yesterday_field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift C') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}>🅲 Shift C (12AM–8AM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift A') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}><ShiftBadge letter="A" /> Shift A (8AM–4PM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift B') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}><ShiftBadge letter="B" /> Shift B (4PM–12AM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift C') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}><ShiftBadge letter="C" /> Shift C (12AM–8AM)</button>
                       </div>
                     </div>
                     <div>
                       <div className="text-xs font-semibold text-gray-500 mb-2">📅 Today</div>
                       <div className="flex flex-wrap gap-2">
-                        <button onClick={() => applyShiftPreset('today_field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift A') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}>🅰️ Shift A (8AM–4PM)</button>
-                        <button onClick={() => applyShiftPreset('today_field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift B') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}>🅱️ Shift B (4PM–12AM)</button>
-                        <button onClick={() => applyShiftPreset('today_field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift C') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}>🅲 Shift C (12AM–8AM)</button>
+                        <button onClick={() => applyShiftPreset('today_field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift A') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}><ShiftBadge letter="A" /> Shift A (8AM–4PM)</button>
+                        <button onClick={() => applyShiftPreset('today_field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift B') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}><ShiftBadge letter="B" /> Shift B (4PM–12AM)</button>
+                        <button onClick={() => applyShiftPreset('today_field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift C') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}><ShiftBadge letter="C" /> Shift C (12AM–8AM)</button>
                       </div>
                     </div>
                   </div>
@@ -4244,9 +4250,9 @@ export default function Home() {
                       <div className="bg-green-500 w-2 h-2 rounded-full"></div> Field Shifts
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <button onClick={() => applyCustomDateShift('field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Field Shift A') && selectedShift.includes(customDate) ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-white hover:bg-green-50 text-green-700 border-green-200 hover:border-green-300'}`}>🅰️ Shift A (8AM–4PM)</button>
-                      <button onClick={() => applyCustomDateShift('field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Field Shift B') && selectedShift.includes(customDate) ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-white hover:bg-green-50 text-green-700 border-green-200 hover:border-green-300'}`}>🅱️ Shift B (4PM–12AM)</button>
-                      <button onClick={() => applyCustomDateShift('field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Field Shift C') && selectedShift.includes(customDate) ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-white hover:bg-green-50 text-green-700 border-green-200 hover:border-green-300'}`}>🅲 Shift C (12AM–8AM)</button>
+                      <button onClick={() => applyCustomDateShift('field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Field Shift A') && selectedShift.includes(customDate) ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-white hover:bg-green-50 text-green-700 border-green-200 hover:border-green-300'}`}><ShiftBadge letter="A" /> Shift A (8AM–4PM)</button>
+                      <button onClick={() => applyCustomDateShift('field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Field Shift B') && selectedShift.includes(customDate) ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-white hover:bg-green-50 text-green-700 border-green-200 hover:border-green-300'}`}><ShiftBadge letter="B" /> Shift B (4PM–12AM)</button>
+                      <button onClick={() => applyCustomDateShift('field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Field Shift C') && selectedShift.includes(customDate) ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-white hover:bg-green-50 text-green-700 border-green-200 hover:border-green-300'}`}><ShiftBadge letter="C" /> Shift C (12AM–8AM)</button>
                     </div>
                   </div>
                 </div>
@@ -4272,36 +4278,36 @@ export default function Home() {
                 <span className="font-semibold text-gray-700">Showing {filtered.length} of {original.length} complaints</span>
               </div>
               <div className="flex flex-wrap gap-3">
-              <button
-                onClick={exportSummaryPDF}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
-              >
-                <FiBarChart2 className="text-xl" /> <span>Summary PDF</span>
-              </button>
-              <button
-                onClick={() => router.push('/charts')}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
-              >
-                <FiBarChart2 className="text-xl" /> <span>View Charts</span>
-              </button>
-              <button
-                onClick={exportTrendChartsPDF}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
-              >
-                <FiTrendingUp className="text-xl" /> <span>Charts PDF</span>
-              </button>
-              <button
-                onClick={() => setShowReportModal(true)}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
-              >
-                <FiLayers className="text-xl" /> <span>Detailed Reports</span>
-              </button>
-              <button
-                onClick={exportExcel}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
-              >
-                <FiDownload className="text-xl" /> <span>Excel (.xlsx)</span>
-              </button>
+                <button
+                  onClick={exportSummaryPDF}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
+                >
+                  <FiBarChart2 className="text-xl" /> <span>Summary PDF</span>
+                </button>
+                <button
+                  onClick={() => router.push('/charts')}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
+                >
+                  <FiBarChart2 className="text-xl" /> <span>View Charts</span>
+                </button>
+                <button
+                  onClick={exportTrendChartsPDF}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
+                >
+                  <FiTrendingUp className="text-xl" /> <span>Charts PDF</span>
+                </button>
+                <button
+                  onClick={() => setShowReportModal(true)}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
+                >
+                  <FiLayers className="text-xl" /> <span>Detailed Reports</span>
+                </button>
+                <button
+                  onClick={exportExcel}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
+                >
+                  <FiDownload className="text-xl" /> <span>Excel (.xlsx)</span>
+                </button>
               </div>
             </div>
           </div>
@@ -4317,59 +4323,59 @@ export default function Home() {
           <div className="bg-white rounded-xl shadow-md border border-gray-100">
             <div className="overflow-x-auto max-h-[70vh] relative">
               <table className="min-w-full divide-y divide-gray-200 text-xs md:text-sm">
-              <thead className="bg-gradient-to-r from-gray-100 to-gray-50 sticky top-0 z-10 shadow-sm">
-                <tr>
-                  {(() => {
-                    const base = Object.keys(filtered[0]);
-                    const idx = base.indexOf('Closed Date');
-                    if (idx >= 0) base.splice(idx + 1, 0, 'Resolution Time'); else base.push('Resolution Time');
-                    return base;
-                  })().map((header) => (
-                    <th 
-                      key={header} 
-                      onClick={() => handleSort(header)}
-                      className="px-4 md:px-6 py-3 text-left font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-200 select-none"
-                    >
-                      <div className="flex items-center gap-1">
-                        {header}
-                        {sortColumn === header && (
-                          <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
-                        )}
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-100">
-                {filtered.map((row, index) => (
-                  <tr key={index} className="hover:bg-gray-50">
+                <thead className="bg-gradient-to-r from-gray-100 to-gray-50 sticky top-0 z-10 shadow-sm">
+                  <tr>
                     {(() => {
-                      const baseHeaders = Object.keys(row);
-                      const idx = baseHeaders.indexOf('Closed Date');
-                      const headers = idx >= 0 ? [
-                        ...baseHeaders.slice(0, idx + 1),
-                        'Resolution Time',
-                        ...baseHeaders.slice(idx + 1)
-                      ] : [...baseHeaders, 'Resolution Time'];
-                      return headers.map((h, i) => {
-                        let display: any = (row as any)[h];
-                        if (h === 'Resolution Time') display = computeResolutionTime(row);
-                        const isRemarks = h === 'Closing Remarks';
-                        return (
-                          <td key={i} className="px-4 md:px-6 py-3 whitespace-nowrap text-gray-900 max-w-[14rem] md:max-w-xs">
-                            {isRemarks ? (
-                              <span title={String(display || '')} className="block truncate">{String(display || '')}</span>
-                            ) : (
-                              String(display ?? '')
-                            )}
-                          </td>
-                        );
-                      });
-                    })()}
+                      const base = Object.keys(filtered[0]);
+                      const idx = base.indexOf('Closed Date');
+                      if (idx >= 0) base.splice(idx + 1, 0, 'Resolution Time'); else base.push('Resolution Time');
+                      return base;
+                    })().map((header) => (
+                      <th
+                        key={header}
+                        onClick={() => handleSort(header)}
+                        className="px-4 md:px-6 py-3 text-left font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-200 select-none"
+                      >
+                        <div className="flex items-center gap-1">
+                          {header}
+                          {sortColumn === header && (
+                            <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                          )}
+                        </div>
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-100">
+                  {filtered.map((row, index) => (
+                    <tr key={index} className="hover:bg-gray-50">
+                      {(() => {
+                        const baseHeaders = Object.keys(row);
+                        const idx = baseHeaders.indexOf('Closed Date');
+                        const headers = idx >= 0 ? [
+                          ...baseHeaders.slice(0, idx + 1),
+                          'Resolution Time',
+                          ...baseHeaders.slice(idx + 1)
+                        ] : [...baseHeaders, 'Resolution Time'];
+                        return headers.map((h, i) => {
+                          let display: any = (row as any)[h];
+                          if (h === 'Resolution Time') display = computeResolutionTime(row);
+                          const isRemarks = h === 'Closing Remarks';
+                          return (
+                            <td key={i} className="px-4 md:px-6 py-3 whitespace-nowrap text-gray-900 max-w-[14rem] md:max-w-xs">
+                              {isRemarks ? (
+                                <span title={String(display || '')} className="block truncate">{String(display || '')}</span>
+                              ) : (
+                                String(display ?? '')
+                              )}
+                            </td>
+                          );
+                        });
+                      })()}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
