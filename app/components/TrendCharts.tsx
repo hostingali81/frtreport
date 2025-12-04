@@ -202,7 +202,7 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
         beyondChartInstance.current = new Chart(ctx, {
           type: 'doughnut',
           data: {
-            labels: beyondData.map(([name]) => name),
+            labels: beyondData.map(([name, count]) => `${name} (${count})`),
             datasets: [{
               data: beyondData.map(([, count]) => count),
               backgroundColor: colors.slice(0, beyondData.length),
@@ -369,7 +369,7 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
         areaTypeChartInstance.current = new Chart(ctx, {
           type: 'pie',
           data: {
-            labels: areaTypeData.map(([name]) => name),
+            labels: areaTypeData.map(([name, count]) => `${name} (${count})`),
             datasets: [{
               data: areaTypeData.map(([, count]) => count),
               backgroundColor: areaTypePalette.slice(0, areaTypeData.length),
