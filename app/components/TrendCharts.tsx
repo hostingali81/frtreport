@@ -181,16 +181,13 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
       }
     }
 
-    // Beyond Chart (using Closed Status)
+    // Beyond Chart - Division-wise Closed Beyond
     const beyondMap = new Map<string, number>();
     for (const r of data) {
       const closedStatus = String(r['Closed Status'] || '').trim();
-      if (closedStatus === 'Closed Within') {
-        beyondMap.set('Closed Within', (beyondMap.get('Closed Within') || 0) + 1);
-      } else if (closedStatus === 'Closed Beyond') {
-        beyondMap.set('Closed Beyond', (beyondMap.get('Closed Beyond') || 0) + 1);
-      } else if (closedStatus) {
-        beyondMap.set(closedStatus, (beyondMap.get(closedStatus) || 0) + 1);
+      if (closedStatus === 'Closed Beyond') {
+        const division = String(r['Division'] || '').trim() || 'Unknown';
+        beyondMap.set(division, (beyondMap.get(division) || 0) + 1);
       }
     }
     const beyondData = Array.from(beyondMap.entries()).sort((a, b) => b[1] - a[1]);
@@ -216,7 +213,7 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-              title: { display: true, text: 'Beyond Distribution', font: { size: 16, weight: 'bold' } },
+              title: { display: true, text: 'Closed Beyond - Division Wise', font: { size: 16, weight: 'bold' } },
               legend: { position: 'bottom' },
               tooltip: {
                 callbacks: {
