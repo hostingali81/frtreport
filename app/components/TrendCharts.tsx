@@ -15,7 +15,7 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
   const subStationChartRef = useRef<HTMLCanvasElement>(null);
   const dailyTrendChartRef = useRef<HTMLCanvasElement>(null);
   const areaTypeChartRef = useRef<HTMLCanvasElement>(null);
-  
+
   const comparisonChartInstance = useRef<Chart | null>(null);
   const divisionChartInstance = useRef<Chart | null>(null);
   const beyondChartInstance = useRef<Chart | null>(null);
@@ -25,6 +25,31 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
 
   useEffect(() => {
     if (data.length === 0) return;
+
+    // Helper to parse DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
+    // Returns YYYY-MM-DD string or 'Unknown'
+    const normalizeDateKey = (dateStr: string) => {
+      if (!dateStr) return 'Unknown';
+      // Match dd/mm/yyyy where separators can be / - .
+      const match = dateStr.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+      if (match) {
+        const day = match[1].padStart(2, '0');
+        const month = match[2].padStart(2, '0');
+        const year = match[3];
+        return `${day}/${month}/${year}`;
+      }
+      return 'Unknown';
+    };
+
+    const parseDateFromKey = (dateKey: string) => {
+      const match = dateKey.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      if (match) {
+        // match[1] = day, match[2] = month, match[3] = year
+        // Create date as YYYY-MM-DD
+        return new Date(`${match[3]}-${match[2]}-${match[1]}`);
+      }
+      return new Date(0); // Fallback for unknown
+    };
 
     const controlRoomClosed = data.filter(r => {
       const isClosed = isClosedRow(r);
@@ -42,26 +67,24 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
 
     const controlRoomMap = new Map<string, number>();
     for (const r of controlRoomClosed) {
-      const s = String(r['Complaint Date and Time'] || '');
-      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
-      const key = m ? m[1] : 'Unknown';
-      controlRoomMap.set(key, (controlRoomMap.get(key) || 0) + 1);
+      const key = normalizeDateKey(String(r['Complaint Date and Time'] || ''));
+      if (key !== 'Unknown') {
+        controlRoomMap.set(key, (controlRoomMap.get(key) || 0) + 1);
+      }
     }
 
     const frtMap = new Map<string, number>();
     for (const r of frtClosed) {
-      const s = String(r['Complaint Date and Time'] || '');
-      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
-      const key = m ? m[1] : 'Unknown';
-      frtMap.set(key, (frtMap.get(key) || 0) + 1);
+      const key = normalizeDateKey(String(r['Complaint Date and Time'] || ''));
+      if (key !== 'Unknown') {
+        frtMap.set(key, (frtMap.get(key) || 0) + 1);
+      }
     }
 
     const allDates = new Set([...controlRoomMap.keys(), ...frtMap.keys()]);
     const sortedDates = Array.from(allDates).sort((a, b) => {
-      const pa = a.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const pb = b.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
-      const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
+      const da = parseDateFromKey(a);
+      const db = parseDateFromKey(b);
       return da.getTime() - db.getTime();
     });
 
@@ -302,16 +325,14 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
     // Daily Trend Area Chart
     const dailyMap = new Map<string, number>();
     for (const r of data) {
-      const s = String(r['Complaint Date and Time'] || '');
-      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
-      const key = m ? m[1] : 'Unknown';
-      dailyMap.set(key, (dailyMap.get(key) || 0) + 1);
+      const key = normalizeDateKey(String(r['Complaint Date and Time'] || ''));
+      if (key !== 'Unknown') {
+        dailyMap.set(key, (dailyMap.get(key) || 0) + 1);
+      }
     }
     const dailyDates = Array.from(dailyMap.keys()).sort((a, b) => {
-      const pa = a.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const pb = b.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
-      const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
+      const da = parseDateFromKey(a);
+      const db = parseDateFromKey(b);
       return da.getTime() - db.getTime();
     });
 
@@ -360,7 +381,7 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
       const ctx = areaTypeChartRef.current.getContext('2d');
       if (ctx) {
         const areaTypePalette = [
-          '#06b6d4', '#8b5cf6', '#f59e0b', '#10b981', '#ec4899', 
+          '#06b6d4', '#8b5cf6', '#f59e0b', '#10b981', '#ec4899',
           '#3b82f6', '#f97316', '#14b8a6', '#6366f1', '#eab308'
         ];
         areaTypeChartInstance.current = new Chart(ctx, {
@@ -425,7 +446,7 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
             <p className="text-2xl font-bold text-blue-600">{data.length}</p>
           </div>
         </div>
-        
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white p-6 rounded-xl border-2 border-blue-100 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
             <div style={{ height: '380px' }}>

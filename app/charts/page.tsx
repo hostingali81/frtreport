@@ -94,8 +94,29 @@ export default function ChartsPage() {
   };
 
   const parsePossibleDate = (value: string) => {
-    const d = new Date(value.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$2/$1/$3'));
-    return isNaN(d.getTime()) ? null : d;
+    const clean = value.trim();
+    if (!clean) return null;
+    const match = clean.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+    if (match) {
+      const day = match[1].padStart(2, '0');
+      const month = match[2].padStart(2, '0');
+      const year = match[3];
+      // Note: handling time if present
+      const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+      let hours = 0;
+      let minutes = 0;
+      if (timeMatch) {
+        hours = parseInt(timeMatch[1], 10);
+        minutes = parseInt(timeMatch[2], 10);
+        if (timeMatch[3]) {
+          const ampm = timeMatch[3].toUpperCase();
+          if (ampm === 'PM' && hours < 12) hours += 12;
+          if (ampm === 'AM' && hours === 12) hours = 0;
+        }
+      }
+      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hours, minutes);
+    }
+    return null;
   };
 
   const filtered = useMemo(() => {
@@ -350,11 +371,11 @@ export default function ChartsPage() {
   const fetchData = async () => {
     setLoading(true);
     setError('');
-    
+
     try {
       const response = await fetch('/api/scrape');
       const result = await response.json();
-      
+
       if (result.success && result.data && result.data.length > 0) {
         setOriginal(result.data);
         setData(result.data);

@@ -131,10 +131,40 @@ export default function Home() {
     value.toLowerCase().includes(query.toLowerCase());
 
   const parsePossibleDate = (value: string) => {
-    // Handles formats like: 01/11/2025 03:45 PM
+    // Handles formats like: 01/11/2025 03:45 PM, 1-1-2025, etc.
     // Returns Date or null
-    const d = new Date(value.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$2/$1/$3'));
-    return isNaN(d.getTime()) ? null : d;
+    // Clean string first
+    const clean = value.trim();
+    if (!clean) return null;
+
+    // Attempt detecting dd/mm/yyyy or dd-mm-yyyy or similar
+    const match = clean.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+    if (match) {
+      const day = match[1].padStart(2, '0');
+      const month = match[2].padStart(2, '0');
+      const year = match[3];
+      // Note: we're discarding time here for simple date check, 
+      // but if time is needed we could parse it. 
+      // The original code passed standard date string to new Date() which might fail for dd/mm
+      // Let's return a proper Date object from yyyy-mm-dd
+
+      // If original string has time 'HH:MM AM/PM'
+      const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+      let hours = 0;
+      let minutes = 0;
+      if (timeMatch) {
+        hours = parseInt(timeMatch[1], 10);
+        minutes = parseInt(timeMatch[2], 10);
+        if (timeMatch[3]) {
+          const ampm = timeMatch[3].toUpperCase();
+          if (ampm === 'PM' && hours < 12) hours += 12;
+          if (ampm === 'AM' && hours === 12) hours = 0;
+        }
+      }
+
+      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hours, minutes);
+    }
+    return null;
   };
 
   const formatDuration = (ms: number) => {
@@ -921,17 +951,57 @@ export default function Home() {
     addHeader('Date-wise Total Complaint Count');
     const dateTotalMap = new Map<string, number>();
     for (const r of rows) {
-      const s = String(r['Complaint Date and Time'] || '');
-      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
-      const date = m ? m[1] : 'Unknown';
+      const s = String(r['Complaint Date and Time'] || '').trim();
+      const match = s.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+      let date = 'Unknown';
+      if (match) {
+        const day = match[1].padStart(2, '0');
+        const month = match[2].padStart(2, '0');
+        const year = match[3];
+        date = `${day}/${month}/${year}`;
+      } else {
+        // Fallback: try parsing as standard Date if string is like "Dec 7, 2025" or ISO
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) {
+          const dd = String(d.getDate()).padStart(2, '0');
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const yyyy = d.getFullYear();
+          date = `${dd}/${mm}/${yyyy}`;
+        }
+      }
       dateTotalMap.set(date, (dateTotalMap.get(date) || 0) + 1);
     }
     const dateTotalRows = Array.from(dateTotalMap.entries()).sort((a, b) => {
-      const pa = a[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const pb = b[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
-      const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
-      return da.getTime() - db.getTime();
+      const parse = (dStr: string) => {
+        const m = dStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        // Return max integer for unknown so they go to the bottom in ascending order? 
+        // Or 0? 0 puts them at start. User says 8 before 7, implies 2025-12-08 before 2025-12-07?
+        // Wait, 8 < 7 is mathematically false. Ascending is A to Z (Early to Late).
+        // 07 Dec < 08 Dec.
+        // If user sees 08 before 07, it's Descending.
+        // But code is a - b.
+        // Maybe the user *wants* descending? "8 pehle, 7 baad mein"?
+        // No, typically lists are 1, 2, 3...
+        // If 8 is before 7, that is Descending.
+        // If the user says "problems is 8 before 7", they mean it SHOULD NOT be that way.
+        // So they want Ascending.
+        // My code does `da - db`.
+        // Let's assume standard behavior.
+        // If any date failed to parse, it becomes 0.
+        // If 7 failed parse, it is 0. 8 is >0. 7 comes before 8.
+        // If 8 failed parse, it is 0. 7 is >0. 8 comes before 7.
+        // Maybe 8th Failed to parse?
+        // 08/12/2025 vs 07/12/2025.
+        // Let's force robust parsing here too just in case the key isn't perfectly normalized?
+        // But the loop normalizes it.
+        return m ? new Date(`${m[3]}-${m[2]}-${m[1]}`).getTime() : 0;
+      };
+
+      const tA = parse(a[0]);
+      const tB = parse(b[0]);
+      if (tA === 0 && tB !== 0) return 1; // Unknowns at bottom
+      if (tB === 0 && tA !== 0) return -1;
+      return tA - tB;
     });
     const dateTotalBody = dateTotalRows.map(([date, count]) => [date, String(count)]);
     const dateTotalSum = dateTotalRows.reduce((acc, [, c]) => acc + (c as number), 0);
@@ -2450,29 +2520,51 @@ export default function Home() {
     // Group Control Room by date
     const controlRoomMap = new Map<string, number>();
     for (const r of controlRoomClosed) {
-      const s = String(r['Complaint Date and Time'] || '');
-      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
-      const key = m ? m[1] : 'Unknown';
-      controlRoomMap.set(key, (controlRoomMap.get(key) || 0) + 1);
+      const s = String(r['Complaint Date and Time'] || '').trim();
+      const match = s.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+      let key = 'Unknown';
+      if (match) {
+        const day = match[1].padStart(2, '0');
+        const month = match[2].padStart(2, '0');
+        const year = match[3];
+        key = `${day}/${month}/${year}`;
+      }
+      if (key !== 'Unknown') {
+        controlRoomMap.set(key, (controlRoomMap.get(key) || 0) + 1);
+      }
     }
 
     // Group FRT by date
     const frtMap = new Map<string, number>();
     for (const r of frtClosed) {
-      const s = String(r['Complaint Date and Time'] || '');
-      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
-      const key = m ? m[1] : 'Unknown';
-      frtMap.set(key, (frtMap.get(key) || 0) + 1);
+      const s = String(r['Complaint Date and Time'] || '').trim();
+      const match = s.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+      let key = 'Unknown';
+      if (match) {
+        const day = match[1].padStart(2, '0');
+        const month = match[2].padStart(2, '0');
+        const year = match[3];
+        key = `${day}/${month}/${year}`;
+      }
+      if (key !== 'Unknown') {
+        frtMap.set(key, (frtMap.get(key) || 0) + 1);
+      }
     }
 
     // Get all unique dates
     const allDates = new Set([...controlRoomMap.keys(), ...frtMap.keys()]);
     const sortedDates = Array.from(allDates).sort((a, b) => {
-      const pa = a.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const pb = b.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
-      const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
-      return da.getTime() - db.getTime();
+      const parse = (dStr: string) => {
+        const m = dStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        return m ? new Date(`${m[3]}-${m[2]}-${m[1]}`).getTime() : 0;
+      };
+
+      const tA = parse(a);
+      const tB = parse(b);
+      // Ensure Unknowns or failures go to end or handled consistently
+      if (tA === 0 && tB !== 0) return 1;
+      if (tB === 0 && tA !== 0) return -1;
+      return tA - tB;
     });
 
     if (sortedDates.length === 0) {
