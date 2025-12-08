@@ -12,6 +12,7 @@
   "dependencies": {
     "@sparticuz/chromium": "^133.0.0",
     "@supabase/supabase-js": "^2.45.0",
+    "@tailwindcss/postcss": "^4.1.17",
     "chart.js": "^4.5.1",
     "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
@@ -25,7 +26,6 @@
     "react-select": "^5.10.2"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

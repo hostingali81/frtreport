@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation';
 
 export default function Home() {
   const ShiftBadge = ({ letter }: { letter: string }) => (
-    <span className="inline-flex items-center justify-center w-5 h-5 bg-gradient-to-br from-rose-500 to-red-600 text-white text-xs font-bold rounded-md mr-2 shadow-sm border border-rose-400/50">
+    <span className="inline-flex items-center justify-center w-5 h-5 bg-emerald-600 text-white text-xs font-bold rounded-md mr-2 shadow-sm border border-emerald-500/50">
       {letter}
     </span>
   );
@@ -4007,7 +4007,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen p-4 md:p-8 bg-gradient-to-b from-gray-50 to-white">
+    <div className="min-h-screen p-4 md:p-8 bg-gray-50">
       <div className="max-w-7xl mx-auto space-y-6">
         <header className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
@@ -4020,7 +4020,7 @@ export default function Home() {
           <button
             onClick={() => fetchData(true)}
             disabled={loading}
-            className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
+            className="inline-flex items-center gap-2 bg-slate-700 hover:bg-amber-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
           >
             {loading ? (<><FiClock /> लोड हो रहा है…</>) : (<><FiRefreshCw /> Refresh</>)}
           </button>
@@ -4090,14 +4090,14 @@ export default function Home() {
           <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg p-6 mb-6 border border-gray-200">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
-                <div className="bg-blue-500 p-2.5 rounded-lg">
+                <div className="bg-blue-700 p-2.5 rounded-lg">
                   <FiFilter className="text-white text-xl" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-xl font-bold text-gray-800">Filters & Presets</h2>
                     {(search || statusFilter || divisionFilter || subDivisionFilter || subStationFilter || fromDT || toDT || selectedShift) && (
-                      <span className="bg-blue-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">
+                      <span className="bg-blue-700 text-white text-xs font-bold px-2.5 py-1 rounded-full">
                         {[search, statusFilter, divisionFilter, subDivisionFilter, subStationFilter, fromDT, toDT, selectedShift].filter(Boolean).length}
                       </span>
                     )}
@@ -4107,7 +4107,7 @@ export default function Home() {
               </div>
               <button
                 onClick={clearAllFilters}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
+                className="inline-flex items-center gap-2 bg-slate-700 to-slate-800 hover:from-gray-700 hover:to-gray-800 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
               >
                 <FiFilter className="text-lg" /> <span>Clear All</span>
               </button>
@@ -4245,16 +4245,16 @@ export default function Home() {
                   <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Quick Presets</h3>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={() => { applyPreset('fromNov2025ToNow'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'fromNov2025ToNow' && !selectedShift ? 'bg-purple-600 text-white border-purple-700 shadow-lg' : 'bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-700 border-purple-200 hover:shadow-md'}`}>📅 Nov-2025 → Now</button>
-                  <button onClick={() => { applyPreset('today'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'today' && !selectedShift ? 'bg-purple-600 text-white border-purple-700 shadow-lg' : 'bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-700 border-purple-200 hover:shadow-md'}`}>📆 Today</button>
-                  <button onClick={() => { applyPreset('last24h'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'last24h' && !selectedShift ? 'bg-purple-600 text-white border-purple-700 shadow-lg' : 'bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-700 border-purple-200 hover:shadow-md'}`}>⏰ Last 24h</button>
-                  <button onClick={() => { applyPreset('thisMonth'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'thisMonth' && !selectedShift ? 'bg-purple-600 text-white border-purple-700 shadow-lg' : 'bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-700 border-purple-200 hover:shadow-md'}`}>📊 This Month</button>
-                  <button onClick={() => { applyPreset('toNow'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'toNow' && !selectedShift ? 'bg-purple-600 text-white border-purple-700 shadow-lg' : 'bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-700 border-purple-200 hover:shadow-md'}`}>⚡ Set To = Now</button>
+                  <button onClick={() => { applyPreset('fromNov2025ToNow'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'fromNov2025ToNow' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>📅 Nov-2025 → Now</button>
+                  <button onClick={() => { applyPreset('today'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'today' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>📆 Today</button>
+                  <button onClick={() => { applyPreset('last24h'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'last24h' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>⏰ Last 24h</button>
+                  <button onClick={() => { applyPreset('thisMonth'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'thisMonth' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>📊 This Month</button>
+                  <button onClick={() => { applyPreset('toNow'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'toNow' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>⚡ Set To = Now</button>
                 </div>
               </div>
               <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-200">
                 <div className="flex items-center gap-2 mb-5">
-                  <div className="bg-gradient-to-r from-blue-500 to-green-500 p-1.5 rounded-lg">
+                  <div className="bg-slate-700 p-1.5 rounded-lg">
                     <FiLayers className="text-white text-base" />
                   </div>
                   <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Shift Presets</h3>
@@ -4263,23 +4263,23 @@ export default function Home() {
                   {/* Control Room Shifts - Left Column */}
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 mb-3">
-                      <div className="bg-blue-500 w-3 h-3 rounded-full"></div>
+                      <div className="bg-blue-700 w-3 h-3 rounded-full"></div>
                       <h4 className="text-sm font-bold text-blue-700">Control Room Shifts</h4>
                     </div>
                     <div>
                       <div className="text-xs font-semibold text-gray-500 mb-2">🔙 Yesterday</div>
                       <div className="flex flex-wrap gap-2">
-                        <button onClick={() => applyShiftPreset('yesterday_morning')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Control Room Morning') ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-200'}`}>🌅 Morning (7AM–3PM)</button>
-                        <button onClick={() => applyShiftPreset('yesterday_day')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Control Room Day') ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-200'}`}>☀️ Day (3PM–11PM)</button>
-                        <button onClick={() => applyShiftPreset('yesterday_night')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Control Room Night') ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-200'}`}>🌙 Night (11PM–7AM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_morning')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Control Room Morning') ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>🌅 Morning (7AM–3PM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_day')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Control Room Day') ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>☀️ Day (3PM–11PM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_night')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Control Room Night') ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>🌙 Night (11PM–7AM)</button>
                       </div>
                     </div>
                     <div>
                       <div className="text-xs font-semibold text-gray-500 mb-2">📅 Today</div>
                       <div className="flex flex-wrap gap-2">
-                        <button onClick={() => applyShiftPreset('today_morning')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Control Room Morning') ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-200'}`}>🌅 Morning (7AM–3PM)</button>
-                        <button onClick={() => applyShiftPreset('today_day')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Control Room Day') ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-200'}`}>☀️ Day (3PM–11PM)</button>
-                        <button onClick={() => applyShiftPreset('today_night')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Control Room Night') ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-200'}`}>🌙 Night (11PM–7AM)</button>
+                        <button onClick={() => applyShiftPreset('today_morning')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Control Room Morning') ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>🌅 Morning (7AM–3PM)</button>
+                        <button onClick={() => applyShiftPreset('today_day')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Control Room Day') ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>☀️ Day (3PM–11PM)</button>
+                        <button onClick={() => applyShiftPreset('today_night')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Control Room Night') ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>🌙 Night (11PM–7AM)</button>
                       </div>
                     </div>
                   </div>
@@ -4292,25 +4292,25 @@ export default function Home() {
                     <div>
                       <div className="text-xs font-semibold text-gray-500 mb-2">🔙 Yesterday</div>
                       <div className="flex flex-wrap gap-2">
-                        <button onClick={() => applyShiftPreset('yesterday_field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift A') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}><ShiftBadge letter="A" /> Shift A (8AM–4PM)</button>
-                        <button onClick={() => applyShiftPreset('yesterday_field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift B') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}><ShiftBadge letter="B" /> Shift B (4PM–12AM)</button>
-                        <button onClick={() => applyShiftPreset('yesterday_field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift C') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}><ShiftBadge letter="C" /> Shift C (12AM–8AM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift A') ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="A" /> Shift A (8AM–4PM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift B') ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="B" /> Shift B (4PM–12AM)</button>
+                        <button onClick={() => applyShiftPreset('yesterday_field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift C') ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="C" /> Shift C (12AM–8AM)</button>
                       </div>
                     </div>
                     <div>
                       <div className="text-xs font-semibold text-gray-500 mb-2">📅 Today</div>
                       <div className="flex flex-wrap gap-2">
-                        <button onClick={() => applyShiftPreset('today_field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift A') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}><ShiftBadge letter="A" /> Shift A (8AM–4PM)</button>
-                        <button onClick={() => applyShiftPreset('today_field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift B') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}><ShiftBadge letter="B" /> Shift B (4PM–12AM)</button>
-                        <button onClick={() => applyShiftPreset('today_field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift C') ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 border-green-200'}`}><ShiftBadge letter="C" /> Shift C (12AM–8AM)</button>
+                        <button onClick={() => applyShiftPreset('today_field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift A') ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="A" /> Shift A (8AM–4PM)</button>
+                        <button onClick={() => applyShiftPreset('today_field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift B') ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="B" /> Shift B (4PM–12AM)</button>
+                        <button onClick={() => applyShiftPreset('today_field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift C') ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="C" /> Shift C (12AM–8AM)</button>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-              <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-5 shadow-sm border-2 border-orange-200">
+              <div className="bg-gray-50 rounded-xl p-5 shadow-sm border border-gray-200">
                 <div className="flex items-center gap-2 mb-4">
-                  <div className="bg-orange-500 p-1.5 rounded-lg">
+                  <div className="bg-amber-600 p-1.5 rounded-lg">
                     <FiClock className="text-white text-base" />
                   </div>
                   <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Custom Date Shift Selector</h3>
@@ -4329,35 +4329,35 @@ export default function Home() {
                   </div>
                   <div>
                     <div className="text-xs font-semibold text-blue-600 mb-2 flex items-center gap-1">
-                      <div className="bg-blue-500 w-2 h-2 rounded-full"></div> Control Room Shifts
+                      <div className="bg-blue-700 w-2 h-2 rounded-full"></div> Control Room Shifts
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <button onClick={() => applyCustomDateShift('morning')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Control Room Morning') && selectedShift.includes(customDate) ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-300'}`}>🌅 Morning (7AM–3PM)</button>
-                      <button onClick={() => applyCustomDateShift('day')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Control Room Day') && selectedShift.includes(customDate) ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-300'}`}>☀️ Day (3PM–11PM)</button>
-                      <button onClick={() => applyCustomDateShift('night')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Control Room Night') && selectedShift.includes(customDate) ? 'bg-blue-600 text-white border-blue-700 shadow-lg' : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-300'}`}>🌙 Night (11PM–7AM)</button>
+                      <button onClick={() => applyCustomDateShift('morning')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Control Room Morning') && selectedShift.includes(customDate) ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>🌅 Morning (7AM–3PM)</button>
+                      <button onClick={() => applyCustomDateShift('day')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Control Room Day') && selectedShift.includes(customDate) ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>☀️ Day (3PM–11PM)</button>
+                      <button onClick={() => applyCustomDateShift('night')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Control Room Night') && selectedShift.includes(customDate) ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>🌙 Night (11PM–7AM)</button>
                     </div>
                   </div>
                   <div>
                     <div className="text-xs font-semibold text-green-600 mb-2 flex items-center gap-1">
-                      <div className="bg-green-500 w-2 h-2 rounded-full"></div> Field Shifts
+                      <div className="bg-emerald-600 w-2 h-2 rounded-full"></div> Field Shifts
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <button onClick={() => applyCustomDateShift('field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Field Shift A') && selectedShift.includes(customDate) ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-white hover:bg-green-50 text-green-700 border-green-200 hover:border-green-300'}`}><ShiftBadge letter="A" /> Shift A (8AM–4PM)</button>
-                      <button onClick={() => applyCustomDateShift('field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Field Shift B') && selectedShift.includes(customDate) ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-white hover:bg-green-50 text-green-700 border-green-200 hover:border-green-300'}`}><ShiftBadge letter="B" /> Shift B (4PM–12AM)</button>
-                      <button onClick={() => applyCustomDateShift('field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border-2 transition-all ${selectedShift.includes('Field Shift C') && selectedShift.includes(customDate) ? 'bg-green-600 text-white border-green-700 shadow-lg' : 'bg-white hover:bg-green-50 text-green-700 border-green-200 hover:border-green-300'}`}><ShiftBadge letter="C" /> Shift C (12AM–8AM)</button>
+                      <button onClick={() => applyCustomDateShift('field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Field Shift A') && selectedShift.includes(customDate) ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="A" /> Shift A (8AM–4PM)</button>
+                      <button onClick={() => applyCustomDateShift('field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Field Shift B') && selectedShift.includes(customDate) ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="B" /> Shift B (4PM–12AM)</button>
+                      <button onClick={() => applyCustomDateShift('field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Field Shift C') && selectedShift.includes(customDate) ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="C" /> Shift C (12AM–8AM)</button>
                     </div>
                   </div>
                 </div>
               </div>
               {selectedShift && (
-                <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-4 border-2 border-indigo-200">
+                <div className="bg-sky-50 rounded-xl p-4 border border-sky-200">
                   <div className="flex items-center gap-2">
-                    <div className="bg-indigo-500 p-1.5 rounded-lg">
+                    <div className="bg-sky-600 p-1.5 rounded-lg">
                       <FiClock className="text-white text-sm" />
                     </div>
                     <div>
                       <div className="text-xs text-gray-500 font-medium">Active Shift</div>
-                      <div className="text-sm font-bold text-indigo-700">{selectedShift}</div>
+                      <div className="text-sm font-bold text-sky-700">{selectedShift}</div>
                     </div>
                   </div>
                 </div>
@@ -4366,37 +4366,37 @@ export default function Home() {
 
             <div className="flex flex-wrap items-center justify-between gap-3 mt-6 pt-5 border-t-2 border-gray-200">
               <div className="flex items-center gap-2 text-sm">
-                <FiBarChart2 className="text-blue-500 text-lg" />
+                <FiBarChart2 className="text-sky-600 text-lg" />
                 <span className="font-semibold text-gray-700">Showing {filtered.length} of {original.length} complaints</span>
               </div>
               <div className="flex flex-wrap gap-3">
                 <button
                   onClick={exportSummaryPDF}
-                  className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
+                  className="inline-flex items-center gap-2 bg-indigo-700 hover:bg-indigo-800 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
                 >
                   <FiBarChart2 className="text-xl" /> <span>Summary PDF</span>
                 </button>
                 <button
                   onClick={() => router.push('/charts')}
-                  className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
+                  className="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
                 >
                   <FiBarChart2 className="text-xl" /> <span>View Charts</span>
                 </button>
                 <button
                   onClick={exportTrendChartsPDF}
-                  className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
+                  className="inline-flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
                 >
                   <FiTrendingUp className="text-xl" /> <span>Charts PDF</span>
                 </button>
                 <button
                   onClick={() => setShowReportModal(true)}
-                  className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
+                  className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
                 >
                   <FiLayers className="text-xl" /> <span>Detailed Reports</span>
                 </button>
                 <button
                   onClick={exportExcel}
-                  className="inline-flex items-center gap-2 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
+                  className="inline-flex items-center gap-2 bg-sky-700 hover:bg-sky-800 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
                 >
                   <FiDownload className="text-xl" /> <span>Excel (.xlsx)</span>
                 </button>
@@ -4663,7 +4663,7 @@ export default function Home() {
                       onClick={() => { exportDivisionCount(); setShowReportModal(false); }}
                       className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 hover:border-purple-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <div className="bg-purple-500 p-3 rounded-lg group-hover:bg-purple-600 transition">
+                      <div className="bg-slate-700 p-3 rounded-lg group-hover:bg-purple-600 transition">
                         <FiFileText className="text-white text-xl" />
                       </div>
                       <div className="flex-1">
@@ -4675,7 +4675,7 @@ export default function Home() {
                       onClick={() => { exportSubDivisionCount(); setShowReportModal(false); }}
                       className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 hover:border-purple-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <div className="bg-purple-500 p-3 rounded-lg group-hover:bg-purple-600 transition">
+                      <div className="bg-slate-700 p-3 rounded-lg group-hover:bg-purple-600 transition">
                         <FiFileText className="text-white text-xl" />
                       </div>
                       <div className="flex-1">
@@ -4687,7 +4687,7 @@ export default function Home() {
                       onClick={() => { exportDatewiseTotalCount(); setShowReportModal(false); }}
                       className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 hover:border-purple-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <div className="bg-purple-500 p-3 rounded-lg group-hover:bg-purple-600 transition">
+                      <div className="bg-slate-700 p-3 rounded-lg group-hover:bg-purple-600 transition">
                         <FiFileText className="text-white text-xl" />
                       </div>
                       <div className="flex-1">
@@ -4699,7 +4699,7 @@ export default function Home() {
                       onClick={() => { exportSubStationCount(); setShowReportModal(false); }}
                       className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 hover:border-purple-400 hover:shadow-md rounded-lg transition-all text-left group"
                     >
-                      <div className="bg-purple-500 p-3 rounded-lg group-hover:bg-purple-600 transition">
+                      <div className="bg-slate-700 p-3 rounded-lg group-hover:bg-purple-600 transition">
                         <FiFileText className="text-white text-xl" />
                       </div>
                       <div className="flex-1">

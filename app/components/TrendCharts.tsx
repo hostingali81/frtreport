@@ -95,12 +95,22 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
     }
     const divisionData = Array.from(divisionMap.entries()).sort((a, b) => b[1] - a[1]);
     const divisionColors = divisionData.map((_, i) => {
-      const hue = (i * 360 / divisionData.length) % 360;
-      return `hsla(${hue}, 70%, 60%, 0.8)`;
+      // Professional Palette: Blues, Teals, Indigos, Slates
+      const palette = [
+        'rgba(30, 64, 175, 0.8)', // Primary 800
+        'rgba(14, 116, 144, 0.8)', // Cyan 700
+        'rgba(71, 85, 105, 0.8)', // Slate 600
+        'rgba(37, 99, 235, 0.8)', // Blue 600
+        'rgba(15, 23, 42, 0.8)',  // Slate 900
+        'rgba(3, 105, 161, 0.8)', // Sky 700
+      ];
+      return palette[i % palette.length];
     });
     const divisionBorderColors = divisionData.map((_, i) => {
-      const hue = (i * 360 / divisionData.length) % 360;
-      return `hsla(${hue}, 70%, 50%, 1)`;
+      const palette = [
+        '#1e40af', '#0e7490', '#475569', '#2563eb', '#0f172a', '#0369a1'
+      ];
+      return palette[i % palette.length];
     });
 
     if (comparisonChartInstance.current) comparisonChartInstance.current.destroy();
@@ -121,8 +131,8 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
               {
                 label: 'Control Room Closed',
                 data: sortedDates.map(date => controlRoomMap.get(date) || 0),
-                borderColor: 'rgb(239, 68, 68)',
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                borderColor: '#0f172a', // Navy (Slate 900)
+                backgroundColor: 'rgba(15, 23, 42, 0.1)',
                 tension: 0.3,
                 fill: true,
                 pointRadius: 4,
@@ -131,8 +141,8 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
               {
                 label: 'FRT Closed',
                 data: sortedDates.map(date => frtMap.get(date) || 0),
-                borderColor: 'rgb(59, 130, 246)',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                borderColor: '#0284c7', // Sky 600
+                backgroundColor: 'rgba(2, 132, 199, 0.1)',
                 tension: 0.3,
                 fill: true,
                 pointRadius: 4,
@@ -218,7 +228,8 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
     if (beyondChartRef.current && beyondData.length > 0) {
       const ctx = beyondChartRef.current.getContext('2d');
       if (ctx) {
-        const colors = ['#10b981', '#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
+        // Professional Palette
+        const colors = ['#1e3a8a', '#1d4ed8', '#3b82f6', '#64748b', '#94a3b8', '#0f172a', '#0ea5e9', '#0284c7'];
         beyondChartInstance.current = new Chart(ctx, {
           type: 'doughnut',
           data: {
@@ -257,18 +268,17 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
     }
     const subStationData = Array.from(subStationMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 15);
     const professionalPalette = [
-      'rgba(59, 130, 246, 0.8)', 'rgba(16, 185, 129, 0.8)', 'rgba(245, 158, 11, 0.8)',
-      'rgba(139, 92, 246, 0.8)', 'rgba(236, 72, 153, 0.8)', 'rgba(20, 184, 166, 0.8)',
-      'rgba(251, 146, 60, 0.8)', 'rgba(99, 102, 241, 0.8)', 'rgba(34, 197, 94, 0.8)',
-      'rgba(234, 179, 8, 0.8)', 'rgba(168, 85, 247, 0.8)', 'rgba(244, 63, 94, 0.8)',
-      'rgba(6, 182, 212, 0.8)', 'rgba(249, 115, 22, 0.8)', 'rgba(124, 58, 237, 0.8)'
+      'rgba(30, 58, 138, 0.8)',  // Primary 900
+      'rgba(29, 78, 216, 0.8)',  // Primary 700
+      'rgba(59, 130, 246, 0.8)', // Primary 500
+      'rgba(15, 23, 42, 0.8)',   // Slate 900
+      'rgba(51, 65, 85, 0.8)',   // Slate 700
+      'rgba(100, 116, 139, 0.8)',// Slate 500
+      'rgba(3, 105, 161, 0.8)',  // Sky 700
+      'rgba(14, 165, 233, 0.8)', // Sky 500
     ];
     const professionalBorders = [
-      'rgb(59, 130, 246)', 'rgb(16, 185, 129)', 'rgb(245, 158, 11)',
-      'rgb(139, 92, 246)', 'rgb(236, 72, 153)', 'rgb(20, 184, 166)',
-      'rgb(251, 146, 60)', 'rgb(99, 102, 241)', 'rgb(34, 197, 94)',
-      'rgb(234, 179, 8)', 'rgb(168, 85, 247)', 'rgb(244, 63, 94)',
-      'rgb(6, 182, 212)', 'rgb(249, 115, 22)', 'rgb(124, 58, 237)'
+      '#1e3a8a', '#1d4ed8', '#3b82f6', '#0f172a', '#334155', '#64748b', '#0369a1', '#0ea5e9'
     ];
     const subStationColors = subStationData.map((_, i) => professionalPalette[i % professionalPalette.length]);
     const subStationBorderColors = subStationData.map((_, i) => professionalBorders[i % professionalBorders.length]);
@@ -346,8 +356,8 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
             datasets: [{
               label: 'Daily Complaints',
               data: dailyDates.map(date => dailyMap.get(date) || 0),
-              borderColor: 'rgb(139, 92, 246)',
-              backgroundColor: 'rgba(139, 92, 246, 0.2)',
+              borderColor: '#64748b', // Slate 500
+              backgroundColor: 'rgba(100, 116, 139, 0.2)',
               tension: 0.4,
               fill: true,
               pointRadius: 3,
@@ -381,8 +391,16 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
       const ctx = areaTypeChartRef.current.getContext('2d');
       if (ctx) {
         const areaTypePalette = [
-          '#06b6d4', '#8b5cf6', '#f59e0b', '#10b981', '#ec4899',
-          '#3b82f6', '#f97316', '#14b8a6', '#6366f1', '#eab308'
+          '#0c4a6e', // Navy
+          '#0284c7', // Sky
+          '#0d9488', // Teal
+          '#4f46e5', // Indigo
+          '#059669', // Emerald
+          '#d97706', // Amber
+          '#64748b', // Slate
+          '#7c3aed', // Violet
+          '#be185d', // Pink-Red (Professional)
+          '#0891b2'  // Cyan
         ];
         areaTypeChartInstance.current = new Chart(ctx, {
           type: 'pie',
@@ -428,15 +446,15 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
 
   return (
     <div className="space-y-8">
-      <div className="bg-gradient-to-br from-white via-blue-50/30 to-purple-50/30 rounded-2xl shadow-2xl p-8 border border-gray-100">
+      <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-200">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
-            <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-3 rounded-xl shadow-lg">
-              <span className="text-3xl">📊</span>
+            <div className="bg-sky-50 p-3 rounded-xl">
+              <span className="text-3xl text-primary-700">📊</span>
             </div>
             <div>
-              <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                Interactive Analytics Dashboard
+              <h2 className="text-3xl font-bold text-gray-900">
+                Independent Analytics Dashboard
               </h2>
               <p className="text-sm text-gray-500 mt-1">Visual insights and trend analysis</p>
             </div>
@@ -448,37 +466,37 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white p-6 rounded-xl border-2 border-blue-100 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300">
             <div style={{ height: '380px' }}>
               <canvas ref={comparisonChartRef}></canvas>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl border-2 border-purple-100 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300">
             <div style={{ height: '380px' }}>
               <canvas ref={dailyTrendChartRef}></canvas>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl border-2 border-emerald-100 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300">
             <div style={{ height: '380px' }}>
               <canvas ref={beyondChartRef}></canvas>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl border-2 border-cyan-100 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300">
             <div style={{ height: '380px' }}>
               <canvas ref={areaTypeChartRef}></canvas>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl border-2 border-indigo-100 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300">
             <div style={{ height: '380px' }}>
               <canvas ref={divisionChartRef}></canvas>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl border-2 border-teal-100 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300">
             <div style={{ height: '380px' }}>
               <canvas ref={subStationChartRef}></canvas>
             </div>
