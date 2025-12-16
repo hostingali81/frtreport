@@ -7,6 +7,7 @@ import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock, FiBar
 import Image from 'next/image';
 import Select from 'react-select';
 import { useRouter } from 'next/navigation';
+import FilterBar from './components/FilterBar';
 
 export default function Home() {
   const ShiftBadge = ({ letter }: { letter: string }) => (
@@ -24,6 +25,7 @@ export default function Home() {
   const [fromDT, setFromDT] = useState(''); // yyyy-mm-ddTHH:mm (datetime-local)
   const [toDT, setToDT] = useState('');   // yyyy-mm-ddTHH:mm (datetime-local)
   const [statusFilter, setStatusFilter] = useState(''); // empty = all
+  const [closedStatusFilter, setClosedStatusFilter] = useState(''); // NEW state
   const [divisionFilter, setDivisionFilter] = useState('');
   const [subDivisionFilter, setSubDivisionFilter] = useState('');
   const [subStationFilter, setSubStationFilter] = useState('');
@@ -39,6 +41,15 @@ export default function Home() {
     const set = new Set<string>();
     for (const r of original) {
       const s = String((r as any)['Status'] ?? '').trim();
+      if (s) set.add(s);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [original]);
+
+  const closedStatusOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of original) {
+      const s = String((r as any)['Closed Status'] ?? '').trim();
       if (s) set.add(s);
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
@@ -220,6 +231,9 @@ export default function Home() {
     if (statusFilter) {
       rows = rows.filter(row => String(row['Status'] ?? '').trim() === statusFilter);
     }
+    if (closedStatusFilter) {
+      rows = rows.filter(row => String(row['Closed Status'] ?? '').trim() === closedStatusFilter);
+    }
     if (divisionFilter) {
       rows = rows.filter(row => String(row['Division'] ?? '').trim() === divisionFilter);
     }
@@ -260,7 +274,7 @@ export default function Home() {
       });
     }
     return rows;
-  }, [original, search, fromDT, toDT, statusFilter, divisionFilter, subDivisionFilter, subStationFilter, sortColumn, sortDirection]);
+  }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, sortColumn, sortDirection]);
 
   const formatDateTimeLocal = (d: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -436,7 +450,7 @@ export default function Home() {
     setSelectedShift(labelMap[shiftType]);
   };
 
-  const applyPreset = (type: 'fromNov2025ToNow' | 'today' | 'last24h' | 'thisMonth' | 'toNow') => {
+  const applyPreset = (type: 'fromNov2025ToNow' | 'today' | 'last24h' | 'thisMonth' | 'toNow' | 'yesterday') => {
     const now = new Date();
     if (type === 'fromNov2025ToNow') {
       setFromDT('2025-11-01T00:00');
@@ -447,6 +461,12 @@ export default function Home() {
       setFromDT(formatDateTimeLocal(start));
       setToDT(formatDateTimeLocal(now));
       setActivePreset('today');
+    } else if (type === 'yesterday') {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+      setFromDT(formatDateTimeLocal(start));
+      setToDT(formatDateTimeLocal(end));
+      setActivePreset('yesterday');
     } else if (type === 'last24h') {
       const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       setFromDT(formatDateTimeLocal(start));
@@ -469,6 +489,7 @@ export default function Home() {
     setSubDivisionFilter('');
     setSubStationFilter('');
     setStatusFilter('');
+    setClosedStatusFilter(''); // Clear new filter
     setFromDT('');
     setToDT('');
     setSelectedShift('');
@@ -979,7 +1000,9 @@ export default function Home() {
         // Wait, 8 < 7 is mathematically false. Ascending is A to Z (Early to Late).
         // 07 Dec < 08 Dec.
         // If user sees 08 before 07, it's Descending.
-        // But code is a - b.
+        // If the user says "problems is 8 before 7", they mean it SHOULD NOT be that way.
+        // So they want Ascending.
+        // My code does `da - db`.
         // Maybe the user *wants* descending? "8 pehle, 7 baad mein"?
         // No, typically lists are 1, 2, 3...
         // If 8 is before 7, that is Descending.
@@ -2979,10 +3002,17 @@ export default function Home() {
 
     // Cover / Summary sheet
     const wsCover = wb.addWorksheet('1. Cover Page', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1 }] });
-    const periodText = periodSubtitle;
+    // Fix periodText definition
+    const periodParts: string[] = [];
+    if (fromDT) periodParts.push(`From: ${new Date(fromDT).toLocaleString()}`);
+    if (toDT) periodParts.push(`To: ${new Date(toDT).toLocaleString()}`);
+    const periodText = periodParts.length ? periodParts.join(' - ') : 'All Time';
+
     const statusApplied = statusFilter ? statusFilter : 'All';
+    const closedStatusApplied = closedStatusFilter ? closedStatusFilter : 'All';
     const uniqueDivisions = Array.from(new Set(rows.map(r => String((r as any)['Division'] || '').trim()).filter(Boolean))).sort();
     const uniqueStatuses = Array.from(new Set(rows.map(r => String((r as any)['Status'] || '').trim()).filter(Boolean))).sort();
+    const uniqueClosedStatuses = Array.from(new Set(rows.map(r => String((r as any)['Closed Status'] || '').trim()).filter(Boolean))).sort();
     const shiftSuffix = selectedShift ? ` | Shift: ${selectedShift}` : '';
     addTitle(wsCover, 'FRT Barabanki - Supply Complaint Report', `Generated: ${new Date().toLocaleString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})${shiftSuffix}`);
     wsCover.addRow([]);
@@ -4087,285 +4117,43 @@ export default function Home() {
         )}
 
         {original.length > 0 && !loading && (
-          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg p-6 mb-6 border border-gray-200">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div className="bg-blue-700 p-2.5 rounded-lg">
-                  <FiFilter className="text-white text-xl" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-bold text-gray-800">Filters & Presets</h2>
-                    {(search || statusFilter || divisionFilter || subDivisionFilter || subStationFilter || fromDT || toDT || selectedShift) && (
-                      <span className="bg-blue-700 text-white text-xs font-bold px-2.5 py-1 rounded-full">
-                        {[search, statusFilter, divisionFilter, subDivisionFilter, subStationFilter, fromDT, toDT, selectedShift].filter(Boolean).length}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-500">Refine your data view</p>
-                </div>
-              </div>
-              <button
-                onClick={clearAllFilters}
-                className="inline-flex items-center gap-2 bg-slate-700 to-slate-800 hover:from-gray-700 hover:to-gray-800 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 hover:-translate-y-0.5"
-              >
-                <FiFilter className="text-lg" /> <span>Clear All</span>
-              </button>
-            </div>
-            <div className="space-y-5">
-              <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-200">
-                <div className="flex items-center gap-2 mb-4">
-                  <FiSearch className="text-blue-500 text-lg" />
-                  <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Basic Filters</h3>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                  <div className="flex flex-col lg:col-span-2 min-w-0">
-                    <label className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
-                      <FiSearch className="text-gray-400" /> Search
-                    </label>
-                    <input
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Search keywords..."
-                      className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none w-full transition-all"
-                    />
-                  </div>
-                  <div className="flex flex-col min-w-0">
-                    <label className="text-xs font-semibold text-gray-600 mb-2">Division</label>
-                    <Select
-                      value={divisionFilter ? { value: divisionFilter, label: divisionFilter } : null}
-                      onChange={(option) => {
-                        setDivisionFilter(option?.value || '');
-                      }}
-                      options={[{ value: '', label: 'All' }, ...divisionOptions.map(s => ({ value: s, label: s }))]}
-                      isClearable
-                      placeholder="All"
-                      className="text-sm"
-                      styles={{
-                        control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
-                        menu: (base) => ({ ...base, fontSize: '14px' })
-                      }}
-                    />
-                  </div>
-                  <div className="flex flex-col min-w-0">
-                    <label className="text-xs font-semibold text-gray-600 mb-2">Sub Division</label>
-                    <Select
-                      value={subDivisionFilter ? { value: subDivisionFilter, label: subDivisionFilter } : null}
-                      onChange={(option) => {
-                        const selectedSubDiv = option?.value || '';
-                        setSubDivisionFilter(selectedSubDiv);
-                        if (selectedSubDiv) {
-                          const parentDiv = findParentForSubDivision(selectedSubDiv);
-                          if (parentDiv) setDivisionFilter(parentDiv);
-                        }
-                      }}
-                      options={[{ value: '', label: 'All' }, ...subDivisionOptions.map(s => ({ value: s, label: s }))]}
-                      isClearable
-                      placeholder="All"
-                      className="text-sm"
-                      styles={{
-                        control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
-                        menu: (base) => ({ ...base, fontSize: '14px' })
-                      }}
-                    />
-                  </div>
-                  <div className="flex flex-col min-w-0">
-                    <label className="text-xs font-semibold text-gray-600 mb-2">Sub Station</label>
-                    <Select
-                      value={subStationFilter ? { value: subStationFilter, label: subStationFilter } : null}
-                      onChange={(option) => {
-                        const selectedSubStn = option?.value || '';
-                        setSubStationFilter(selectedSubStn);
-                        if (selectedSubStn) {
-                          const parents = findParentsForSubStation(selectedSubStn);
-                          if (parents) {
-                            setDivisionFilter(parents.division);
-                            setSubDivisionFilter(parents.subDivision);
-                          }
-                        }
-                      }}
-                      options={[{ value: '', label: 'All' }, ...subStationOptions.map(s => ({ value: s, label: s }))]}
-                      isClearable
-                      placeholder="All"
-                      className="text-sm"
-                      styles={{
-                        control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
-                        menu: (base) => ({ ...base, fontSize: '14px' })
-                      }}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-4">
-                  <div className="flex flex-col min-w-0">
-                    <label className="text-xs font-semibold text-gray-600 mb-2">Status</label>
-                    <Select
-                      value={statusFilter ? { value: statusFilter, label: statusFilter } : null}
-                      onChange={(option) => setStatusFilter(option?.value || '')}
-                      options={[{ value: '', label: 'All' }, ...statusOptions.map(s => ({ value: s, label: s }))]}
-                      isClearable
-                      placeholder="All"
-                      className="text-sm"
-                      styles={{
-                        control: (base) => ({ ...base, minHeight: '38px', fontSize: '14px' }),
-                        menu: (base) => ({ ...base, fontSize: '14px' })
-                      }}
-                    />
-                  </div>
-                </div>
-                <div className="border-t border-gray-200 pt-4 mt-4">
-                  <div className="flex items-center gap-2 mb-4">
-                    <FiClock className="text-blue-500 text-lg" />
-                    <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Date Range</h3>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="flex flex-col min-w-0">
-                      <label className="text-xs font-semibold text-gray-600 mb-2">From (Date & Time)</label>
-                      <input
-                        type="datetime-local"
-                        value={fromDT}
-                        onChange={(e) => setFromDT(e.target.value)}
-                        className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
-                      />
-                    </div>
-                    <div className="flex flex-col min-w-0">
-                      <label className="text-xs font-semibold text-gray-600 mb-2">To (Date & Time)</label>
-                      <input
-                        type="datetime-local"
-                        value={toDT}
-                        onChange={(e) => setToDT(e.target.value)}
-                        className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-200">
-                <div className="flex items-center gap-2 mb-4">
-                  <FiClock className="text-purple-500 text-lg" />
-                  <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Quick Presets</h3>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={() => { applyPreset('fromNov2025ToNow'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'fromNov2025ToNow' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>📅 Nov-2025 → Now</button>
-                  <button onClick={() => { applyPreset('today'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'today' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>📆 Today</button>
-                  <button onClick={() => { const now = new Date(); const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1); const start = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0); const end = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59); setFromDT(formatDateTimeLocal(start)); setToDT(formatDateTimeLocal(end)); setActivePreset('yesterday'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'yesterday' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>📅 Yesterday</button>
-                  <button onClick={() => { applyPreset('last24h'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'last24h' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>⏰ Last 24h</button>
-                  <button onClick={() => { applyPreset('thisMonth'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'thisMonth' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>📊 This Month</button>
-                  <button onClick={() => { applyPreset('toNow'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'toNow' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>⚡ Set To = Now</button>
-                </div>
-              </div>
-              <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-200">
-                <div className="flex items-center gap-2 mb-5">
-                  <div className="bg-slate-700 p-1.5 rounded-lg">
-                    <FiLayers className="text-white text-base" />
-                  </div>
-                  <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Shift Presets</h3>
-                </div>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Control Room Shifts - Left Column */}
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="bg-blue-700 w-3 h-3 rounded-full"></div>
-                      <h4 className="text-sm font-bold text-blue-700">Control Room Shifts</h4>
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold text-gray-500 mb-2">🔙 Yesterday</div>
-                      <div className="flex flex-wrap gap-2">
-                        <button onClick={() => applyShiftPreset('yesterday_morning')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Control Room Morning') ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>🌅 Morning (7AM–3PM)</button>
-                        <button onClick={() => applyShiftPreset('yesterday_day')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Control Room Day') ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>☀️ Day (3PM–11PM)</button>
-                        <button onClick={() => applyShiftPreset('yesterday_night')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Control Room Night') ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>🌙 Night (11PM–7AM)</button>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold text-gray-500 mb-2">📅 Today</div>
-                      <div className="flex flex-wrap gap-2">
-                        <button onClick={() => applyShiftPreset('today_morning')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Control Room Morning') ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>🌅 Morning (7AM–3PM)</button>
-                        <button onClick={() => applyShiftPreset('today_day')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Control Room Day') ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>☀️ Day (3PM–11PM)</button>
-                        <button onClick={() => applyShiftPreset('today_night')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Control Room Night') ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>🌙 Night (11PM–7AM)</button>
-                      </div>
-                    </div>
-                  </div>
-                  {/* Field Shifts - Right Column */}
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="bg-green-500 w-3 h-3 rounded-full"></div>
-                      <h4 className="text-sm font-bold text-green-700">Field Shifts</h4>
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold text-gray-500 mb-2">🔙 Yesterday</div>
-                      <div className="flex flex-wrap gap-2">
-                        <button onClick={() => applyShiftPreset('yesterday_field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift A') ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="A" /> Shift A (8AM–4PM)</button>
-                        <button onClick={() => applyShiftPreset('yesterday_field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift B') ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="B" /> Shift B (4PM–12AM)</button>
-                        <button onClick={() => applyShiftPreset('yesterday_field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Yesterday - Field Shift C') ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="C" /> Shift C (12AM–8AM)</button>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold text-gray-500 mb-2">📅 Today</div>
-                      <div className="flex flex-wrap gap-2">
-                        <button onClick={() => applyShiftPreset('today_field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift A') ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="A" /> Shift A (8AM–4PM)</button>
-                        <button onClick={() => applyShiftPreset('today_field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift B') ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="B" /> Shift B (4PM–12AM)</button>
-                        <button onClick={() => applyShiftPreset('today_field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Today - Field Shift C') ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="C" /> Shift C (12AM–8AM)</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-5 shadow-sm border border-gray-200">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="bg-amber-600 p-1.5 rounded-lg">
-                    <FiClock className="text-white text-base" />
-                  </div>
-                  <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Custom Date Shift Selector</h3>
-                </div>
-                <div className="space-y-4">
-                  <div className="flex flex-col">
-                    <label className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
-                      📅 Select Date
-                    </label>
-                    <input
-                      type="date"
-                      value={customDate}
-                      onChange={(e) => setCustomDate(e.target.value)}
-                      className="border-2 border-orange-200 rounded-lg px-4 py-2.5 text-sm w-full max-w-xs focus:ring-2 focus:ring-orange-500 focus:border-orange-500 focus:outline-none bg-white transition-all"
-                    />
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold text-blue-600 mb-2 flex items-center gap-1">
-                      <div className="bg-blue-700 w-2 h-2 rounded-full"></div> Control Room Shifts
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button onClick={() => applyCustomDateShift('morning')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Control Room Morning') && selectedShift.includes(customDate) ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>🌅 Morning (7AM–3PM)</button>
-                      <button onClick={() => applyCustomDateShift('day')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Control Room Day') && selectedShift.includes(customDate) ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>☀️ Day (3PM–11PM)</button>
-                      <button onClick={() => applyCustomDateShift('night')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Control Room Night') && selectedShift.includes(customDate) ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>🌙 Night (11PM–7AM)</button>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold text-green-600 mb-2 flex items-center gap-1">
-                      <div className="bg-emerald-600 w-2 h-2 rounded-full"></div> Field Shifts
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button onClick={() => applyCustomDateShift('field_a')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Field Shift A') && selectedShift.includes(customDate) ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="A" /> Shift A (8AM–4PM)</button>
-                      <button onClick={() => applyCustomDateShift('field_b')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Field Shift B') && selectedShift.includes(customDate) ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="B" /> Shift B (4PM–12AM)</button>
-                      <button onClick={() => applyCustomDateShift('field_c')} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${selectedShift.includes('Field Shift C') && selectedShift.includes(customDate) ? 'bg-emerald-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><ShiftBadge letter="C" /> Shift C (12AM–8AM)</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              {selectedShift && (
-                <div className="bg-sky-50 rounded-xl p-4 border border-sky-200">
-                  <div className="flex items-center gap-2">
-                    <div className="bg-sky-600 p-1.5 rounded-lg">
-                      <FiClock className="text-white text-sm" />
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500 font-medium">Active Shift</div>
-                      <div className="text-sm font-bold text-sky-700">{selectedShift}</div>
-                    </div>
-                  </div>
-                </div>
-              )}
+          <>
+            <div className="mb-6">
+              <FilterBar
+                search={search}
+                setSearch={setSearch}
+                divisionFilter={divisionFilter}
+                setDivisionFilter={setDivisionFilter}
+                divisionOptions={divisionOptions}
+                subDivisionFilter={subDivisionFilter}
+                setSubDivisionFilter={setSubDivisionFilter}
+                subDivisionOptions={subDivisionOptions}
+                subStationFilter={subStationFilter}
+                setSubStationFilter={setSubStationFilter}
+                subStationOptions={subStationOptions}
+                statusFilter={statusFilter}
+                setStatusFilter={setStatusFilter}
+                statusOptions={statusOptions}
+                closedStatusFilter={closedStatusFilter}
+                setClosedStatusFilter={setClosedStatusFilter}
+                closedStatusOptions={closedStatusOptions}
+                fromDT={fromDT}
+                setFromDT={setFromDT}
+                toDT={toDT}
+                setToDT={setToDT}
+                selectedShift={selectedShift}
+                setSelectedShift={setSelectedShift}
+                activePreset={activePreset}
+                applyPreset={applyPreset}
+                applyShiftPreset={applyShiftPreset}
+                customDate={customDate}
+                setCustomDate={setCustomDate}
+                applyCustomDateShift={applyCustomDateShift}
+                clearAllFilters={clearAllFilters}
+              />
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 mt-6 pt-5 border-t-2 border-gray-200">
+            <div className="flex flex-wrap items-center justify-between gap-3 mt-6 pt-5 border-t border-gray-200">
               <div className="flex items-center gap-2 text-sm">
                 <FiBarChart2 className="text-sky-600 text-lg" />
                 <span className="font-semibold text-gray-700">Showing {filtered.length} of {original.length} complaints</span>
@@ -4403,7 +4191,7 @@ export default function Home() {
                 </button>
               </div>
             </div>
-          </div>
+          </>
         )}
 
         {error && (
@@ -4419,48 +4207,93 @@ export default function Home() {
                 <thead className="bg-gradient-to-r from-gray-100 to-gray-50 sticky top-0 z-10 shadow-sm">
                   <tr>
                     {(() => {
-                      const base = Object.keys(filtered[0]);
-                      const idx = base.indexOf('Closed Date');
-                      if (idx >= 0) base.splice(idx + 1, 0, 'Resolution Time'); else base.push('Resolution Time');
-                      return base;
-                    })().map((header) => (
-                      <th
-                        key={header}
-                        onClick={() => handleSort(header)}
-                        className="px-4 md:px-6 py-3 text-left font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-200 select-none"
-                      >
-                        <div className="flex items-center gap-1">
-                          {header}
-                          {sortColumn === header && (
-                            <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
-                          )}
-                        </div>
-                      </th>
-                    ))}
+                      const preferredOrder = [
+                        'Complaint Number',
+                        'Status',
+                        'Closed Status',
+                        'Complaint Date and Time',
+                        'Closed Date',
+                        'Resolution Time',
+                        'Area Type',
+                        'Division',
+                        'Sub Division',
+                        'Sub Station',
+                        'Closed By',
+                        'Closing Remarks'
+                      ];
+
+                      // Get all unique keys from the first row to check for extra columns
+                      const firstRowKeys = Object.keys(filtered[0] || {});
+                      // Remove Resolution Time from generic check as it is computed
+                      const otherKeys = firstRowKeys.filter(k => !preferredOrder.includes(k) && k !== 'Resolution Time');
+
+                      // Final headers: Preferred + Others
+                      const finalHeaders = [...preferredOrder, ...otherKeys];
+
+                      return finalHeaders.map((header) => (
+                        <th
+                          key={header}
+                          onClick={() => handleSort(header)}
+                          className="px-4 md:px-6 py-3 text-left font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-200 select-none"
+                        >
+                          <div className="flex items-center gap-1">
+                            {header}
+                            {sortColumn === header && (
+                              <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                            )}
+                          </div>
+                        </th>
+                      ));
+                    })()}
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
                   {filtered.map((row, index) => (
                     <tr key={index} className="hover:bg-gray-50">
                       {(() => {
-                        const baseHeaders = Object.keys(row);
-                        const idx = baseHeaders.indexOf('Closed Date');
-                        const headers = idx >= 0 ? [
-                          ...baseHeaders.slice(0, idx + 1),
+                        const preferredOrder = [
+                          'Complaint Number',
+                          'Status',
+                          'Closed Status',
+                          'Complaint Date and Time',
+                          'Closed Date',
                           'Resolution Time',
-                          ...baseHeaders.slice(idx + 1)
-                        ] : [...baseHeaders, 'Resolution Time'];
-                        return headers.map((h, i) => {
+                          'Area Type',
+                          'Division',
+                          'Sub Division',
+                          'Sub Station',
+                          'Closed By',
+                          'Closing Remarks'
+                        ];
+                        const firstRowKeys = Object.keys(row || {});
+                        const otherKeys = firstRowKeys.filter(k => !preferredOrder.includes(k) && k !== 'Resolution Time');
+                        const finalHeaders = [...preferredOrder, ...otherKeys];
+
+                        return finalHeaders.map((h, i) => {
                           let display: any = (row as any)[h];
                           if (h === 'Resolution Time') display = computeResolutionTime(row);
                           const isRemarks = h === 'Closing Remarks';
+                          const isClosedStatus = h === 'Closed Status';
+
+                          let cellContent;
+                          if (isClosedStatus) {
+                            const status = String(display || '').trim();
+                            const isWithin = status === 'Closed Within';
+                            const isBeyond = status === 'Closed Beyond';
+                            cellContent = (
+                              <span className={`px-2 py-1 rounded-full font-medium ${isWithin ? 'bg-green-100 text-green-700' : isBeyond ? 'bg-red-100 text-red-700' : 'text-gray-600'}`}>
+                                {status}
+                              </span>
+                            );
+                          } else if (isRemarks) {
+                            cellContent = <span title={String(display || '')} className="block truncate">{String(display || '')}</span>;
+                          } else {
+                            cellContent = String(display ?? '');
+                          }
+
                           return (
                             <td key={i} className="px-4 md:px-6 py-3 whitespace-nowrap text-gray-900 max-w-[14rem] md:max-w-xs">
-                              {isRemarks ? (
-                                <span title={String(display || '')} className="block truncate">{String(display || '')}</span>
-                              ) : (
-                                String(display ?? '')
-                              )}
+                              {cellContent}
                             </td>
                           );
                         });
