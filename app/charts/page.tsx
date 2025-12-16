@@ -21,6 +21,7 @@ export default function ChartsPage() {
   const [divisionFilter, setDivisionFilter] = useState('');
   const [subDivisionFilter, setSubDivisionFilter] = useState('');
   const [subStationFilter, setSubStationFilter] = useState('');
+  const [closedStatusFilter, setClosedStatusFilter] = useState('');
   const [selectedShift, setSelectedShift] = useState<string>('');
   const [customDate, setCustomDate] = useState<string>('');
   const [activePreset, setActivePreset] = useState<string>('');
@@ -36,8 +37,21 @@ export default function ChartsPage() {
     if (closedDate.length > 0) return true;
     if (statusLower.includes('closed') || statusLower.includes('resolve')) return true;
     if (statusLower.includes('attend') && statusLower.includes('confirm')) return true;
+    if (statusLower.includes('attend') && statusLower.includes('confirm')) return true;
     return false;
   };
+
+  const closedStatusOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of original) {
+      // Use the helper logic or raw column if available. 
+      // The main page uses raw 'Closed Status' column if it exists in data, or derives it.
+      // Based on main page, it uses the 'Closed Status' column directly.
+      const s = String(r['Closed Status'] ?? '').trim();
+      if (s) set.add(s);
+    }
+    return Array.from(set).sort();
+  }, [original]);
 
   const statusOptions = useMemo(() => {
     const set = new Set<string>();
@@ -140,11 +154,12 @@ export default function ChartsPage() {
       });
     }
     if (statusFilter) rows = rows.filter(row => String(row['Status'] ?? '').trim() === statusFilter);
+    if (closedStatusFilter) rows = rows.filter(row => String(row['Closed Status'] ?? '').trim() === closedStatusFilter);
     if (divisionFilter) rows = rows.filter(row => String(row['Division'] ?? '').trim() === divisionFilter);
     if (subDivisionFilter) rows = rows.filter(row => String(row['Sub Division'] ?? '').trim() === subDivisionFilter);
     if (subStationFilter) rows = rows.filter(row => String(row['Sub Station'] ?? '').trim() === subStationFilter);
     return rows;
-  }, [original, search, fromDT, toDT, statusFilter, divisionFilter, subDivisionFilter, subStationFilter]);
+  }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter]);
 
   useEffect(() => {
     setData(filtered);
@@ -324,7 +339,7 @@ export default function ChartsPage() {
     setSelectedShift(labelMap[shiftType]);
   };
 
-  const applyPreset = (type: 'fromNov2025ToNow' | 'today' | 'last24h' | 'thisMonth' | 'toNow') => {
+  const applyPreset = (type: 'fromNov2025ToNow' | 'today' | 'last24h' | 'thisMonth' | 'toNow' | 'yesterday') => {
     const now = new Date();
     if (type === 'fromNov2025ToNow') {
       setFromDT('2025-11-01T00:00');
@@ -335,6 +350,12 @@ export default function ChartsPage() {
       setFromDT(formatDateTimeLocal(start));
       setToDT(formatDateTimeLocal(now));
       setActivePreset('today');
+    } else if (type === 'yesterday') {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+      setFromDT(formatDateTimeLocal(start));
+      setToDT(formatDateTimeLocal(end));
+      setActivePreset('yesterday');
     } else if (type === 'last24h') {
       const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       setFromDT(formatDateTimeLocal(start));
@@ -356,7 +377,9 @@ export default function ChartsPage() {
     setDivisionFilter('');
     setSubDivisionFilter('');
     setSubStationFilter('');
+    setSubStationFilter('');
     setStatusFilter('');
+    setClosedStatusFilter('');
     setFromDT('');
     setToDT('');
     setSelectedShift('');
@@ -455,6 +478,9 @@ export default function ChartsPage() {
                 statusFilter={statusFilter}
                 setStatusFilter={setStatusFilter}
                 statusOptions={statusOptions}
+                closedStatusFilter={closedStatusFilter}
+                setClosedStatusFilter={setClosedStatusFilter}
+                closedStatusOptions={closedStatusOptions}
                 fromDT={fromDT}
                 setFromDT={setFromDT}
                 toDT={toDT}
