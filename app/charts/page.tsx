@@ -250,8 +250,10 @@ export default function ChartsPage() {
         break;
       }
       case 'today_field_c': {
-        const start = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
-        const end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 8, 0, 0);
+        const start = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(start.getTime());
+        end.setHours(8, 0, 0, 0);
         setRange(start, end);
         break;
       }
@@ -268,8 +270,8 @@ export default function ChartsPage() {
         break;
       }
       case 'yesterday_field_c': {
-        const start = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0);
-        const end = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 8, 0, 0);
+        const start = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
+        const end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 8, 0, 0);
         setRange(start, end);
         break;
       }
@@ -330,8 +332,10 @@ export default function ChartsPage() {
         break;
       }
       case 'field_c': {
-        const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0);
-        const end = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 8, 0, 0);
+        const start = new Date(date.getTime() + 24 * 60 * 60 * 1000);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(start.getTime());
+        end.setHours(8, 0, 0, 0);
         setRange(start, end);
         break;
       }
