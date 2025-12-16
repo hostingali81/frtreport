@@ -4217,8 +4217,8 @@ export default function Home() {
                     <FiClock className="text-blue-500 text-lg" />
                     <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Date Range</h3>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
-                    <div className="flex flex-col lg:col-span-1 min-w-0">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="flex flex-col min-w-0">
                       <label className="text-xs font-semibold text-gray-600 mb-2">From (Date & Time)</label>
                       <input
                         type="datetime-local"
@@ -4227,7 +4227,7 @@ export default function Home() {
                         className="border-2 border-gray-200 rounded-lg px-4 py-2.5 text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
                       />
                     </div>
-                    <div className="flex flex-col lg:col-span-1 min-w-0">
+                    <div className="flex flex-col min-w-0">
                       <label className="text-xs font-semibold text-gray-600 mb-2">To (Date & Time)</label>
                       <input
                         type="datetime-local"
@@ -4247,6 +4247,7 @@ export default function Home() {
                 <div className="flex flex-wrap items-center gap-2">
                   <button onClick={() => { applyPreset('fromNov2025ToNow'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'fromNov2025ToNow' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>📅 Nov-2025 → Now</button>
                   <button onClick={() => { applyPreset('today'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'today' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>📆 Today</button>
+                  <button onClick={() => { const now = new Date(); const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1); const start = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0); const end = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59); setFromDT(formatDateTimeLocal(start)); setToDT(formatDateTimeLocal(end)); setActivePreset('yesterday'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'yesterday' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>📅 Yesterday</button>
                   <button onClick={() => { applyPreset('last24h'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'last24h' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>⏰ Last 24h</button>
                   <button onClick={() => { applyPreset('thisMonth'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'thisMonth' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>📊 This Month</button>
                   <button onClick={() => { applyPreset('toNow'); setSelectedShift(''); }} className={`text-xs font-medium px-3 py-2 rounded-lg border transition-all ${activePreset === 'toNow' && !selectedShift ? 'bg-sky-700 text-white shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm'}`}>⚡ Set To = Now</button>
