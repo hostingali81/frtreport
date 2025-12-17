@@ -4,6 +4,9 @@ import React, { useState } from 'react';
 import Select from 'react-select';
 import { FiSearch, FiFilter, FiCalendar, FiClock, FiX, FiLayers, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 
+import Calendar from 'react-calendar';
+import 'react-calendar/dist/Calendar.css';
+
 interface Option {
   value: string;
   label: string;
@@ -58,6 +61,9 @@ interface FilterBarProps {
   clearAllFilters: () => void;
   onRefresh?: () => void;
   loading?: boolean;
+
+  // Data for Calendar
+  dailyCounts?: Record<string, number>;
 }
 
 const ShiftBadge = ({ letter }: { letter: string }) => (
@@ -76,9 +82,10 @@ export default function FilterBar({
   fromDT, setFromDT, toDT, setToDT,
   selectedShift, setSelectedShift, activePreset, applyPreset, applyShiftPreset,
   customDate, setCustomDate, applyCustomDateShift,
-  clearAllFilters, onRefresh, loading
+  clearAllFilters, onRefresh, loading, dailyCounts = {}
 }: FilterBarProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
 
   React.useEffect(() => {
@@ -115,8 +122,58 @@ export default function FilterBar({
     return `${day}/${month}/${year}`;
   };
 
+  // Calendar Helpers
+  const onDateChange = (value: any) => {
+    if (!value) return;
+    const d = value as Date;
+    // Set fromDT to Start of Day (00:00)
+    // Set toDT to End of Day (23:59) (or next day 00:00 depending on filter logic, usually end of day helpful)
+    // Filter logic in parent uses <= toDT probably, or <. Let's check parent logic.
+    // Parent page.tsx: if (toDate && dt > toDate) return false; (Wait, if toDate is 23:59:59 it works?)
+    // Let's set it to 23:59:59.
+
+    // Construct local YYYY-MM-DDTHH:mm
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const mm = pad(d.getMonth() + 1);
+    const dd = pad(d.getDate());
+
+    setFromDT(`${yyyy}-${mm}-${dd}T00:00`);
+    setToDT(`${yyyy}-${mm}-${dd}T23:59`);
+  };
+
+  const tileContent = ({ date, view }: { date: Date, view: string }) => {
+    if (view === 'month') {
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const key = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+      const count = dailyCounts[key];
+      if (count) {
+        return (
+          <div className="flex justify-center mt-1">
+            <span className="text-[10px] bg-red-100 text-red-600 font-bold px-1.5 rounded-full border border-red-200 shadow-sm">
+              {count}
+            </span>
+          </div>
+        );
+      }
+    }
+    return null;
+  };
+
+  const tileDisabled = ({ date, view }: { date: Date, view: string }) => {
+    // Only disable in month view to allow navigation between months/years
+    if (view === 'month') {
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const key = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+      // Logic: Disable if NO count for this day
+      // (If you want to allow clicking '0' count, remove this. But user said "jo dates data main nhi hai wo disabled dikhe")
+      return !dailyCounts[key];
+    }
+    return false;
+  };
+
   return (
-    <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden hover:shadow-xl transition-shadow duration-300">
+    <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-visible hover:shadow-xl transition-shadow duration-300 relative z-20">
       {/* Top Bar: Always Visible */}
       <div className="p-4 flex flex-col lg:flex-row gap-4 items-center justify-between bg-gradient-to-r from-gray-50/50 via-white to-gray-50/50">
 
@@ -143,6 +200,14 @@ export default function FilterBar({
             )}
             {isExpanded ? <FiChevronUp /> : <FiChevronDown />}
           </button>
+
+          <button
+            onClick={() => setShowCalendar(!showCalendar)}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all shadow-sm border ${showCalendar ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-200' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'}`}
+          >
+            <FiCalendar className={showCalendar ? 'text-white' : 'text-gray-500'} />
+            <span className="hidden sm:inline">Calendar</span>
+          </button>
         </div>
 
         {/* Right: Date Range & Actions */}
@@ -167,6 +232,21 @@ export default function FilterBar({
           )}
         </div>
       </div>
+
+      {/* Calendar Dropdown Area */}
+      {showCalendar && (
+        <div className="p-4 bg-white border-t border-gray-100 flex justify-center animate-fadeIn">
+          <div className="max-w-md w-full">
+            <p className="text-center text-sm text-gray-500 mb-2">Select a date to filter (Badges show total complaints)</p>
+            <Calendar
+              onChange={onDateChange}
+              tileContent={tileContent}
+              tileDisabled={tileDisabled}
+              className="shadow-sm border border-gray-200 rounded-lg w-full !font-sans"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Expanded Section: Advanced Filters */}
       {isExpanded && (

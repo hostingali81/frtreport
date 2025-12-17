@@ -277,6 +277,21 @@ export default function Home() {
     return rows;
   }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, sortColumn, sortDirection]);
 
+  // Calculate daily counts for calendar
+  const dailyCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const row of original) {
+      const val = String(row['Complaint Date and Time'] || row['Complaint Date'] || '');
+      const dt = parsePossibleDate(val);
+      if (dt) {
+        // Use local date string YYYY-MM-DD
+        const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        counts[key] = (counts[key] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [original]);
+
   const formatDateTimeLocal = (d: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0');
     const yyyy = d.getFullYear();
@@ -4155,6 +4170,7 @@ export default function Home() {
                 setCustomDate={setCustomDate}
                 applyCustomDateShift={applyCustomDateShift}
                 clearAllFilters={clearAllFilters}
+                dailyCounts={dailyCounts}
               />
             </div>
 
