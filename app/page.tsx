@@ -119,8 +119,9 @@ export default function Home() {
 
       if (result.success) {
         if (result.data && result.data.length > 0) {
-          setOriginal(result.data);
-          setData(result.data);
+          const reversed = [...result.data].reverse();
+          setOriginal(reversed);
+          setData(reversed);
           // Set timestamp from API response (last scrape time)
           if (result.lastScrapedAt) {
             setLastUpdated(result.lastScrapedAt);
