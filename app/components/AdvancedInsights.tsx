@@ -181,60 +181,111 @@ export default function AdvancedInsights({ data }: Props) {
         if (!trendRef.current) return;
         if (trendInstance.current) trendInstance.current.destroy();
 
-        // Group by Month
-        const monthlyStats: Record<string, { totalTime: number, count: number, order: number }> = {};
+        // 1. Determine Date Range
+        let minTime = Infinity;
+        let maxTime = -Infinity;
 
-        // Use global 'data' so trend lines show history even when a specific month is selected
+        data.forEach(r => {
+            const d = parseDate(String(r['Complaint Date and Time'] || ''));
+            if (d) {
+                const t = d.getTime();
+                if (t < minTime) minTime = t;
+                if (t > maxTime) maxTime = t;
+            }
+        });
+
+        const spanDays = (maxTime - minTime) / (1000 * 60 * 60 * 24);
+        const useWeekly = spanDays <= 90; // If less than 3 months, use weekly
+
+        // 2. Group Data
+        const stats: Record<string, { totalTime: number, count: number, order: number }> = {};
+
         data.forEach(r => {
             const open = parseDate(String(r['Complaint Date and Time'] || ''));
             const close = parseDate(String(r['Closed Date'] || ''));
 
             if (open && close) {
-                const key = open.toLocaleString('en-US', { month: 'short', year: '2-digit' });
-                const sortKey = open.getFullYear() * 100 + open.getMonth(); // 202401
+                let key = '';
+                let sortKey = 0;
 
-                if (!monthlyStats[key]) monthlyStats[key] = { totalTime: 0, count: 0, order: sortKey };
+                if (useWeekly) {
+                    // Weekly Grouping
+                    const startOfYear = new Date(open.getFullYear(), 0, 1);
+                    const days = Math.floor((open.getTime() - startOfYear.getTime()) / (24 * 60 * 60 * 1000));
+                    const weekNum = Math.ceil((days + 1) / 7);
+
+                    key = `W${weekNum} ${open.toLocaleString('en-US', { month: 'short' })}`;
+                    sortKey = open.getFullYear() * 1000 + weekNum;
+                } else {
+                    // Monthly Grouping
+                    key = open.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+                    sortKey = open.getFullYear() * 100 + open.getMonth();
+                }
+
+                if (!stats[key]) stats[key] = { totalTime: 0, count: 0, order: sortKey };
 
                 const diff = close.getTime() - open.getTime();
                 if (diff > 0) {
-                    monthlyStats[key].totalTime += diff;
-                    monthlyStats[key].count++;
+                    stats[key].totalTime += diff;
+                    stats[key].count++;
                 }
             }
         });
 
-        // Convert to Array & Sort
-        const trendData = Object.entries(monthlyStats)
+        // 3. Format Data
+        const trendData = Object.entries(stats)
             .map(([label, val]) => ({
                 label,
                 avg: val.count > 0 ? (val.totalTime / val.count / 3600000) : 0,
                 order: val.order
             }))
             .sort((a, b) => a.order - b.order);
-        // .slice(-6); // Remove slice if we are filtering, show whatever is relevant
+
+        // Helper to format hours to "1h 30m"
+        const formatDuration = (val: number) => {
+            const h = Math.floor(val);
+            const m = Math.round((val - h) * 60);
+            return `${h}h ${m}m`;
+        };
 
         trendInstance.current = new Chart(trendRef.current, {
             type: 'line',
             data: {
                 labels: trendData.map(d => d.label),
                 datasets: [{
-                    label: 'Avg Time (Hrs)',
+                    label: 'Avg Resolution Time',
                     data: trendData.map(d => d.avg),
                     borderColor: '#10b981', // Emerald
                     backgroundColor: 'rgba(16, 185, 129, 0.1)',
                     fill: true,
                     tension: 0.4,
-                    pointRadius: 4
+                    pointRadius: 4,
+                    pointHoverRadius: 6
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { display: false }
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => {
+                                const val = ctx.parsed.y;
+                                return `Avg Time: ${val !== null ? formatDuration(val) : '0h'}`;
+                            }
+                        }
+                    }
                 },
                 scales: {
-                    y: { beginAtZero: true, grid: { color: '#f3f4f6' }, title: { display: true, text: 'Hours' } },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: '#f3f4f6' },
+                        title: { display: true, text: 'Time' },
+                        ticks: {
+                            callback: (val) => formatDuration(Number(val))
+                        }
+                    },
                     x: { grid: { display: false } }
                 }
             }
