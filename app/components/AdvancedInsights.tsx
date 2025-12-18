@@ -87,7 +87,7 @@ export default function AdvancedInsights({ data }: Props) {
         return { grid, maxCount };
     }, [filteredData]);
 
-    // 2. Top Problem Areas (Sub Division)
+    // 2. Top Problem Areas (Sub Station)
     useEffect(() => {
         if (!topAreasRef.current) return;
 
@@ -97,7 +97,7 @@ export default function AdvancedInsights({ data }: Props) {
         // Calculate
         const counts: Record<string, number> = {};
         filteredData.forEach(r => {
-            const div = String(r['Sub Division'] || 'Unknown').trim();
+            const div = String(r['Sub Station'] || 'Unknown').trim();
             counts[div] = (counts[div] || 0) + 1;
         });
 
@@ -251,7 +251,7 @@ export default function AdvancedInsights({ data }: Props) {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {/* 1. Top Problem Areas */}
                 <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
-                    <h3 className="text-lg font-bold text-gray-800 mb-4">🏆 Top Problem Areas (Sub Divisions)</h3>
+                    <h3 className="text-lg font-bold text-gray-800 mb-4">🏆 Top Problem Areas (Sub Stations)</h3>
                     <div className="h-64">
                         <canvas ref={topAreasRef} />
                     </div>
