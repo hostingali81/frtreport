@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useRef, useEffect } from 'react';
+import { useMemo, useRef, useEffect, useState } from 'react';
 import { Chart } from 'chart.js/auto';
+import Select from 'react-select';
 
 interface Props {
     data: any[];
@@ -10,6 +11,7 @@ interface Props {
 export default function AdvancedInsights({ data }: Props) {
     const topAreasRef = useRef<HTMLCanvasElement>(null);
     const trendRef = useRef<HTMLCanvasElement>(null);
+    const [selectedMonth, setSelectedMonth] = useState<string | null>(null); // 'Null' means All Time
 
     // Instances
     const topAreasInstance = useRef<Chart | null>(null);
@@ -41,12 +43,37 @@ export default function AdvancedInsights({ data }: Props) {
         return null;
     };
 
+    // Month Options
+    const monthOptions = useMemo(() => {
+        const months = new Set<string>();
+        data.forEach(r => {
+            const d = parseDate(String(r['Complaint Date and Time'] || r['Complaint Date'] || ''));
+            if (d) {
+                months.add(d.toLocaleString('en-US', { month: 'long', year: 'numeric' }));
+            }
+        });
+        const opts = Array.from(months)
+            .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
+            .map(m => ({ value: m, label: m }));
+
+        return [{ value: 'All', label: 'All Time' }, ...opts];
+    }, [data]);
+
+    // Filter Data
+    const filteredData = useMemo(() => {
+        if (!selectedMonth || selectedMonth === 'All') return data;
+        return data.filter(r => {
+            const d = parseDate(String(r['Complaint Date and Time'] || r['Complaint Date'] || ''));
+            return d && d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) === selectedMonth;
+        });
+    }, [data, selectedMonth]);
+
     // 1. Peak Time Heatmap Data
     const heatmapData = useMemo(() => {
         const grid = Array(7).fill(0).map(() => Array(24).fill(0));
         let maxCount = 0;
 
-        data.forEach(r => {
+        filteredData.forEach(r => {
             const d = parseDate(String(r['Complaint Date and Time'] || r['Complaint Date'] || ''));
             if (d) {
                 const day = d.getDay(); // 0 = Sun
@@ -58,7 +85,7 @@ export default function AdvancedInsights({ data }: Props) {
             }
         });
         return { grid, maxCount };
-    }, [data]);
+    }, [filteredData]);
 
     // 2. Top Problem Areas (Sub Division)
     useEffect(() => {
@@ -69,7 +96,7 @@ export default function AdvancedInsights({ data }: Props) {
 
         // Calculate
         const counts: Record<string, number> = {};
-        data.forEach(r => {
+        filteredData.forEach(r => {
             const div = String(r['Sub Division'] || 'Unknown').trim();
             counts[div] = (counts[div] || 0) + 1;
         });
@@ -112,9 +139,13 @@ export default function AdvancedInsights({ data }: Props) {
         return () => {
             if (topAreasInstance.current) topAreasInstance.current.destroy();
         };
-    }, [data]);
+    }, [filteredData]);
 
     // 3. Efficiency Trend (Last 6 Months)
+    // NOTE: Trend usually requires historical context. If user selects a specific month, trend might look weird (single point).
+    // Let's decide: Should Trend ALWAYS show filtered data? Or always show global trend?
+    // User requested "month filter". Usually implies filtering everything.
+    // If single month is selected, trend line will just be a dot or single month. Acceptable.
     useEffect(() => {
         if (!trendRef.current) return;
         if (trendInstance.current) trendInstance.current.destroy();
@@ -122,7 +153,12 @@ export default function AdvancedInsights({ data }: Props) {
         // Group by Month
         const monthlyStats: Record<string, { totalTime: number, count: number, order: number }> = {};
 
-        data.forEach(r => {
+        // Use filteredData? Or global Data?
+        // If I use filteredData and select "Dec 2025", I only get Dec data. Trend chart becomes pointless for a single month.
+        // However, Top Areas and Heatmap make sense for single month.
+        // Let's us filteredData for consistency. If user wants trend, they select "All Time".
+
+        filteredData.forEach(r => {
             const open = parseDate(String(r['Complaint Date and Time'] || ''));
             const close = parseDate(String(r['Closed Date'] || ''));
 
@@ -147,8 +183,8 @@ export default function AdvancedInsights({ data }: Props) {
                 avg: val.count > 0 ? (val.totalTime / val.count / 3600000) : 0,
                 order: val.order
             }))
-            .sort((a, b) => a.order - b.order)
-            .slice(-6); // Last 6 months
+            .sort((a, b) => a.order - b.order);
+        // .slice(-6); // Remove slice if we are filtering, show whatever is relevant
 
         trendInstance.current = new Chart(trendRef.current, {
             type: 'line',
@@ -181,12 +217,12 @@ export default function AdvancedInsights({ data }: Props) {
             if (trendInstance.current) trendInstance.current.destroy();
         };
 
-    }, [data]);
+    }, [filteredData]);
 
     // Heatmap Colors
     const getHeatmapColor = (count: number, max: number) => {
         if (count === 0) return 'bg-gray-50';
-        const intensity = count / max;
+        const intensity = max > 0 ? count / max : 0;
         if (intensity < 0.2) return 'bg-blue-100';
         if (intensity < 0.4) return 'bg-blue-300';
         if (intensity < 0.6) return 'bg-blue-500';
@@ -204,54 +240,72 @@ export default function AdvancedInsights({ data }: Props) {
     };
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8 animate-in fade-in duration-700">
-            {/* 1. Peak Time Heatmap */}
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 lg:col-span-2">
-                <h3 className="text-lg font-bold text-gray-800 mb-4">🔥 Peak Time Heatmap (Weekly Pattern)</h3>
-                <div className="overflow-x-auto">
-                    <div className="min-w-[600px]">
-                        <div className="flex mb-2">
-                            <div className="w-12"></div>
-                            {Array.from({ length: 24 }).map((_, i) => (
-                                <div key={i} className="flex-1 text-[10px] text-center text-gray-400 font-mono transform -rotate-45 origin-bottom translate-y-2">
-                                    {formatHour(i)}
-                                </div>
-                            ))}
-                        </div>
-                        <div className="mt-4">
-                            {days.map((day, dIndex) => (
-                                <div key={day} className="flex items-center mb-1">
-                                    <div className="w-12 text-xs font-bold text-gray-500">{day}</div>
-                                    {heatmapData.grid[dIndex].map((count, hIndex) => (
-                                        <div
-                                            key={hIndex}
-                                            className={`flex-1 h-8 mx-[1px] rounded-sm ${getHeatmapColor(count, heatmapData.maxCount)} group relative`}
-                                        >
-                                            <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black text-white text-xs p-1 rounded z-10 whitespace-nowrap">
-                                                {day} {formatHour(hIndex)} - {count} Calls
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            ))}
-                        </div>
+        <div className="flex flex-col gap-8 mb-8 animate-in fade-in duration-700">
+            {/* Header with Filter */}
+            <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                <h2 className="text-xl font-bold text-gray-800">🔮 Advanced Insights</h2>
+                <div className="w-64">
+                    <Select
+                        options={monthOptions}
+                        value={monthOptions.find(o => o.value === (selectedMonth || 'All'))}
+                        onChange={(opt) => setSelectedMonth(opt?.value || 'All')}
+                        placeholder="Filter by Month"
+                        isSearchable={true}
+                    />
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* 1. Top Problem Areas */}
+                <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+                    <h3 className="text-lg font-bold text-gray-800 mb-4">🏆 Top Problem Areas (Sub Divisions)</h3>
+                    <div className="h-64">
+                        <canvas ref={topAreasRef} />
                     </div>
                 </div>
-            </div>
 
-            {/* 2. Top Problem Areas */}
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
-                <h3 className="text-lg font-bold text-gray-800 mb-4">🏆 Top Problem Areas (Sub Divisions)</h3>
-                <div className="h-64">
-                    <canvas ref={topAreasRef} />
+                {/* 2. Efficiency Trend */}
+                <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+                    <h3 className="text-lg font-bold text-gray-800 mb-4">📈 Efficiency Trend (Avg Resolution Time)</h3>
+                    <div className="h-64">
+                        <canvas ref={trendRef} />
+                    </div>
                 </div>
-            </div>
 
-            {/* 3. Efficiency Trend */}
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
-                <h3 className="text-lg font-bold text-gray-800 mb-4">📈 Efficiency Trend (Avg Resolution Time)</h3>
-                <div className="h-64">
-                    <canvas ref={trendRef} />
+                {/* 3. Peak Time Heatmap (Moved to Bottom) */}
+                <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 lg:col-span-2">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-bold text-gray-800">🔥 Peak Time Heatmap ({selectedMonth === 'All' || !selectedMonth ? 'All Time' : selectedMonth})</h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <div className="min-w-[600px]">
+                            <div className="flex mb-2">
+                                <div className="w-12"></div>
+                                {Array.from({ length: 24 }).map((_, i) => (
+                                    <div key={i} className="flex-1 text-[10px] text-center text-gray-400 font-mono transform -rotate-45 origin-bottom translate-y-2">
+                                        {formatHour(i)}
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="mt-4">
+                                {days.map((day, dIndex) => (
+                                    <div key={day} className="flex items-center mb-1">
+                                        <div className="w-12 text-xs font-bold text-gray-500">{day}</div>
+                                        {heatmapData.grid[dIndex].map((count, hIndex) => (
+                                            <div
+                                                key={hIndex}
+                                                className={`flex-1 h-8 mx-[1px] rounded-sm ${getHeatmapColor(count, heatmapData.maxCount)} group relative`}
+                                            >
+                                                <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black text-white text-xs p-1 rounded z-10 whitespace-nowrap">
+                                                    {day} {formatHour(hIndex)} - {count} Calls
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
