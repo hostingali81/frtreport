@@ -195,7 +195,13 @@ export default function AdvancedInsights({ data }: Props) {
     };
 
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const hours = [0, 6, 12, 18]; // Labels
+
+    // Helper for AM/PM format
+    const formatHour = (h: number) => {
+        if (h === 0) return '12 AM';
+        if (h === 12) return '12 PM';
+        return h > 12 ? `${h - 12} PM` : `${h} AM`;
+    };
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8 animate-in fade-in duration-700">
@@ -207,26 +213,28 @@ export default function AdvancedInsights({ data }: Props) {
                         <div className="flex mb-2">
                             <div className="w-12"></div>
                             {Array.from({ length: 24 }).map((_, i) => (
-                                <div key={i} className="flex-1 text-xs text-center text-gray-400 font-mono">
-                                    {i}
+                                <div key={i} className="flex-1 text-[10px] text-center text-gray-400 font-mono transform -rotate-45 origin-bottom translate-y-2">
+                                    {formatHour(i)}
                                 </div>
                             ))}
                         </div>
-                        {days.map((day, dIndex) => (
-                            <div key={day} className="flex items-center mb-1">
-                                <div className="w-12 text-xs font-bold text-gray-500">{day}</div>
-                                {heatmapData.grid[dIndex].map((count, hIndex) => (
-                                    <div
-                                        key={hIndex}
-                                        className={`flex-1 h-8 mx-[1px] rounded-sm ${getHeatmapColor(count, heatmapData.maxCount)} group relative`}
-                                    >
-                                        <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black text-white text-xs p-1 rounded z-10 whitespace-nowrap">
-                                            {day} {hIndex}:00 - {count} Calls
+                        <div className="mt-4">
+                            {days.map((day, dIndex) => (
+                                <div key={day} className="flex items-center mb-1">
+                                    <div className="w-12 text-xs font-bold text-gray-500">{day}</div>
+                                    {heatmapData.grid[dIndex].map((count, hIndex) => (
+                                        <div
+                                            key={hIndex}
+                                            className={`flex-1 h-8 mx-[1px] rounded-sm ${getHeatmapColor(count, heatmapData.maxCount)} group relative`}
+                                        >
+                                            <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black text-white text-xs p-1 rounded z-10 whitespace-nowrap">
+                                                {day} {formatHour(hIndex)} - {count} Calls
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
-                            </div>
-                        ))}
+                                    ))}
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </div>
             </div>
