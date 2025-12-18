@@ -209,13 +209,13 @@ export default function AdvancedInsights({ data }: Props) {
                 let sortKey = 0;
 
                 if (useWeekly) {
-                    // Weekly Grouping
-                    const startOfYear = new Date(open.getFullYear(), 0, 1);
-                    const days = Math.floor((open.getTime() - startOfYear.getTime()) / (24 * 60 * 60 * 1000));
-                    const weekNum = Math.ceil((days + 1) / 7);
+                    // Weekly Grouping: Use Start of Week (Monday)
+                    const d = new Date(open);
+                    const day = d.getDay() || 7; // Make Sunday 7
+                    if (day !== 1) d.setHours(-24 * (day - 1)); // Go to Monday
 
-                    key = `W${weekNum} ${open.toLocaleString('en-US', { month: 'short' })}`;
-                    sortKey = open.getFullYear() * 1000 + weekNum;
+                    key = d.toLocaleString('en-US', { day: 'numeric', month: 'short' });
+                    sortKey = d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate();
                 } else {
                     // Monthly Grouping
                     key = open.toLocaleString('en-US', { month: 'short', year: '2-digit' });
