@@ -6,6 +6,7 @@ import { FiArrowLeft, FiRefreshCw, FiLayers } from 'react-icons/fi';
 import FilterBar from '../components/FilterBar';
 import DeepAnalysisCharts from '../components/DeepAnalysisCharts';
 import MonthComparison from '../components/MonthComparison';
+import AdvancedInsights from '../components/AdvancedInsights';
 import Image from 'next/image';
 
 export default function DeepAnalysisPage() {
@@ -468,7 +469,9 @@ export default function DeepAnalysisPage() {
                         <div className="mb-8">
                             <MonthComparison data={original} />
                         </div>
-                        <DeepAnalysisCharts data={data} />
+                        <AdvancedInsights data={original} />
+
+                        <DeepAnalysisCharts data={filtered} />
                     </>
                 )}
             </div>
