@@ -469,9 +469,9 @@ export default function DeepAnalysisPage() {
                         <div className="mb-8">
                             <MonthComparison data={original} />
                         </div>
-                        <AdvancedInsights data={original} />
-
                         <DeepAnalysisCharts data={filtered} />
+
+                        <AdvancedInsights data={original} />
                     </>
                 )}
             </div>

@@ -142,10 +142,7 @@ export default function AdvancedInsights({ data }: Props) {
     }, [filteredData]);
 
     // 3. Efficiency Trend (Last 6 Months)
-    // NOTE: Trend usually requires historical context. If user selects a specific month, trend might look weird (single point).
-    // Let's decide: Should Trend ALWAYS show filtered data? Or always show global trend?
-    // User requested "month filter". Usually implies filtering everything.
-    // If single month is selected, trend line will just be a dot or single month. Acceptable.
+    // Always show historical trend regardless of filter
     useEffect(() => {
         if (!trendRef.current) return;
         if (trendInstance.current) trendInstance.current.destroy();
@@ -153,12 +150,8 @@ export default function AdvancedInsights({ data }: Props) {
         // Group by Month
         const monthlyStats: Record<string, { totalTime: number, count: number, order: number }> = {};
 
-        // Use filteredData? Or global Data?
-        // If I use filteredData and select "Dec 2025", I only get Dec data. Trend chart becomes pointless for a single month.
-        // However, Top Areas and Heatmap make sense for single month.
-        // Let's us filteredData for consistency. If user wants trend, they select "All Time".
-
-        filteredData.forEach(r => {
+        // Use global 'data' so trend lines show history even when a specific month is selected
+        data.forEach(r => {
             const open = parseDate(String(r['Complaint Date and Time'] || ''));
             const close = parseDate(String(r['Closed Date'] || ''));
 
@@ -217,7 +210,7 @@ export default function AdvancedInsights({ data }: Props) {
             if (trendInstance.current) trendInstance.current.destroy();
         };
 
-    }, [filteredData]);
+    }, [data]);
 
     // Heatmap Colors
     const getHeatmapColor = (count: number, max: number) => {
