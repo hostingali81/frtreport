@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import TrendCharts from '../components/TrendCharts';
 import { FiArrowLeft, FiRefreshCw } from 'react-icons/fi';
@@ -25,6 +25,7 @@ export default function ChartsPage() {
   const [selectedShift, setSelectedShift] = useState<string>('');
   const [customDate, setCustomDate] = useState<string>('');
   const [activePreset, setActivePreset] = useState<string>('');
+  const [monthFilter, setMonthFilter] = useState<string>('All');
 
   const isClosedRow = (row: any) => {
     const statusRaw = String(row['Status'] ?? '').trim();
@@ -39,6 +40,32 @@ export default function ChartsPage() {
     if (statusLower.includes('attend') && statusLower.includes('confirm')) return true;
     if (statusLower.includes('attend') && statusLower.includes('confirm')) return true;
     return false;
+  };
+
+  const parsePossibleDate = (value: string) => {
+    const clean = value.trim();
+    if (!clean) return null;
+    const match = clean.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+    if (match) {
+      const day = match[1].padStart(2, '0');
+      const month = match[2].padStart(2, '0');
+      const year = match[3];
+      // Note: handling time if present
+      const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+      let hours = 0;
+      let minutes = 0;
+      if (timeMatch) {
+        hours = parseInt(timeMatch[1], 10);
+        minutes = parseInt(timeMatch[2], 10);
+        if (timeMatch[3]) {
+          const ampm = timeMatch[3].toUpperCase();
+          if (ampm === 'PM' && hours < 12) hours += 12;
+          if (ampm === 'AM' && hours === 12) hours = 0;
+        }
+      }
+      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hours, minutes);
+    }
+    return null;
   };
 
   const closedStatusOptions = useMemo(() => {
@@ -108,30 +135,35 @@ export default function ChartsPage() {
     return '';
   };
 
-  const parsePossibleDate = (value: string) => {
-    const clean = value.trim();
-    if (!clean) return null;
-    const match = clean.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-    if (match) {
-      const day = match[1].padStart(2, '0');
-      const month = match[2].padStart(2, '0');
-      const year = match[3];
-      // Note: handling time if present
-      const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-      let hours = 0;
-      let minutes = 0;
-      if (timeMatch) {
-        hours = parseInt(timeMatch[1], 10);
-        minutes = parseInt(timeMatch[2], 10);
-        if (timeMatch[3]) {
-          const ampm = timeMatch[3].toUpperCase();
-          if (ampm === 'PM' && hours < 12) hours += 12;
-          if (ampm === 'AM' && hours === 12) hours = 0;
-        }
+
+
+  const monthOptions = useMemo(() => {
+    const months = new Set<string>();
+    original.forEach(r => {
+      const val = String(r['Complaint Date and Time'] || r['Complaint Date'] || '');
+      const d = parsePossibleDate(val);
+      if (d) {
+        const key = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+        months.add(key);
       }
-      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hours, minutes);
-    }
-    return null;
+    });
+    const options = Array.from(months).map(m => ({ value: m, label: m }));
+    return [{ value: 'All', label: 'All Months' }, ...options];
+  }, [original]);
+
+  const [isPending, startTransition] = useTransition();
+
+  const handleMonthChange = (val: string) => {
+    startTransition(() => {
+      setMonthFilter(val);
+      if (val !== 'All') {
+        setFromDT('');
+        setToDT('');
+        setActivePreset('');
+        setSelectedShift('');
+        setCustomDate('');
+      }
+    });
   };
 
   const filtered = useMemo(() => {
@@ -141,6 +173,17 @@ export default function ChartsPage() {
         Object.values(row).some(v => String(v || '').toLowerCase().includes(search.trim().toLowerCase()))
       );
     }
+
+    // Month Filter Logic
+    if (monthFilter && monthFilter !== 'All') {
+      rows = rows.filter(row => {
+        const val = String(row['Complaint Date and Time'] || row['Complaint Date'] || '');
+        const dt = parsePossibleDate(val);
+        if (!dt) return false;
+        return dt.toLocaleString('en-US', { month: 'long', year: 'numeric' }) === monthFilter;
+      });
+    }
+
     if (fromDT || toDT) {
       const fromDate = fromDT ? new Date(fromDT) : null;
       const toDate = toDT ? new Date(toDT) : null;
@@ -159,7 +202,7 @@ export default function ChartsPage() {
     if (subDivisionFilter) rows = rows.filter(row => String(row['Sub Division'] ?? '').trim() === subDivisionFilter);
     if (subStationFilter) rows = rows.filter(row => String(row['Sub Station'] ?? '').trim() === subStationFilter);
     return rows;
-  }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter]);
+  }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, monthFilter]);
 
   useEffect(() => {
     setData(filtered);
@@ -440,6 +483,12 @@ export default function ChartsPage() {
               <FiArrowLeft /> Back
             </button>
             <button
+              onClick={() => router.push('/deep-analysis')}
+              className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg transition shadow-sm"
+            >
+              <span className="text-lg">🔍</span> Deep Analysis
+            </button>
+            <button
               onClick={fetchData}
               disabled={loading}
               className="inline-flex items-center gap-2 bg-sky-700 hover:bg-sky-800 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-sm"
@@ -498,6 +547,12 @@ export default function ChartsPage() {
                 setCustomDate={setCustomDate}
                 applyCustomDateShift={applyCustomDateShift}
                 clearAllFilters={clearAllFilters}
+                onRefresh={fetchData}
+                loading={loading || isPending}
+                dailyCounts={{}}
+                monthFilter={monthFilter}
+                setMonthFilter={handleMonthChange}
+                monthOptions={monthOptions}
               />
             </div>
             <TrendCharts data={data} isClosedRow={isClosedRow} />

@@ -62,6 +62,11 @@ interface FilterBarProps {
   onRefresh?: () => void;
   loading?: boolean;
 
+  // Month Filter
+  monthFilter?: string;
+  setMonthFilter?: (val: string) => void;
+  monthOptions?: { value: string; label: string }[];
+
   // Data for Calendar
   dailyCounts?: Record<string, number>;
 }
@@ -82,7 +87,8 @@ export default function FilterBar({
   fromDT, setFromDT, toDT, setToDT,
   selectedShift, setSelectedShift, activePreset, applyPreset, applyShiftPreset,
   customDate, setCustomDate, applyCustomDateShift,
-  clearAllFilters, onRefresh, loading, dailyCounts = {}
+  clearAllFilters, onRefresh, loading, dailyCounts = {},
+  monthFilter, setMonthFilter, monthOptions = []
 }: FilterBarProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
@@ -103,7 +109,8 @@ export default function FilterBar({
   // Helper to count active filters
   const activeCount = [
     search, divisionFilter, subDivisionFilter, subStationFilter, statusFilter, closedStatusFilter,
-    fromDT, toDT, selectedShift
+    fromDT, toDT, selectedShift,
+    (monthFilter !== 'All' && monthFilter !== '') ? monthFilter : null
   ].filter(Boolean).length;
 
   const selectStyles = {
@@ -178,8 +185,8 @@ export default function FilterBar({
       <div className="p-4 flex flex-col lg:flex-row gap-4 items-center justify-between bg-gradient-to-r from-gray-50/50 via-white to-gray-50/50">
 
         {/* Left: Search & Toggle */}
-        <div className="flex items-center gap-3 w-full lg:w-auto flex-1">
-          <div className="relative flex-1 max-w-md group">
+        <div className="flex items-center gap-3 w-full lg:w-auto flex-1 flex-wrap">
+          <div className="relative flex-1 max-w-xs group min-w-[200px]">
             <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
             <input
               value={search}
@@ -208,6 +215,35 @@ export default function FilterBar({
             <FiCalendar className={showCalendar ? 'text-white' : 'text-gray-500'} />
             <span className="hidden sm:inline">Calendar</span>
           </button>
+
+          {/* Month Filter Dropdown */}
+          {setMonthFilter && (
+            <div className="w-40 flex items-center gap-2">
+              <Select
+                options={monthOptions}
+                value={monthOptions?.find(o => o.value === monthFilter)}
+                onChange={(opt) => setMonthFilter(opt?.value || 'All')}
+                className="basic-single text-sm flex-1"
+                classNamePrefix="select"
+                placeholder="Month"
+                isClearable={false}
+                isSearchable={true}
+                isDisabled={loading}
+                styles={{
+                  control: (base) => ({
+                    ...base,
+                    minHeight: '42px',
+                    borderRadius: '0.75rem',
+                    borderColor: '#e5e7eb',
+                    boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                  }),
+                }}
+              />
+              {loading && (
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right: Date Range & Actions */}

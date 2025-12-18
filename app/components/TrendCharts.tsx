@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 import { Chart, ChartConfiguration } from 'chart.js/auto';
 
 interface TrendChartsProps {
@@ -23,8 +23,22 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
   const dailyTrendChartInstance = useRef<Chart | null>(null);
   const areaTypeChartInstance = useRef<Chart | null>(null);
 
+  // Pre-calculate data for rendering checks
+  const beyondData = useMemo(() => {
+    const beyondMap = new Map<string, number>();
+    for (const r of data) {
+      const closedStatus = String(r['Closed Status'] || '').trim();
+      if (closedStatus === 'Closed Beyond') {
+        const division = String(r['Division'] || '').trim() || 'Unknown';
+        beyondMap.set(division, (beyondMap.get(division) || 0) + 1);
+      }
+    }
+    return Array.from(beyondMap.entries()).sort((a, b) => b[1] - a[1]);
+  }, [data]);
+
   useEffect(() => {
     if (data.length === 0) return;
+    // ... rest of the effect (other charts logic remains here)
 
     // Helper to parse DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
     // Returns YYYY-MM-DD string or 'Unknown'
@@ -215,15 +229,7 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
     }
 
     // Beyond Chart - Division-wise Closed Beyond
-    const beyondMap = new Map<string, number>();
-    for (const r of data) {
-      const closedStatus = String(r['Closed Status'] || '').trim();
-      if (closedStatus === 'Closed Beyond') {
-        const division = String(r['Division'] || '').trim() || 'Unknown';
-        beyondMap.set(division, (beyondMap.get(division) || 0) + 1);
-      }
-    }
-    const beyondData = Array.from(beyondMap.entries()).sort((a, b) => b[1] - a[1]);
+    // Data is pre-calculated in useMemo (beyondData)
 
     if (beyondChartRef.current && beyondData.length > 0) {
       const ctx = beyondChartRef.current.getContext('2d');
@@ -479,8 +485,14 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
           </div>
 
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300">
-            <div style={{ height: '380px' }}>
-              <canvas ref={beyondChartRef}></canvas>
+            <div style={{ height: '380px', position: 'relative' }}>
+              {beyondData.length > 0 ? (
+                <canvas ref={beyondChartRef}></canvas>
+              ) : (
+                <div className="flex h-full items-center justify-center">
+                  <p className="text-gray-500 font-medium">No Beyond Complaints</p>
+                </div>
+              )}
             </div>
           </div>
 

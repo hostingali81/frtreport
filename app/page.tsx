@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers } from 'react-icons/fi';
@@ -36,6 +36,46 @@ export default function Home() {
   const [showReportModal, setShowReportModal] = useState(false);
   const [customDate, setCustomDate] = useState<string>('');
   const [activePreset, setActivePreset] = useState<string>(''); // Track active preset
+  const [monthFilter, setMonthFilter] = useState<string>('All'); // New Month Filter
+
+
+
+  const parsePossibleDate = (value: string) => {
+    // Handles formats like: 01/11/2025 03:45 PM, 1-1-2025, etc.
+    // Returns Date or null
+    // Clean string first
+    const clean = value.trim();
+    if (!clean) return null;
+
+    // Attempt detecting dd/mm/yyyy or dd-mm-yyyy or similar
+    const match = clean.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+    if (match) {
+      const day = match[1].padStart(2, '0');
+      const month = match[2].padStart(2, '0');
+      const year = match[3];
+      // Note: we're discarding time here for simple date check, 
+      // but if time is needed we could parse it. 
+      // The original code passed standard date string to new Date() which might fail for dd/mm
+      // Let's return a proper Date object from yyyy-mm-dd
+
+      // If original string has time 'HH:MM AM/PM'
+      const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+      let hours = 0;
+      let minutes = 0;
+      if (timeMatch) {
+        hours = parseInt(timeMatch[1], 10);
+        minutes = parseInt(timeMatch[2], 10);
+        if (timeMatch[3]) {
+          const ampm = timeMatch[3].toUpperCase();
+          if (ampm === 'PM' && hours < 12) hours += 12;
+          if (ampm === 'AM' && hours === 12) hours = 0;
+        }
+      }
+
+      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hours, minutes);
+    }
+    return null;
+  };
 
   const statusOptions = useMemo(() => {
     const set = new Set<string>();
@@ -80,6 +120,22 @@ export default function Home() {
       if (s) set.add(s);
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [original]);
+
+  // Extract available months for filter
+  const monthOptions = useMemo(() => {
+    const months = new Set<string>();
+    original.forEach(r => {
+      const val = String(r['Complaint Date and Time'] || r['Complaint Date'] || '');
+      const d = parsePossibleDate(val);
+      if (d) {
+        const key = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+        months.add(key);
+      }
+    });
+    const options = Array.from(months).map(m => ({ value: m, label: m }));
+    // Custom sort could be added here if needed, usually defaults are okay or sort by date
+    return [{ value: 'All', label: 'All Months' }, ...options];
   }, [original]);
 
   // Helper function to find parent Division and Sub Division for a Sub Station
@@ -142,42 +198,7 @@ export default function Home() {
   const normalizedIncludes = (value: string, query: string) =>
     value.toLowerCase().includes(query.toLowerCase());
 
-  const parsePossibleDate = (value: string) => {
-    // Handles formats like: 01/11/2025 03:45 PM, 1-1-2025, etc.
-    // Returns Date or null
-    // Clean string first
-    const clean = value.trim();
-    if (!clean) return null;
 
-    // Attempt detecting dd/mm/yyyy or dd-mm-yyyy or similar
-    const match = clean.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-    if (match) {
-      const day = match[1].padStart(2, '0');
-      const month = match[2].padStart(2, '0');
-      const year = match[3];
-      // Note: we're discarding time here for simple date check, 
-      // but if time is needed we could parse it. 
-      // The original code passed standard date string to new Date() which might fail for dd/mm
-      // Let's return a proper Date object from yyyy-mm-dd
-
-      // If original string has time 'HH:MM AM/PM'
-      const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-      let hours = 0;
-      let minutes = 0;
-      if (timeMatch) {
-        hours = parseInt(timeMatch[1], 10);
-        minutes = parseInt(timeMatch[2], 10);
-        if (timeMatch[3]) {
-          const ampm = timeMatch[3].toUpperCase();
-          if (ampm === 'PM' && hours < 12) hours += 12;
-          if (ampm === 'AM' && hours === 12) hours = 0;
-        }
-      }
-
-      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hours, minutes);
-    }
-    return null;
-  };
 
   const formatDuration = (ms: number) => {
     if (!isFinite(ms) || ms <= 0) return '';
@@ -210,6 +231,21 @@ export default function Home() {
     }
   };
 
+  const [isPending, startTransition] = useTransition();
+
+  const handleMonthChange = (val: string) => {
+    startTransition(() => {
+      setMonthFilter(val);
+      if (val !== 'All') {
+        setFromDT('');
+        setToDT('');
+        setActivePreset('');
+        setSelectedShift('');
+        setCustomDate('');
+      }
+    });
+  };
+
   const filtered = useMemo(() => {
     let rows = original;
     if (search.trim()) {
@@ -217,6 +253,17 @@ export default function Home() {
         Object.values(row).some(v => normalizedIncludes(String(v || ''), search.trim()))
       );
     }
+
+    // Month Filter Logic
+    if (monthFilter && monthFilter !== 'All') {
+      rows = rows.filter(row => {
+        const val = String(row['Complaint Date and Time'] || row['Complaint Date'] || '');
+        const d = parsePossibleDate(val);
+        if (!d) return false;
+        return d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) === monthFilter;
+      });
+    }
+
     if (fromDT || toDT) {
       const fromDate = fromDT ? new Date(fromDT) : null;
       const toDate = toDT ? new Date(toDT) : null;
@@ -275,7 +322,7 @@ export default function Home() {
       });
     }
     return rows;
-  }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, sortColumn, sortDirection]);
+  }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, sortColumn, sortDirection, monthFilter]);
 
   // Calculate daily counts for calendar
   const dailyCounts = useMemo(() => {
@@ -4166,11 +4213,15 @@ export default function Home() {
                 activePreset={activePreset}
                 applyPreset={applyPreset}
                 applyShiftPreset={applyShiftPreset}
-                customDate={customDate}
-                setCustomDate={setCustomDate}
+                customDate={customDate} setCustomDate={setCustomDate}
                 applyCustomDateShift={applyCustomDateShift}
                 clearAllFilters={clearAllFilters}
+                onRefresh={() => fetchData(true)}
+                loading={loading || isPending}
                 dailyCounts={dailyCounts}
+                monthFilter={monthFilter}
+                setMonthFilter={handleMonthChange}
+                monthOptions={monthOptions}
               />
             </div>
 
