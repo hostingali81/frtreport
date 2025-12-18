@@ -175,17 +175,16 @@ export default function AdvancedInsights({ data }: Props) {
         };
     }, [filteredData]);
 
-    // 3. Efficiency Trend (Last 6 Months)
-    // Always show historical trend regardless of filter
+    // 3. Efficiency Trend (Responds to Filter)
     useEffect(() => {
         if (!trendRef.current) return;
         if (trendInstance.current) trendInstance.current.destroy();
 
-        // 1. Determine Date Range
+        // 1. Determine Date Range from FILTERED Data
         let minTime = Infinity;
         let maxTime = -Infinity;
 
-        data.forEach(r => {
+        filteredData.forEach(r => {
             const d = parseDate(String(r['Complaint Date and Time'] || ''));
             if (d) {
                 const t = d.getTime();
@@ -194,13 +193,23 @@ export default function AdvancedInsights({ data }: Props) {
             }
         });
 
+        // Handle case where filteredData is empty
+        if (minTime === Infinity) {
+            // Maybe render empty chart or return
+            return;
+        }
+
         const spanDays = (maxTime - minTime) / (1000 * 60 * 60 * 24);
-        const useWeekly = spanDays <= 90; // If less than 3 months, use weekly
+
+        // Granularity Logic
+        let granularity: 'daily' | 'weekly' | 'monthly' = 'monthly';
+        if (spanDays <= 35) granularity = 'daily';
+        else if (spanDays <= 90) granularity = 'weekly';
 
         // 2. Group Data
         const stats: Record<string, { totalTime: number, count: number, order: number }> = {};
 
-        data.forEach(r => {
+        filteredData.forEach(r => {
             const open = parseDate(String(r['Complaint Date and Time'] || ''));
             const close = parseDate(String(r['Closed Date'] || ''));
 
@@ -208,22 +217,17 @@ export default function AdvancedInsights({ data }: Props) {
                 let key = '';
                 let sortKey = 0;
 
-                if (useWeekly) {
-                    // Weekly Grouping: Use Start of Week (Monday)
+                if (granularity === 'daily') {
+                    // Daily Grouping: "1 Nov", "2 Nov"
+                    key = open.toLocaleString('en-US', { day: 'numeric', month: 'short' });
+                    sortKey = open.getFullYear() * 10000 + open.getMonth() * 100 + open.getDate();
+                } else if (granularity === 'weekly') {
+                    // Weekly Grouping: Start of Week
                     const d = new Date(open);
-                    const day = d.getDay() || 7; // Make Sunday 7
-                    if (day !== 1) d.setHours(-24 * (day - 1)); // Go to Monday
+                    const day = d.getDay() || 7;
+                    if (day !== 1) d.setHours(-24 * (day - 1));
 
-                    // IF the "Monday" is before the absolute first data point (minTime), 
-                    // and we are in the very first week, maybe we should just label it as the actual start date?
-                    // But that might break the "Weekly" consistency.
-                    // User confusion: "Why Oct 27 when data starts Nov 1?"
-                    // Answer: Because we group by Week (starting Monday).
-                    // Fix: Clamp the label display? Or just explain?
-                    // Let's CLAMP the label date equal to minTime if d < minTime
-                    if (d.getTime() < minTime) {
-                        d.setTime(minTime);
-                    }
+                    if (d.getTime() < minTime) d.setTime(minTime);
 
                     key = d.toLocaleString('en-US', { day: 'numeric', month: 'short' });
                     sortKey = d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate();
@@ -306,7 +310,7 @@ export default function AdvancedInsights({ data }: Props) {
             if (trendInstance.current) trendInstance.current.destroy();
         };
 
-    }, [data]);
+    }, [filteredData]);
 
     // Heatmap Colors
     const getHeatmapColor = (count: number, max: number) => {
