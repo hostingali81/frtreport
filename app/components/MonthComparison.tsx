@@ -65,12 +65,13 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
     // Set default selection
     useEffect(() => {
         if (!monthA && !monthB && monthOptions.length >= 1) {
-            setMonthA(monthOptions[monthOptions.length - 1].value);
-            if (monthOptions.length >= 2) {
-                setMonthB(monthOptions[monthOptions.length - 2].value);
-            } else {
-                setMonthB(monthOptions[monthOptions.length - 1].value);
-            }
+            // User requested: 1st selector (Month A) = Current - 1 (Previous)
+            // 2nd selector (Month B) = Current (Latest)
+            const latest = monthOptions[monthOptions.length - 1];
+            const previous = monthOptions.length >= 2 ? monthOptions[monthOptions.length - 2] : latest;
+
+            setMonthA(previous.value);
+            setMonthB(latest.value);
         }
     }, [monthOptions]);
 
@@ -128,6 +129,8 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
                 return `${h}h ${m}m`;
             };
 
+            const maxValue = Math.max(...data, 0);
+
             const dataLabelPlugin = {
                 id: 'dataLabelPlugin',
                 afterDatasetsDraw(chart: any) {
@@ -170,31 +173,28 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
                     maintainAspectRatio: false,
                     layout: {
                         padding: {
-                            top: 25
+                            top: 20
                         }
                     },
                     plugins: {
                         legend: { display: false },
-                        title: { display: true, text: label, font: { size: 14 } },
+                        title: { display: true, text: label, font: { size: 14, weight: 'bold' }, padding: { bottom: 20 } },
                         tooltip: {
                             callbacks: {
                                 label: (ctx) => {
                                     let val = ctx.parsed.y;
                                     if (val === null) return '';
-
-                                    const formatDuration = (val: number) => {
-                                        const h = Math.floor(val);
-                                        const m = Math.round((val - h) * 60);
-                                        return `${h}h ${m}m`;
-                                    };
-
                                     return formatTime ? formatDuration(val) : val + '';
                                 }
                             }
                         }
                     },
                     scales: {
-                        y: { beginAtZero: true, grid: { display: true, color: '#f3f4f6' } },
+                        y: {
+                            beginAtZero: true,
+                            grid: { display: true, color: '#f3f4f6' },
+                            suggestedMax: maxValue * 1.2
+                        },
                         x: { grid: { display: false } }
                     }
                 },
