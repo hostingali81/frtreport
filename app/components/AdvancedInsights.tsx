@@ -214,6 +214,17 @@ export default function AdvancedInsights({ data }: Props) {
                     const day = d.getDay() || 7; // Make Sunday 7
                     if (day !== 1) d.setHours(-24 * (day - 1)); // Go to Monday
 
+                    // IF the "Monday" is before the absolute first data point (minTime), 
+                    // and we are in the very first week, maybe we should just label it as the actual start date?
+                    // But that might break the "Weekly" consistency.
+                    // User confusion: "Why Oct 27 when data starts Nov 1?"
+                    // Answer: Because we group by Week (starting Monday).
+                    // Fix: Clamp the label display? Or just explain?
+                    // Let's CLAMP the label date equal to minTime if d < minTime
+                    if (d.getTime() < minTime) {
+                        d.setTime(minTime);
+                    }
+
                     key = d.toLocaleString('en-US', { day: 'numeric', month: 'short' });
                     sortKey = d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate();
                 } else {
