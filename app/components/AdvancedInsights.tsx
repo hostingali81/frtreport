@@ -284,16 +284,22 @@ export default function AdvancedInsights({ data }: Props) {
                                 {days.map((day, dIndex) => (
                                     <div key={day} className="flex items-center mb-1">
                                         <div className="w-12 text-xs font-bold text-gray-500">{day}</div>
-                                        {heatmapData.grid[dIndex].map((count, hIndex) => (
-                                            <div
-                                                key={hIndex}
-                                                className={`flex-1 h-8 mx-[1px] rounded-sm ${getHeatmapColor(count, heatmapData.maxCount)} group relative`}
-                                            >
-                                                <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black text-white text-xs p-1 rounded z-10 whitespace-nowrap">
-                                                    {day} {formatHour(hIndex)} - {count} Calls
+                                        {heatmapData.grid[dIndex].map((count, hIndex) => {
+                                            const intensity = heatmapData.maxCount > 0 ? count / heatmapData.maxCount : 0;
+                                            const textColor = intensity > 0.5 ? 'text-white' : 'text-gray-600';
+
+                                            return (
+                                                <div
+                                                    key={hIndex}
+                                                    className={`flex-1 h-8 mx-[1px] rounded-sm ${getHeatmapColor(count, heatmapData.maxCount)} flex items-center justify-center text-[9px] font-medium ${textColor} cursor-default group relative`}
+                                                >
+                                                    {count > 0 ? count : ''}
+                                                    <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black text-white text-xs p-1 rounded z-10 whitespace-nowrap pointer-events-none">
+                                                        {day} {formatHour(hIndex)} - {count} Calls
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 ))}
                             </div>
