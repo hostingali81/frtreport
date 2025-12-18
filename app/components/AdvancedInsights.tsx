@@ -109,6 +109,32 @@ export default function AdvancedInsights({ data }: Props) {
         const labels = sorted.map(s => s[0]);
         const values = sorted.map(s => s[1]);
 
+        // Plugin to draw data labels
+        const dataLabelPlugin = {
+            id: 'dataLabelPlugin',
+            afterDatasetsDraw(chart: any) {
+                const { ctx } = chart;
+                ctx.save();
+                chart.data.datasets.forEach((dataset: any, i: number) => {
+                    const meta = chart.getDatasetMeta(i);
+                    meta.data.forEach((bar: any, index: number) => {
+                        const value = dataset.data[index];
+                        if (value !== null && value !== undefined) {
+                            ctx.fillStyle = '#374151'; // Gray-700
+                            ctx.font = 'bold 11px sans-serif';
+                            ctx.textAlign = 'left';
+                            ctx.textBaseline = 'middle';
+                            // Draw text slightly to the right of the bar end
+                            ctx.fillText(value, bar.x + 5, bar.y);
+                        }
+                    });
+                });
+                ctx.restore();
+            }
+        };
+
+        const maxValue = Math.max(...values, 0);
+
         topAreasInstance.current = new Chart(topAreasRef.current, {
             type: 'bar',
             data: {
@@ -125,15 +151,23 @@ export default function AdvancedInsights({ data }: Props) {
                 indexAxis: 'y',
                 responsive: true,
                 maintainAspectRatio: false,
+                layout: {
+                    padding: { right: 40 } // Space for labels
+                },
                 plugins: {
                     legend: { display: false },
                     title: { display: false }
                 },
                 scales: {
-                    x: { beginAtZero: true, grid: { display: false } },
+                    x: {
+                        beginAtZero: true,
+                        grid: { display: false },
+                        suggestedMax: maxValue * 1.15 // Extend axis space
+                    },
                     y: { grid: { display: false } }
                 }
-            }
+            },
+            plugins: [dataLabelPlugin]
         });
 
         return () => {
