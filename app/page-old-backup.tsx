@@ -20,7 +20,6 @@ export default function Home() {
   const [original, setOriginal] = useState<any[]>([]);
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fullRefreshLoading, setFullRefreshLoading] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [fromDT, setFromDT] = useState(''); // yyyy-mm-ddTHH:mm (datetime-local)
@@ -37,9 +36,9 @@ export default function Home() {
   const [showReportModal, setShowReportModal] = useState(false);
   const [customDate, setCustomDate] = useState<string>('');
   const [activePreset, setActivePreset] = useState<string>(''); // Track active preset
-  const [monthFilter, setMonthFilter] = useState<string>('All');
-  const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 100;
+  const [monthFilter, setMonthFilter] = useState<string>('All'); // New Month Filter
+
+
 
   const parsePossibleDate = (value: string) => {
     // Handles formats like: 01/11/2025 03:45 PM, 1-1-2025, etc.
@@ -169,38 +168,22 @@ export default function Home() {
     }
 
     try {
-      if (refresh) {
-        // First scrape new data
-        const scrapeResponse = await fetch('/api/scrape?refresh=1');
-        const scrapeResult = await scrapeResponse.json();
-        
-        if (!scrapeResult.success) {
-          setError(scrapeResult.error || 'Scraping failed');
-          setLoading(false);
-          return;
-        }
-      }
-      
-      // Then fetch ALL data from database
-      const endpoint = '/api/complaints';
-      const response = await fetch(endpoint);
+      const response = await fetch(`/api/scrape${refresh ? '?refresh=1' : ''}`);
       const result = await response.json();
 
       console.log('API Response:', result);
 
       if (result.success) {
-        const dataArray = result.data || [];
-        if (dataArray.length > 0) {
-          // Keep original order (latest first from database)
-          setOriginal(dataArray);
-          setData(dataArray);
+        if (result.data && result.data.length > 0) {
+          const reversed = [...result.data].reverse();
+          setOriginal(reversed);
+          setData(reversed);
+          // Set timestamp from API response (last scrape time)
           if (result.lastScrapedAt) {
             setLastUpdated(result.lastScrapedAt);
           }
         } else {
-          setOriginal([]);
-          setData([]);
-          setError('कोई डेटा नहीं मिला');
+          setError('कोई डेटा नहीं मिला। Debug info: ' + JSON.stringify(result.debug));
         }
       } else {
         setError(result.error || 'डेटा प्राप्त करने में त्रुटि');
@@ -340,17 +323,6 @@ export default function Home() {
     }
     return rows;
   }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, sortColumn, sortDirection, monthFilter]);
-
-  const paginatedData = useMemo(() => {
-    const start = (currentPage - 1) * rowsPerPage;
-    return filtered.slice(start, start + rowsPerPage);
-  }, [filtered, currentPage]);
-
-  const totalPages = Math.ceil(filtered.length / rowsPerPage);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, monthFilter]);
 
   // Calculate daily counts for calendar
   const dailyCounts = useMemo(() => {
@@ -602,10 +574,9 @@ export default function Home() {
     if (dateList.length === 0) return;
     const min = new Date(Math.min.apply(null, dateList.map(d => d.getTime())));
     const max = new Date(Math.max.apply(null, dateList.map(d => d.getTime())));
-    // Don't auto-set dates - let user choose
-    // setFromDT(formatDateTimeLocal(min));
-    // setToDT(formatDateTimeLocal(max));
-  }, [original, fromDT, toDT]);
+    setFromDT(formatDateTimeLocal(min));
+    setToDT(formatDateTimeLocal(max));
+  }, [original]);
 
   useEffect(() => {
     fetchData(false);
@@ -2979,13 +2950,6 @@ export default function Home() {
   const exportExcel = async () => {
     const rows = filtered;
     if (rows.length === 0) return;
-    
-    // Warning for large exports
-    if (rows.length > 5000) {
-      const confirm = window.confirm(`⚠️ You are exporting ${rows.length} rows. This may take some time. Continue?`);
-      if (!confirm) return;
-    }
-    
     const [excelModule, { saveAs }] = await Promise.all([
       import('exceljs/dist/exceljs.min.js'),
       import('file-saver'),
@@ -4150,56 +4114,18 @@ export default function Home() {
               <p className="text-gray-500 text-sm md:text-base">Analyze, filter and export complaints with ease</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => fetchData(true)}
-              disabled={loading || fullRefreshLoading}
-              className="inline-flex items-center gap-2 bg-slate-700 hover:bg-amber-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
-            >
-              {loading ? (<><FiClock /> लोड हो रहा है…</>) : (<><FiRefreshCw /> Refresh</>)}
-            </button>
-            <button
-              onClick={async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (!confirm('⚠️ Full Refresh will re-scrape ALL data from 2010. This may take 2-3 minutes. Continue?')) return;
-                setFullRefreshLoading(true);
-                setError('');
-                try {
-                  const response = await fetch('/api/scrape?refresh=1&full=1');
-                  const result = await response.json();
-                  if (result.success) {
-                    // After full refresh, fetch ALL data from database
-                    const dbResponse = await fetch('/api/complaints');
-                    const dbResult = await dbResponse.json();
-                    if (dbResult.success) {
-                      const dataArray = dbResult.data || [];
-                      // Keep original order (latest first)
-                      setOriginal(dataArray);
-                      setData(dataArray);
-                      if (dbResult.lastScrapedAt) setLastUpdated(dbResult.lastScrapedAt);
-                      alert(`✅ Full refresh complete! ${dataArray.length} complaints loaded from database.`);
-                    }
-                  } else {
-                    setError(result.error || 'Full refresh failed');
-                  }
-                } catch (err: any) {
-                  setError('Full refresh error: ' + err.message);
-                } finally {
-                  setFullRefreshLoading(false);
-                }
-              }}
-              disabled={loading || fullRefreshLoading}
-              className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
-            >
-              {fullRefreshLoading ? (<><FiClock /> Processing...</>) : (<><FiRefreshCw /> Full Refresh</>)}
-            </button>
-          </div>
+          <button
+            onClick={() => fetchData(true)}
+            disabled={loading}
+            className="inline-flex items-center gap-2 bg-slate-700 hover:bg-amber-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
+          >
+            {loading ? (<><FiClock /> लोड हो रहा है…</>) : (<><FiRefreshCw /> Refresh</>)}
+          </button>
         </header>
 
         {lastUpdated && (
           <div className="bg-amber-50 border-l-4 border-amber-500 text-amber-800 px-4 py-3 rounded">
-            <p className="font-semibold">⚠️ Data last updated on: {new Date(lastUpdated).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}</p>
+            <p className="font-semibold">⚠️ Data last updated on: {lastUpdated}</p>
           </div>
         )}
 
@@ -4302,7 +4228,7 @@ export default function Home() {
             <div className="flex flex-wrap items-center justify-between gap-3 mt-6 pt-5 border-t border-gray-200">
               <div className="flex items-center gap-2 text-sm">
                 <FiBarChart2 className="text-sky-600 text-lg" />
-                <span className="font-semibold text-gray-700">Showing {((currentPage-1)*rowsPerPage)+1}-{Math.min(currentPage*rowsPerPage, filtered.length)} of {filtered.length} complaints</span>
+                <span className="font-semibold text-gray-700">Showing {filtered.length} of {original.length} complaints</span>
               </div>
               <div className="flex flex-wrap gap-3">
                 <button
@@ -4347,7 +4273,6 @@ export default function Home() {
         )}
 
         {filtered.length > 0 && (
-          <>
           <div className="bg-white rounded-xl shadow-md border border-gray-100">
             <div className="overflow-x-auto max-h-[70vh] relative">
               <table className="min-w-full divide-y divide-gray-200 text-xs md:text-sm">
@@ -4395,7 +4320,7 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
-                  {paginatedData.map((row, index) => (
+                  {filtered.map((row, index) => (
                     <tr key={index} className="hover:bg-gray-50">
                       {(() => {
                         const preferredOrder = [
@@ -4451,17 +4376,6 @@ export default function Home() {
               </table>
             </div>
           </div>
-          
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-4 pb-4">
-              <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">First</button>
-              <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Prev</button>
-              <span className="px-4 py-1 bg-gray-100 rounded">Page {currentPage} of {totalPages}</span>
-              <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Next</button>
-              <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Last</button>
-            </div>
-          )}
-          </>
         )}
 
         {/* Report Selection Modal */}
