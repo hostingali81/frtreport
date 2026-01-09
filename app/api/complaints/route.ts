@@ -14,11 +14,52 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
+  const fetchAll = searchParams.get('fetchAll') === 'true';
+  
+  if (fetchAll) {
+    // Fetch ALL records in batches
+    let allData: any[] = [];
+    let from = 0;
+    const batchSize = 1000;
+    
+    while (true) {
+      const { data, error } = await supabase
+        .from('complaints')
+        .select('raw_data')
+        .order('complaint_date', { ascending: false })
+        .range(from, from + batchSize - 1);
+      
+      if (error || !data || data.length === 0) break;
+      
+      allData = allData.concat(data);
+      
+      if (data.length < batchSize) break;
+      from += batchSize;
+    }
+    
+    const { count } = await supabase
+      .from('complaints')
+      .select('id', { count: 'exact', head: true });
+    
+    const { data: metadata } = await supabase
+      .from('scrape_metadata')
+      .select('last_scrape_at')
+      .eq('status', 'success')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    return NextResponse.json({
+      success: true,
+      data: allData.map(row => row.raw_data),
+      total: count || 0,
+      lastScrapedAt: metadata?.last_scrape_at || null
+    });
+  }
   
   // Pagination params
   const page = parseInt(searchParams.get('page') || '1');
   const limit = parseInt(searchParams.get('limit') || '100');
-  const fetchAll = searchParams.get('fetchAll') === 'true'; // For exports
   
   // Filter params
   const search = searchParams.get('search') || '';
@@ -46,11 +87,8 @@ export async function GET(request: Request) {
 
   query = query.order('complaint_date', { ascending: false });
 
-  // Pagination or fetch all
-  if (!fetchAll) {
-    const offset = (page - 1) * limit;
-    query = query.range(offset, offset + limit - 1);
-  }
+  const offset = (page - 1) * limit;
+  query = query.range(offset, offset + limit - 1);
 
   const { data, error, count } = await query;
   
@@ -70,9 +108,9 @@ export async function GET(request: Request) {
     success: true,
     data: (data || []).map(row => row.raw_data),
     total: count || 0,
-    page: fetchAll ? 1 : page,
-    limit: fetchAll ? count || 0 : limit,
-    totalPages: fetchAll ? 1 : Math.ceil((count || 0) / limit),
+    page,
+    limit,
+    totalPages: Math.ceil((count || 0) / limit),
     lastScrapedAt: metadata?.last_scrape_at || null
   });
 }

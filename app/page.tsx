@@ -182,11 +182,9 @@ export default function Home() {
       }
       
       // Then fetch ALL data from database
-      const endpoint = '/api/complaints';
+      const endpoint = '/api/complaints?fetchAll=true';
       const response = await fetch(endpoint);
       const result = await response.json();
-
-      console.log('API Response:', result);
 
       if (result.success) {
         const dataArray = result.data || [];
@@ -4162,7 +4160,7 @@ export default function Home() {
               onClick={async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                if (!confirm('⚠️ Full Refresh will re-scrape ALL data from 2010. This may take 2-3 minutes. Continue?')) return;
+                if (!confirm('⚠️ Full Refresh will re-scrape ALL data from 01/11/2025. This may take 2-3 minutes. Continue?')) return;
                 setFullRefreshLoading(true);
                 setError('');
                 try {
@@ -4170,7 +4168,7 @@ export default function Home() {
                   const result = await response.json();
                   if (result.success) {
                     // After full refresh, fetch ALL data from database
-                    const dbResponse = await fetch('/api/complaints');
+                    const dbResponse = await fetch('/api/complaints?fetchAll=true');
                     const dbResult = await dbResponse.json();
                     if (dbResult.success) {
                       const dataArray = dbResult.data || [];

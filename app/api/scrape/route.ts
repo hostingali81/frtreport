@@ -60,13 +60,25 @@ async function getLastSuccessfulScrape() {
 async function loadFromNewDb() {
   if (!supabase) return null;
   
-  // Single query - much faster
-  const { data, error } = await supabase
-    .from('complaints')
-    .select('raw_data')
-    .order('complaint_date', { ascending: false });
+  // Fetch ALL rows in batches
+  let allData: any[] = [];
+  let from = 0;
+  const batchSize = 1000;
   
-  if (error || !data) return null;
+  while (true) {
+    const { data, error } = await supabase
+      .from('complaints')
+      .select('raw_data')
+      .order('complaint_date', { ascending: false })
+      .range(from, from + batchSize - 1);
+    
+    if (error || !data || data.length === 0) break;
+    
+    allData = allData.concat(data);
+    
+    if (data.length < batchSize) break;
+    from += batchSize;
+  }
   
   const { count } = await supabase
     .from('complaints')
@@ -74,7 +86,7 @@ async function loadFromNewDb() {
   
   const lastScrape = await getLastSuccessfulScrape();
   return {
-    data: data.map(row => row.raw_data),
+    data: allData.map(row => row.raw_data),
     total: count || 0,
     lastScrapedAt: lastScrape?.last_scrape_at,
     source: 'supabase_new',
@@ -244,95 +256,84 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
 
   await page.click('#ctrl143708').catch(() => {});
 
-  // Faster wait - 30 seconds enough
-  await page.waitForFunction(() => {
-    const container = document.querySelector('#printablediv143706');
-    if (!container) return false;
-    const tables = Array.from(container.querySelectorAll('table')) as HTMLTableElement[];
-    if (tables.length < 2) return false;
-    const dataTable = tables[1];
-    const rows = dataTable.querySelectorAll('tbody tr').length > 0 ? Array.from(dataTable.querySelectorAll('tbody tr')) : Array.from(dataTable.querySelectorAll('tr'));
-    return rows.length >= 1;
-  }, { timeout: 30000 }).catch(() => {});
-
-  // Check for pagination and extract all pages
-  let allData: Record<string, string>[] = [];
-  let pageNum = 1;
-  const maxPages = 100; // Safety limit
+  // Wait for initial data load
+  await page.waitForSelector('#printablediv143706 table', { timeout: 60000 });
+  await new Promise(resolve => setTimeout(resolve, 3000));
   
-  while (pageNum <= maxPages) {
-    const result = await page.evaluate(() => {
-      const normalize = (s: string | null | undefined) => (s || '').trim();
-      const container = document.querySelector('#printablediv143706');
-      if (!container) return { data: [], hasNext: false, debug: 'container not found' };
-      const tables = Array.from(container.querySelectorAll('table')) as HTMLTableElement[];
-      if (tables.length < 2) return { data: [], hasNext: false, debug: 'tables not found' };
-      const headerTable = tables[0];
-      const dataTable = tables[1];
-      
-      // Try multiple rows for headers (row 0, 1, or 2)
-      const headerRows = Array.from(headerTable.querySelectorAll('tr'));
-      let headers: string[] = [];
-      
-      for (let rowIdx = 0; rowIdx < Math.min(3, headerRows.length); rowIdx++) {
-        const headerCells = Array.from(headerRows[rowIdx].querySelectorAll('th, td')) as HTMLElement[];
-        const tempHeaders = headerCells.map((cell, i) => normalize(cell.textContent) || `Column ${i + 1}`);
-        // Skip if only 1 column or if it looks like a title row
-        if (tempHeaders.length > 1 && tempHeaders.some(h => h && h !== `Column ${tempHeaders.indexOf(h) + 1}` && !h.includes('Report from'))) {
-          headers = tempHeaders;
-          break;
-        }
+  // Try to select "Show All" or maximum entries if dropdown exists
+  await page.evaluate(() => {
+    // Try to find and click "Show All" or select max entries
+    const selects = Array.from(document.querySelectorAll('select'));
+    for (const select of selects) {
+      const options = Array.from(select.querySelectorAll('option'));
+      // Find option with highest value or "All"
+      const allOption = options.find(opt => opt.textContent?.toLowerCase().includes('all'));
+      if (allOption) {
+        (select as HTMLSelectElement).value = allOption.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        return;
       }
-      
-      // Fallback headers if none found
-      if (headers.length === 0) {
-        headers = ['Complaint Number','Complaint Date and Time','Division','Sub Division','Sub Station','Status','Closed Status','Closed By','Closed Date','Closing Remarks','Area Type'];
+      // Or select maximum value
+      const maxOption = options.reduce((max, opt) => {
+        const val = parseInt(opt.value);
+        const maxVal = parseInt(max.value);
+        return (!isNaN(val) && val > maxVal) ? opt : max;
+      });
+      if (maxOption) {
+        (select as HTMLSelectElement).value = maxOption.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
       }
-      
-      const dataRows = dataTable.querySelectorAll('tbody tr').length > 0 ? Array.from(dataTable.querySelectorAll('tbody tr')) : Array.from(dataTable.querySelectorAll('tr'));
-      const mapped = dataRows.map(row => {
-        const cells = Array.from(row.querySelectorAll('td')) as HTMLElement[];
-        if (cells.length === 0) return null;
-        const rowData: Record<string, string> = {};
-        const limit = Math.min(cells.length, headers.length);
-        for (let i = 0; i < limit; i++) rowData[headers[i] || `Column ${i + 1}`] = normalize(cells[i].textContent);
-        const anyValue = Object.values(rowData).some(v => v && v.length > 0);
-        return anyValue ? rowData : null;
-      }).filter(Boolean) as Record<string, string>[];
-      
-      // Check for next page button
-      const nextButton = document.querySelector('a[href*="page"], button[onclick*="page"], .pagination .next, .next-page');
-      const hasNext = nextButton && !nextButton.classList.contains('disabled');
-      
-      return { data: mapped, hasNext: !!hasNext, debug: { mode: 'puppeteer', headersFound: headers.length, rowsFound: mapped.length } };
-    });
+    }
+  }).catch(() => {});
+  
+  await new Promise(resolve => setTimeout(resolve, 5000)); // Wait for data reload
+  
+  const result = await page.evaluate(() => {
+    const normalize = (s: string | null | undefined) => (s || '').trim();
+    const container = document.querySelector('#printablediv143706');
+    if (!container) return { data: [], debug: 'container not found' };
+    const tables = Array.from(container.querySelectorAll('table')) as HTMLTableElement[];
+    if (tables.length < 2) return { data: [], debug: 'tables not found' };
+    const headerTable = tables[0];
+    const dataTable = tables[1];
     
-    allData = allData.concat(result.data);
+    // Get headers
+    const headerRows = Array.from(headerTable.querySelectorAll('tr'));
+    let headers: string[] = [];
     
-    // If no next page or no data, break
-    if (!result.hasNext || result.data.length === 0) {
-      break;
+    for (let rowIdx = 0; rowIdx < Math.min(3, headerRows.length); rowIdx++) {
+      const headerCells = Array.from(headerRows[rowIdx].querySelectorAll('th, td')) as HTMLElement[];
+      const tempHeaders = headerCells.map((cell, i) => normalize(cell.textContent) || `Column ${i + 1}`);
+      if (tempHeaders.length > 1 && tempHeaders.some(h => h && h !== `Column ${tempHeaders.indexOf(h) + 1}` && !h.includes('Report from'))) {
+        headers = tempHeaders;
+        break;
+      }
     }
     
-    // Click next page
-    const nextClicked = await page.evaluate(() => {
-      const nextButton = document.querySelector('a[href*="page"], button[onclick*="page"], .pagination .next, .next-page') as HTMLElement;
-      if (nextButton && !nextButton.classList.contains('disabled')) {
-        nextButton.click();
-        return true;
-      }
-      return false;
-    });
+    if (headers.length === 0) {
+      headers = ['Complaint Number','Complaint Date and Time','Division','Sub Division','Sub Station','Status','Closed Status','Closed By','Closed Date','Closing Remarks','Area Type'];
+    }
     
-    if (!nextClicked) break;
+    // Get ALL data rows - check both tbody and direct tr
+    const dataRows = dataTable.querySelectorAll('tbody tr').length > 0 
+      ? Array.from(dataTable.querySelectorAll('tbody tr')) 
+      : Array.from(dataTable.querySelectorAll('tr'));
     
-    // Faster page load wait
-    await page.waitForTimeout(500);
-    pageNum++;
-  }
+    const mapped = dataRows.map(row => {
+      const cells = Array.from(row.querySelectorAll('td')) as HTMLElement[];
+      if (cells.length === 0) return null;
+      const rowData: Record<string, string> = {};
+      const limit = Math.min(cells.length, headers.length);
+      for (let i = 0; i < limit; i++) rowData[headers[i] || `Column ${i + 1}`] = normalize(cells[i].textContent);
+      const anyValue = Object.values(rowData).some(v => v && v.length > 0);
+      return anyValue ? rowData : null;
+    }).filter(Boolean) as Record<string, string>[];
+    
+    return { data: mapped, debug: { headersFound: headers.length, rowsFound: mapped.length, totalTrElements: dataRows.length } };
+  });
 
   await browser.close();
-  return { clickedAction: '#ctrl143708', data: allData, pageInfo: { totalPages: pageNum, totalRows: allData.length } };
+  return { clickedAction: '#ctrl143708', data: result.data, pageInfo: { totalPages: 1, totalRows: result.data.length } };
 }
 
 export async function GET(request: Request) {
@@ -397,7 +398,7 @@ export async function GET(request: Request) {
     }
     
     // Filter valid rows (with complaint numbers)
-    const validData = payload.data?.filter(r => r['Complaint Number'] && r['Complaint Number'].trim()) || [];
+    const validData = payload.data?.filter((r: any) => r['Complaint Number'] && r['Complaint Number'].trim()) || [];
     
     if (!validData.length) {
       return NextResponse.json({ 
