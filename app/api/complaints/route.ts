@@ -49,11 +49,23 @@ export async function GET(request: Request) {
       .limit(1)
       .maybeSingle();
 
+    const lastScrapedAt = metadata?.last_scrape_at 
+      ? new Date(metadata.last_scrape_at).toLocaleString('en-IN', { 
+          timeZone: 'Asia/Kolkata',
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        })
+      : null;
+
     return NextResponse.json({
       success: true,
       data: allData.map(row => row.raw_data),
       total: count || 0,
-      lastScrapedAt: metadata?.last_scrape_at || null
+      lastScrapedAt
     });
   }
   
@@ -104,6 +116,18 @@ export async function GET(request: Request) {
     .limit(1)
     .maybeSingle();
 
+  const lastScrapedAt = metadata?.last_scrape_at 
+    ? new Date(metadata.last_scrape_at).toLocaleString('en-IN', { 
+        timeZone: 'Asia/Kolkata',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      })
+    : null;
+
   return NextResponse.json({
     success: true,
     data: (data || []).map(row => row.raw_data),
@@ -111,6 +135,6 @@ export async function GET(request: Request) {
     page,
     limit,
     totalPages: Math.ceil((count || 0) / limit),
-    lastScrapedAt: metadata?.last_scrape_at || null
+    lastScrapedAt
   });
 }

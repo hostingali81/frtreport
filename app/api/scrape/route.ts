@@ -132,6 +132,22 @@ function toISTISOString(date: Date | null): string | null {
   return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}+05:30`;
 }
 
+// Get current time in IST and format for storage
+function getCurrentISTTime(): string {
+  const now = new Date();
+  // Convert to IST (UTC+5:30)
+  const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+  
+  const year = istTime.getUTCFullYear();
+  const month = String(istTime.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(istTime.getUTCDate()).padStart(2, '0');
+  const hours = String(istTime.getUTCHours()).padStart(2, '0');
+  const minutes = String(istTime.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(istTime.getUTCSeconds()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}+05:30`;
+}
+
 async function saveToNewDb(rows: any[], scrapeDuration: number, scrapeType: string) {
   if (!supabase || !rows.length) return { new_rows: 0, updated_rows: 0 };
   
@@ -190,7 +206,7 @@ async function saveToNewDb(rows: any[], scrapeDuration: number, scrapeType: stri
   
   const now = new Date();
   await supabase.from('scrape_metadata').insert({
-    last_scrape_at: toISTISOString(now),
+    last_scrape_at: getCurrentISTTime(),
     total_rows: validRows.length,
     new_rows: newRowsCount,
     updated_rows: updatedRowsCount,
@@ -452,7 +468,7 @@ export async function GET(request: Request) {
     if (supabase) {
       const now = new Date();
       supabase.from('scrape_metadata').insert({
-        last_scrape_at: toISTISOString(now),
+        last_scrape_at: getCurrentISTTime(),
         total_rows: 0,
         new_rows: 0,
         updated_rows: 0,

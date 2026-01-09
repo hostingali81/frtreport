@@ -4197,7 +4197,7 @@ export default function Home() {
 
         {lastUpdated && (
           <div className="bg-amber-50 border-l-4 border-amber-500 text-amber-800 px-4 py-3 rounded">
-            <p className="font-semibold">⚠️ Data last updated on: {new Date(lastUpdated).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}</p>
+            <p className="font-semibold">⚠️ Data last updated on: {lastUpdated}</p>
           </div>
         )}
 
