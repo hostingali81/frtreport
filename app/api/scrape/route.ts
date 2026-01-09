@@ -272,24 +272,30 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
 
   await page.click('#ctrl143708').catch(() => {});
 
-  // Wait for initial data load
-  await page.waitForSelector('#printablediv143706 table', { timeout: 60000 });
-  await new Promise(resolve => setTimeout(resolve, 3000));
+  // Wait for table to load with data
+  await page.waitForFunction(() => {
+    const container = document.querySelector('#printablediv143706');
+    if (!container) return false;
+    const tables = Array.from(container.querySelectorAll('table'));
+    if (tables.length < 2) return false;
+    const dataTable = tables[1];
+    const rows = dataTable.querySelectorAll('tbody tr').length > 0 
+      ? dataTable.querySelectorAll('tbody tr') 
+      : dataTable.querySelectorAll('tr');
+    return rows.length > 0;
+  }, { timeout: 60000 });
   
-  // Try to select "Show All" or maximum entries if dropdown exists
-  await page.evaluate(() => {
-    // Try to find and click "Show All" or select max entries
+  // Try to select "Show All" if dropdown exists
+  const hasDropdown = await page.evaluate(() => {
     const selects = Array.from(document.querySelectorAll('select'));
     for (const select of selects) {
       const options = Array.from(select.querySelectorAll('option'));
-      // Find option with highest value or "All"
       const allOption = options.find(opt => opt.textContent?.toLowerCase().includes('all'));
       if (allOption) {
         (select as HTMLSelectElement).value = allOption.value;
         select.dispatchEvent(new Event('change', { bubbles: true }));
-        return;
+        return true;
       }
-      // Or select maximum value
       const maxOption = options.reduce((max, opt) => {
         const val = parseInt(opt.value);
         const maxVal = parseInt(max.value);
@@ -298,11 +304,26 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
       if (maxOption) {
         (select as HTMLSelectElement).value = maxOption.value;
         select.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
       }
     }
-  }).catch(() => {});
+    return false;
+  }).catch(() => false);
   
-  await new Promise(resolve => setTimeout(resolve, 5000)); // Wait for data reload
+  // Only wait if dropdown was changed
+  if (hasDropdown) {
+    await page.waitForFunction(() => {
+      const container = document.querySelector('#printablediv143706');
+      if (!container) return false;
+      const tables = Array.from(container.querySelectorAll('table'));
+      if (tables.length < 2) return false;
+      const dataTable = tables[1];
+      const rows = dataTable.querySelectorAll('tbody tr').length > 0 
+        ? dataTable.querySelectorAll('tbody tr') 
+        : dataTable.querySelectorAll('tr');
+      return rows.length > 0;
+    }, { timeout: 10000 }).catch(() => {});
+  }
   
   const result = await page.evaluate(() => {
     const normalize = (s: string | null | undefined) => (s || '').trim();
