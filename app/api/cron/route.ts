@@ -7,6 +7,7 @@ export async function GET(request: Request) {
   const secret = searchParams.get('secret');
 
   if (secret !== process.env.CRON_SECRET) {
+    console.log('Auth failed:', { received: secret, expected: process.env.CRON_SECRET });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
