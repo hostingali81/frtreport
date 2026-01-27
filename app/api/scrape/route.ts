@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300; // 5 minutes for full scrape
+export const maxDuration = 60; // Vercel free tier limit
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE;
@@ -320,72 +320,26 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
   console.log('[SCRAPER] Step 7: Clicking search button...');
   await page.click('#ctrl143708').catch(() => { console.log('[SCRAPER] Search button click failed!'); });
 
-  // Optimized wait: shorter timeout with retry
+  // Fast wait with timeout - if takes too long, return partial data
   let tableLoaded = false;
-  for (let attempt = 0; attempt < 3 && !tableLoaded; attempt++) {
-    try {
-      await page.waitForFunction(() => {
-        const container = document.querySelector('#printablediv143706');
-        if (!container) return false;
-        const tables = Array.from(container.querySelectorAll('table'));
-        if (tables.length < 2) return false;
-        const dataTable = tables[1];
-        const rows = dataTable.querySelectorAll('tbody tr, tr');
-        return rows.length > 0;
-      }, { timeout: 20000 });
-      tableLoaded = true;
-    } catch {
-      // Retry - click button again
-      await page.click('#ctrl143708').catch(() => { });
-      await new Promise(r => setTimeout(r, 1000));
-    }
+  try {
+    await page.waitForFunction(() => {
+      const container = document.querySelector('#printablediv143706');
+      if (!container) return false;
+      const tables = Array.from(container.querySelectorAll('table'));
+      if (tables.length < 2) return false;
+      const dataTable = tables[1];
+      const rows = dataTable.querySelectorAll('tbody tr, tr');
+      return rows.length > 0;
+    }, { timeout: 15000 }); // Reduced from 20s to 15s
+    tableLoaded = true;
+  } catch (e) {
+    console.log('[SCRAPER] Table load timeout - attempting to extract anyway');
+    tableLoaded = false;
   }
 
-  if (!tableLoaded) {
-    await browser.close();
-    throw new Error('Table did not load after retries');
-  }
-
-  // Always select "Show All" to get ALL data (not just first page)
-  console.log('[SCRAPER] Step 8: Selecting Show All in dropdown...');
-  {
-    const hasDropdown = await page.evaluate(() => {
-      const selects = Array.from(document.querySelectorAll('select'));
-      for (const select of selects) {
-        const options = Array.from(select.querySelectorAll('option'));
-        const allOption = options.find(opt => opt.textContent?.toLowerCase().includes('all'));
-        if (allOption) {
-          (select as HTMLSelectElement).value = allOption.value;
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-          return true;
-        }
-        const maxOption = options.reduce((max, opt) => {
-          const val = parseInt(opt.value);
-          const maxVal = parseInt(max.value);
-          return (!isNaN(val) && val > maxVal) ? opt : max;
-        });
-        if (maxOption) {
-          (select as HTMLSelectElement).value = maxOption.value;
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-          return true;
-        }
-      }
-      return false;
-    }).catch(() => false);
-
-    // Only wait if dropdown was changed
-    if (hasDropdown) {
-      await page.waitForFunction(() => {
-        const container = document.querySelector('#printablediv143706');
-        if (!container) return false;
-        const tables = Array.from(container.querySelectorAll('table'));
-        if (tables.length < 2) return false;
-        const dataTable = tables[1];
-        const rows = dataTable.querySelectorAll('tbody tr, tr');
-        return rows.length > 0;
-      }, { timeout: 10000 }).catch(() => { });
-    }
-  }
+  // Skip "Show All" dropdown - just get first page (faster)
+  console.log('[SCRAPER] Step 8: Extracting data (skipping Show All for speed)...');
 
   const result = await page.evaluate(() => {
     const normalize = (s: string | null | undefined) => (s || '').trim();
@@ -467,19 +421,26 @@ export async function GET(request: Request) {
     let toDate: string | undefined;
     let scrapeType = 'full';
 
-    // Smart incremental scraping based on last complaint date in database
+    // Smart incremental scraping - scrape only last 7 days by default
     if (useNewSystem && !forceFullScrape) {
       const lastComplaintDate = await getLastComplaintDate();
 
       if (lastComplaintDate) {
-        // Scrape from 3 days before last complaint date (for safety/overlap)
+        // Scrape from 2 days before last complaint (overlap for safety)
         const lastDate = new Date(lastComplaintDate);
         const safeDate = new Date(lastDate);
-        safeDate.setDate(safeDate.getDate() - 3); // Extended from -1 to -3 days
+        safeDate.setDate(safeDate.getDate() - 2);
 
         fromDate = safeDate.toISOString().split('T')[0];
         toDate = new Date().toISOString().split('T')[0];
         scrapeType = 'incremental_from_last_complaint';
+      } else {
+        // No data in DB - scrape only last 7 days for first run
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        fromDate = sevenDaysAgo.toISOString().split('T')[0];
+        toDate = new Date().toISOString().split('T')[0];
+        scrapeType = 'initial_7_days';
       }
     }
 
