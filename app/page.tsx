@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers } from 'react-icons/fi';
+import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers, FiInfo, FiActivity } from 'react-icons/fi';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import Image from 'next/image';
 import Select from 'react-select';
 import { useRouter } from 'next/navigation';
@@ -39,6 +41,7 @@ export default function Home() {
   const [activePreset, setActivePreset] = useState<string>(''); // Track active preset
   const [monthFilter, setMonthFilter] = useState<string>('All');
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedCellData, setSelectedCellData] = useState<{ title: string, content: string } | null>(null);
   const rowsPerPage = 100;
 
   const parsePossibleDate = (value: string) => {
@@ -173,14 +176,14 @@ export default function Home() {
         // First scrape new data
         const scrapeResponse = await fetch('/api/scrape?refresh=1');
         const scrapeResult = await scrapeResponse.json();
-        
+
         if (!scrapeResult.success) {
           setError(scrapeResult.error || 'Scraping failed');
           setLoading(false);
           return;
         }
       }
-      
+
       // Then fetch ALL data from database
       const endpoint = '/api/complaints?fetchAll=true';
       const response = await fetch(endpoint);
@@ -2977,13 +2980,13 @@ export default function Home() {
   const exportExcel = async () => {
     const rows = filtered;
     if (rows.length === 0) return;
-    
+
     // Warning for large exports
     if (rows.length > 5000) {
       const confirm = window.confirm(`⚠️ You are exporting ${rows.length} rows. This may take some time. Continue?`);
       if (!confirm) return;
     }
-    
+
     const [excelModule, { saveAs }] = await Promise.all([
       import('exceljs/dist/exceljs.min.js'),
       import('file-saver'),
@@ -4137,6 +4140,135 @@ export default function Home() {
     saveAs(blob, fileName);
   };
 
+  const exportRepeatedCompliantsByMobile = async () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Repeat Complaints (Mobile)');
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true });
+
+    // Aggregate by Mobile
+    const mobileMap = new Map<string, { mobile: string; name: string; address: string; total: number; pending: number; closed: number; timestamps: string[] }>();
+    rows.forEach(r => {
+      const mobile = r['Consumer Mobile'] ? String(r['Consumer Mobile']).trim() : null;
+      if (!mobile || mobile.length < 5) return; // Basic validation
+
+      const entry = mobileMap.get(mobile) || { mobile, name: r['Consumer Name'], address: r['Consumer Address'], total: 0, pending: 0, closed: 0, timestamps: [] as string[] };
+      entry.total += 1;
+      const status = String(r['Status'] || '').toLowerCase();
+      if (status.includes('pending')) entry.pending += 1;
+      else if (status.includes('closed')) entry.closed += 1;
+      entry.timestamps.push(String(r['Complaint Date and Time'] || ''));
+      mobileMap.set(mobile, entry);
+    });
+
+    // Filter > 1 complaint and Sort by Total DESC
+    const sortedData = Array.from(mobileMap.values())
+      .filter(x => x.total > 1)
+      .sort((a, b) => b.total - a.total);
+
+    // Title
+    const titleRow = ws.addRow(['Repeat Complainers Analysis (By Mobile Number)']);
+    titleRow.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+    titleRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+    ws.mergeCells(1, 1, 1, 6);
+
+    // Subtitle
+    const subtitleRow = ws.addRow([`Generated: ${nowStr} | Total Recognized Repeaters: ${sortedData.length}`]);
+    subtitleRow.font = { italic: true, size: 10 };
+    ws.mergeCells(2, 1, 2, 6);
+
+    // Headers
+    const headerRow = ws.addRow(['Mobile Number', 'Consumer Name (Latest)', 'Address (Latest)', 'Total Complaints', 'Pending', 'Closed']);
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } };
+      cell.alignment = { horizontal: 'center' };
+    });
+
+    // Data
+    sortedData.forEach(d => {
+      ws.addRow([d.mobile, d.name, d.address, d.total, d.pending, d.closed]);
+    });
+
+    // Widths
+    ws.getColumn(1).width = 15;
+    ws.getColumn(2).width = 25;
+    ws.getColumn(3).width = 30;
+    ws.getColumn(4).width = 15;
+    ws.getColumn(5).width = 10;
+    ws.getColumn(6).width = 10;
+
+    const buf = await wb.xlsx.writeBuffer();
+    saveAs(new Blob([buf]), `repeat_complaints_mobile_${now.getTime()}.xlsx`);
+  };
+
+  const exportRepeatedCompliantsByNameAddress = async () => {
+    const rows = filtered;
+    if (rows.length === 0) return;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Repeat Complaints (Name+Address)');
+    const now = new Date();
+    const nowStr = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true });
+
+    // Aggregate by Name + Address
+    const keyMap = new Map<string, { mobile: string; name: string; address: string; total: number; pending: number; closed: number }>();
+    rows.forEach(r => {
+      const name = r['Consumer Name'] ? String(r['Consumer Name']).trim() : '';
+      const address = r['Consumer Address'] ? String(r['Consumer Address']).trim() : '';
+      if (!name) return;
+
+      const key = `${name}|${address}`.toLowerCase();
+      const entry = keyMap.get(key) || { mobile: r['Consumer Mobile'], name, address, total: 0, pending: 0, closed: 0 };
+      entry.total += 1;
+      const status = String(r['Status'] || '').toLowerCase();
+      if (status.includes('pending')) entry.pending += 1;
+      else if (status.includes('closed')) entry.closed += 1;
+      keyMap.set(key, entry);
+    });
+
+    // Filter > 1 complaint and Sort by Total DESC
+    const sortedData = Array.from(keyMap.values())
+      .filter(x => x.total > 1)
+      .sort((a, b) => b.total - a.total);
+
+    // Title
+    const titleRow = ws.addRow(['Repeat Complainers Analysis (By Name & Address)']);
+    titleRow.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+    titleRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDB2777' } };
+    ws.mergeCells(1, 1, 1, 6);
+
+    // Subtitle
+    const subtitleRow = ws.addRow([`Generated: ${nowStr} | Total Recognized Repeaters: ${sortedData.length}`]);
+    subtitleRow.font = { italic: true, size: 10 };
+    ws.mergeCells(2, 1, 2, 6);
+
+    // Headers
+    const headerRow = ws.addRow(['Consumer Name', 'Address', 'Last Known Mobile', 'Total Complaints', 'Pending', 'Closed']);
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } };
+      cell.alignment = { horizontal: 'center' };
+    });
+
+    // Data
+    sortedData.forEach(d => {
+      ws.addRow([d.name, d.address, d.mobile, d.total, d.pending, d.closed]);
+    });
+
+    // Widths
+    ws.getColumn(1).width = 25;
+    ws.getColumn(2).width = 30;
+    ws.getColumn(3).width = 15;
+    ws.getColumn(4).width = 15;
+    ws.getColumn(5).width = 10;
+    ws.getColumn(6).width = 10;
+
+    const buf = await wb.xlsx.writeBuffer();
+    saveAs(new Blob([buf]), `repeat_complaints_consumer_${now.getTime()}.xlsx`);
+  };
+
   return (
     <div className="min-h-screen p-4 md:p-8 bg-gray-50">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -4300,7 +4432,7 @@ export default function Home() {
             <div className="flex flex-wrap items-center justify-between gap-3 mt-6 pt-5 border-t border-gray-200">
               <div className="flex items-center gap-2 text-sm">
                 <FiBarChart2 className="text-sky-600 text-lg" />
-                <span className="font-semibold text-gray-700">Showing {((currentPage-1)*rowsPerPage)+1}-{Math.min(currentPage*rowsPerPage, filtered.length)} of {filtered.length} complaints</span>
+                <span className="font-semibold text-gray-700">Showing {((currentPage - 1) * rowsPerPage) + 1}-{Math.min(currentPage * rowsPerPage, filtered.length)} of {filtered.length} complaints</span>
               </div>
               <div className="flex flex-wrap gap-3">
                 <button
@@ -4314,6 +4446,12 @@ export default function Home() {
                   className="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
                 >
                   <FiBarChart2 className="text-xl" /> <span>View Charts</span>
+                </button>
+                <button
+                  onClick={() => router.push('/deep-analysis')}
+                  className="inline-flex items-center gap-2 bg-pink-600 hover:bg-pink-700 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
+                >
+                  <FiActivity className="text-xl" /> <span>Deep Analysis</span>
                 </button>
                 <button
                   onClick={exportTrendChartsPDF}
@@ -4346,58 +4484,19 @@ export default function Home() {
 
         {filtered.length > 0 && (
           <>
-          <div className="bg-white rounded-xl shadow-md border border-gray-100">
-            <div className="overflow-x-auto max-h-[70vh] relative">
-              <table className="min-w-full divide-y divide-gray-200 text-xs md:text-sm">
-                <thead className="bg-gradient-to-r from-gray-100 to-gray-50 sticky top-0 z-10 shadow-sm">
-                  <tr>
-                    {(() => {
-                      const preferredOrder = [
-                        'Complaint Number',
-                        'Status',
-                        'Closed Status',
-                        'Complaint Date and Time',
-                        'Closed Date',
-                        'Resolution Time',
-                        'Area Type',
-                        'Division',
-                        'Sub Division',
-                        'Sub Station',
-                        'Closed By',
-                        'Closing Remarks'
-                      ];
-
-                      // Get all unique keys from the first row to check for extra columns
-                      const firstRowKeys = Object.keys(filtered[0] || {});
-                      // Remove Resolution Time from generic check as it is computed
-                      const otherKeys = firstRowKeys.filter(k => !preferredOrder.includes(k) && k !== 'Resolution Time');
-
-                      // Final headers: Preferred + Others
-                      const finalHeaders = [...preferredOrder, ...otherKeys];
-
-                      return finalHeaders.map((header) => (
-                        <th
-                          key={header}
-                          onClick={() => handleSort(header)}
-                          className="px-4 md:px-6 py-3 text-left font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-200 select-none"
-                        >
-                          <div className="flex items-center gap-1">
-                            {header}
-                            {sortColumn === header && (
-                              <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
-                            )}
-                          </div>
-                        </th>
-                      ));
-                    })()}
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-100">
-                  {paginatedData.map((row, index) => (
-                    <tr key={index} className="hover:bg-gray-50">
+            <div className="bg-white rounded-xl shadow-md border border-gray-100">
+              <div className="overflow-x-auto max-h-[70vh] relative">
+                <table className="min-w-full divide-y divide-gray-200 text-xs md:text-sm">
+                  <thead className="bg-gradient-to-r from-gray-100 to-gray-50 sticky top-0 z-10 shadow-sm">
+                    <tr>
                       {(() => {
                         const preferredOrder = [
                           'Complaint Number',
+                          'Consumer Name',
+                          'Consumer Mobile',
+                          'Consumer Address',
+                          'Complaint Type',
+                          'Complaint Sub Type',
                           'Status',
                           'Closed Status',
                           'Complaint Date and Time',
@@ -4410,55 +4509,121 @@ export default function Home() {
                           'Closed By',
                           'Closing Remarks'
                         ];
-                        const firstRowKeys = Object.keys(row || {});
+
+                        // Get all unique keys from the first row to check for extra columns
+                        const firstRowKeys = Object.keys(filtered[0] || {});
+                        // Remove Resolution Time from generic check as it is computed
                         const otherKeys = firstRowKeys.filter(k => !preferredOrder.includes(k) && k !== 'Resolution Time');
+
+                        // Final headers: Preferred + Others
                         const finalHeaders = [...preferredOrder, ...otherKeys];
 
-                        return finalHeaders.map((h, i) => {
-                          let display: any = (row as any)[h];
-                          if (h === 'Resolution Time') display = computeResolutionTime(row);
-                          const isRemarks = h === 'Closing Remarks';
-                          const isClosedStatus = h === 'Closed Status';
-
-                          let cellContent;
-                          if (isClosedStatus) {
-                            const status = String(display || '').trim();
-                            const isWithin = status === 'Closed Within';
-                            const isBeyond = status === 'Closed Beyond';
-                            cellContent = (
-                              <span className={`px-2 py-1 rounded-full font-medium ${isWithin ? 'bg-green-100 text-green-700' : isBeyond ? 'bg-red-100 text-red-700' : 'text-gray-600'}`}>
-                                {status}
-                              </span>
-                            );
-                          } else if (isRemarks) {
-                            cellContent = <span title={String(display || '')} className="block truncate">{String(display || '')}</span>;
-                          } else {
-                            cellContent = String(display ?? '');
-                          }
-
-                          return (
-                            <td key={i} className="px-4 md:px-6 py-3 whitespace-nowrap text-gray-900 max-w-[14rem] md:max-w-xs">
-                              {cellContent}
-                            </td>
-                          );
-                        });
+                        return finalHeaders.map((header) => (
+                          <th
+                            key={header}
+                            onClick={() => handleSort(header)}
+                            className="px-4 md:px-6 py-3 text-left font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-200 select-none"
+                          >
+                            <div className="flex items-center gap-1">
+                              {header}
+                              {sortColumn === header && (
+                                <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                              )}
+                            </div>
+                          </th>
+                        ));
                       })()}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-100">
+                    {paginatedData.map((row, index) => (
+                      <tr key={index} className="hover:bg-gray-50">
+                        {(() => {
+                          const preferredOrder = [
+                            'Complaint Number',
+                            'Consumer Name',
+                            'Consumer Mobile',
+                            'Consumer Address',
+                            'Complaint Type',
+                            'Complaint Sub Type',
+                            'Status',
+                            'Closed Status',
+                            'Complaint Date and Time',
+                            'Closed Date',
+                            'Resolution Time',
+                            'Area Type',
+                            'Division',
+                            'Sub Division',
+                            'Sub Station',
+                            'Closed By',
+                            'Closing Remarks'
+                          ];
+                          const firstRowKeys = Object.keys(row || {});
+                          const otherKeys = firstRowKeys.filter(k => !preferredOrder.includes(k) && k !== 'Resolution Time');
+                          const finalHeaders = [...preferredOrder, ...otherKeys];
+
+                          return finalHeaders.map((h, i) => {
+                            let display: any = (row as any)[h];
+                            if (h === 'Resolution Time') display = computeResolutionTime(row);
+                            const isRemarks = h === 'Closing Remarks';
+                            const isClosedStatus = h === 'Closed Status';
+
+                            let cellContent;
+                            if (isClosedStatus) {
+                              const status = String(display || '').trim();
+                              const isWithin = status === 'Closed Within';
+                              const isBeyond = status === 'Closed Beyond';
+                              cellContent = (
+                                <span className={`px-2 py-1 rounded-full font-medium ${isWithin ? 'bg-green-100 text-green-700' : isBeyond ? 'bg-red-100 text-red-700' : 'text-gray-600'}`}>
+                                  {status}
+                                </span>
+                              );
+                            } else if (isRemarks) {
+                              cellContent = <span title={String(display || '')} className="block truncate">{String(display || '')}</span>;
+                            } else if (h === 'Consumer Name' || h === 'Consumer Address') {
+                              const contentStr = String(display || '');
+                              cellContent = (
+                                <div className="flex items-center gap-1 group">
+                                  <div title={contentStr} className="truncate max-w-[120px] md:max-w-[150px]">
+                                    {contentStr}
+                                  </div>
+                                  {contentStr && (
+                                    <button
+                                      onClick={() => setSelectedCellData({ title: h, content: contentStr })}
+                                      className="text-gray-400 hover:text-blue-600 flex-shrink-0 md:opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                                    >
+                                      <FiInfo size={14} />
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            } else {
+                              cellContent = String(display ?? '');
+                            }
+
+                            return (
+                              <td key={i} className="px-4 md:px-6 py-3 whitespace-nowrap text-gray-900 max-w-[14rem] md:max-w-xs">
+                                {cellContent}
+                              </td>
+                            );
+                          });
+                        })()}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-          
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-4 pb-4">
-              <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">First</button>
-              <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Prev</button>
-              <span className="px-4 py-1 bg-gray-100 rounded">Page {currentPage} of {totalPages}</span>
-              <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Next</button>
-              <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Last</button>
-            </div>
-          )}
+
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 mt-4 pb-4">
+                <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">First</button>
+                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Prev</button>
+                <span className="px-4 py-1 bg-gray-100 rounded">Page {currentPage} of {totalPages}</span>
+                <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Next</button>
+                <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Last</button>
+              </div>
+            )}
           </>
         )}
 
@@ -4699,6 +4864,38 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
+
+                <div>
+                  <h3 className="text-xs font-bold text-pink-700 uppercase tracking-wider mb-3 px-2 flex items-center gap-2">
+                    <span className="text-lg">🧠</span> Deep Analysis - Consumer Insights
+                  </h3>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => { exportRepeatedCompliantsByMobile(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-pink-50 to-rose-50 border-2 border-pink-200 hover:border-pink-400 hover:shadow-md rounded-lg transition-all text-left group"
+                    >
+                      <div className="bg-pink-600 p-3 rounded-lg group-hover:bg-pink-700 transition">
+                        <FiTrendingUp className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-pink-700 transition">Top Repeaters (By Mobile)</div>
+                        <div className="text-xs text-gray-600">Frequent complainers sharing same mobile</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { exportRepeatedCompliantsByNameAddress(); setShowReportModal(false); }}
+                      className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-pink-50 to-rose-50 border-2 border-pink-200 hover:border-pink-400 hover:shadow-md rounded-lg transition-all text-left group"
+                    >
+                      <div className="bg-pink-600 p-3 rounded-lg group-hover:bg-pink-700 transition">
+                        <FiTrendingUp className="text-white text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 group-hover:text-pink-700 transition">Top Repeaters (Name & Address)</div>
+                        <div className="text-xs text-gray-600">Frequent consumers by Name + Address</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
                 <div className="border-t-2 border-gray-300 pt-4 mt-2"></div>
                 <button
                   onClick={() => { exportDetailedReportPDF(); setShowReportModal(false); }}
@@ -4716,8 +4913,37 @@ export default function Home() {
             </div>
           </div>
         )}
+        {selectedCellData && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full transform scale-100 transition-all p-6 relative">
+              <button
+                onClick={() => setSelectedCellData(null)}
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-2 rounded-full hover:bg-gray-100 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+
+              <h3 className="text-xl font-bold text-gray-900 mb-4 pr-10 border-b border-gray-100 pb-2">
+                {selectedCellData.title}
+              </h3>
+
+              <div className="bg-gray-50 rounded-xl p-4 text-gray-700 text-base leading-relaxed break-words border border-gray-100 max-h-[60vh] overflow-y-auto">
+                {selectedCellData.content}
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setSelectedCellData(null)}
+                  className="bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-lg font-medium transition-colors shadow-lg shadow-gray-200"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    </div >
   );
 }
 

@@ -30,7 +30,7 @@ async function loadFromOldDb() {
     .maybeSingle();
   if (error) return null;
   if (!data) return null;
-  return { 
+  return {
     ...data.payload,
     source: 'supabase_old',
     system: 'legacy'
@@ -59,31 +59,31 @@ async function getLastSuccessfulScrape() {
 
 async function loadFromNewDb() {
   if (!supabase) return null;
-  
+
   // Fetch ALL rows in batches
   let allData: any[] = [];
   let from = 0;
   const batchSize = 1000;
-  
+
   while (true) {
     const { data, error } = await supabase
       .from('complaints')
       .select('raw_data')
       .order('complaint_date', { ascending: false })
       .range(from, from + batchSize - 1);
-    
+
     if (error || !data || data.length === 0) break;
-    
+
     allData = allData.concat(data);
-    
+
     if (data.length < batchSize) break;
     from += batchSize;
   }
-  
+
   const { count } = await supabase
     .from('complaints')
     .select('id', { count: 'exact', head: true });
-  
+
   const lastScrape = await getLastSuccessfulScrape();
   return {
     data: allData.map(row => row.raw_data),
@@ -97,30 +97,30 @@ async function loadFromNewDb() {
 // Parse date in IST timezone (India Standard Time)
 function parseDate(dateStr: string): Date | null {
   if (!dateStr) return null;
-  
+
   // Match: DD/MM/YYYY HH:MM AM/PM
   const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i);
   if (!match) return null;
-  
+
   const [, day, month, year, hour, minute, period] = match;
   let hours = parseInt(hour);
   const mins = parseInt(minute);
-  
+
   // Convert to 24-hour format
   if (period.toUpperCase() === 'PM' && hours < 12) hours += 12;
   if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
-  
+
   // Create date in IST (UTC+5:30)
   // Store as-is without timezone conversion
   const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hours, mins, 0, 0);
-  
+
   return date;
 }
 
 // Convert IST date to ISO string for storage
 function toISTISOString(date: Date | null): string | null {
   if (!date) return null;
-  
+
   // Format: YYYY-MM-DDTHH:MM:SS+05:30
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -128,7 +128,7 @@ function toISTISOString(date: Date | null): string | null {
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   const seconds = String(date.getSeconds()).padStart(2, '0');
-  
+
   return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}+05:30`;
 }
 
@@ -137,45 +137,57 @@ function getCurrentISTTime(): string {
   const now = new Date();
   // Convert to IST (UTC+5:30)
   const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-  
+
   const year = istTime.getUTCFullYear();
   const month = String(istTime.getUTCMonth() + 1).padStart(2, '0');
   const day = String(istTime.getUTCDate()).padStart(2, '0');
   const hours = String(istTime.getUTCHours()).padStart(2, '0');
   const minutes = String(istTime.getUTCMinutes()).padStart(2, '0');
   const seconds = String(istTime.getUTCSeconds()).padStart(2, '0');
-  
+
   return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}+05:30`;
 }
 
 async function saveToNewDb(rows: any[], scrapeDuration: number, scrapeType: string) {
   if (!supabase || !rows.length) return { new_rows: 0, updated_rows: 0 };
-  
-  const validRows = rows.filter(r => r['Complaint Number'] && r['Complaint Number'].trim());
+
+  // Deduplicate rows based on Complaint Number
+  const validRowsMap = new Map();
+  rows.forEach(r => {
+    const cn = r['Complaint Number']?.trim();
+    if (cn) validRowsMap.set(cn, r);
+  });
+  const validRows = Array.from(validRowsMap.values());
+
   if (!validRows.length) return { new_rows: 0, updated_rows: 0 };
-  
+
   const complaintNumbers = validRows.map(r => r['Complaint Number']);
-  
+
   // Single query for all existing records - much faster
   const { data: existingRecords } = await supabase
     .from('complaints')
     .select('complaint_number')
     .in('complaint_number', complaintNumbers);
-  
+
   const existingSet = new Set(existingRecords?.map(r => r.complaint_number) || []);
   const newRowsCount = validRows.filter(r => !existingSet.has(r['Complaint Number'])).length;
   const updatedRowsCount = validRows.length - newRowsCount;
-  
+
   const upsertData = validRows.map(row => {
     const complaintDate = parseDate(row['Complaint Date and Time'] || '');
     const closedDate = parseDate(row['Closed Date'] || '');
-    
+
     return {
       complaint_number: row['Complaint Number'],
       complaint_date: toISTISOString(complaintDate),
       division: row['Division'],
       sub_division: row['Sub Division'],
       sub_station: row['Sub Station'],
+      consumer_name: row['Consumer Name'],
+      consumer_mobile: row['Consumer Mobile'],
+      consumer_address: row['Consumer Address'],
+      complaint_type: row['Complaint Type'],
+      complaint_sub_type: row['Complaint Sub Type'],
       status: row['Status'],
       closed_status: row['Closed Status'],
       closed_by: row['Closed By'],
@@ -191,19 +203,19 @@ async function saveToNewDb(rows: any[], scrapeDuration: number, scrapeType: stri
   for (let i = 0; i < upsertData.length; i += 1000) {
     batches.push(upsertData.slice(i, i + 1000));
   }
-  
-  const results = await Promise.allSettled(batches.map(batch => 
+
+  const results = await Promise.allSettled(batches.map(batch =>
     supabase
       .from('complaints')
       .upsert(batch, { onConflict: 'complaint_number', ignoreDuplicates: false })
   ));
-  
+
   results.forEach((result, i) => {
     if (result.status === 'rejected' || (result.status === 'fulfilled' && result.value.error)) {
       console.error(`Batch ${i + 1} error:`, result.status === 'rejected' ? result.reason : result.value.error);
     }
   });
-  
+
   const now = new Date();
   await supabase.from('scrape_metadata').insert({
     last_scrape_at: getCurrentISTTime(),
@@ -213,7 +225,7 @@ async function saveToNewDb(rows: any[], scrapeDuration: number, scrapeType: stri
     duration_seconds: scrapeDuration,
     status: 'success'
   });
-  
+
   return { new_rows: newRowsCount, updated_rows: updatedRowsCount };
 }
 
@@ -246,15 +258,15 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
   await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', { timeout: 60000, waitUntil: 'domcontentloaded' });
 
   const now = new Date();
-  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] as const;
-  
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
   const formatDateDisplay = (date: Date) => {
     const day = String(date.getDate()).padStart(2, '0');
     const mon = monthNames[date.getMonth()];
     const yr = date.getFullYear();
     return `${day}-${mon}-${yr}`;
   };
-  
+
   const toDateDisplay = toDate ? formatDateDisplay(new Date(toDate)) : formatDateDisplay(now);
   const fromDateDisplay = fromDate ? formatDateDisplay(new Date(fromDate)) : '01-Nov-2025';
   const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -263,14 +275,14 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
     const fireEvents = (el: HTMLElement) => { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('blur', { bubbles: true })); };
     const fromEl = document.getElementById('ctrl143709') as HTMLInputElement | null;
     const toEl = document.getElementById('ctrl143707') as HTMLInputElement | null;
-    if (fromEl) { fromEl.value = fromStr; fireEvents(fromEl); try { (window as any).$ && (window as any)('#ctrl143709').val(fromStr).trigger('change'); } catch {} }
-    if (toEl) { toEl.value = toStr; fireEvents(toEl); try { (window as any).$ && (window as any)('#ctrl143707').val(toStr).trigger('change'); } catch {} }
+    if (fromEl) { fromEl.value = fromStr; fireEvents(fromEl); try { (window as any).$ && (window as any)('#ctrl143709').val(fromStr).trigger('change'); } catch { } }
+    if (toEl) { toEl.value = toStr; fireEvents(toEl); try { (window as any).$ && (window as any)('#ctrl143707').val(toStr).trigger('change'); } catch { } }
     const dateInputs = Array.from(document.querySelectorAll('input[type="date"]')) as HTMLInputElement[];
     if (dateInputs.length === 1) { dateInputs[0].value = todayIsoEval; fireEvents(dateInputs[0]); }
     else if (dateInputs.length >= 2) { dateInputs[0].value = '2025-11-01'; fireEvents(dateInputs[0]); dateInputs[1].value = todayIsoEval; fireEvents(dateInputs[1]); }
   }, { fromStr: fromDateDisplay, toStr: toDateDisplay, todayIsoEval: todayIso });
 
-  await page.click('#ctrl143708').catch(() => {});
+  await page.click('#ctrl143708').catch(() => { });
 
   // Wait for table to load with data
   await page.waitForFunction(() => {
@@ -279,12 +291,12 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
     const tables = Array.from(container.querySelectorAll('table'));
     if (tables.length < 2) return false;
     const dataTable = tables[1];
-    const rows = dataTable.querySelectorAll('tbody tr').length > 0 
-      ? dataTable.querySelectorAll('tbody tr') 
+    const rows = dataTable.querySelectorAll('tbody tr').length > 0
+      ? dataTable.querySelectorAll('tbody tr')
       : dataTable.querySelectorAll('tr');
     return rows.length > 0;
   }, { timeout: 60000 });
-  
+
   // Try to select "Show All" if dropdown exists
   const hasDropdown = await page.evaluate(() => {
     const selects = Array.from(document.querySelectorAll('select'));
@@ -309,7 +321,7 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
     }
     return false;
   }).catch(() => false);
-  
+
   // Only wait if dropdown was changed
   if (hasDropdown) {
     await page.waitForFunction(() => {
@@ -318,13 +330,13 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
       const tables = Array.from(container.querySelectorAll('table'));
       if (tables.length < 2) return false;
       const dataTable = tables[1];
-      const rows = dataTable.querySelectorAll('tbody tr').length > 0 
-        ? dataTable.querySelectorAll('tbody tr') 
+      const rows = dataTable.querySelectorAll('tbody tr').length > 0
+        ? dataTable.querySelectorAll('tbody tr')
         : dataTable.querySelectorAll('tr');
       return rows.length > 0;
-    }, { timeout: 10000 }).catch(() => {});
+    }, { timeout: 10000 }).catch(() => { });
   }
-  
+
   const result = await page.evaluate(() => {
     const normalize = (s: string | null | undefined) => (s || '').trim();
     const container = document.querySelector('#printablediv143706');
@@ -333,11 +345,11 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
     if (tables.length < 2) return { data: [], debug: 'tables not found' };
     const headerTable = tables[0];
     const dataTable = tables[1];
-    
+
     // Get headers
     const headerRows = Array.from(headerTable.querySelectorAll('tr'));
     let headers: string[] = [];
-    
+
     for (let rowIdx = 0; rowIdx < Math.min(3, headerRows.length); rowIdx++) {
       const headerCells = Array.from(headerRows[rowIdx].querySelectorAll('th, td')) as HTMLElement[];
       const tempHeaders = headerCells.map((cell, i) => normalize(cell.textContent) || `Column ${i + 1}`);
@@ -346,16 +358,16 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
         break;
       }
     }
-    
+
     if (headers.length === 0) {
-      headers = ['Complaint Number','Complaint Date and Time','Division','Sub Division','Sub Station','Status','Closed Status','Closed By','Closed Date','Closing Remarks','Area Type'];
+      headers = ['Complaint Number', 'Complaint Date and Time', 'Division', 'Sub Division', 'Sub Station', 'Status', 'Closed Status', 'Closed By', 'Closed Date', 'Closing Remarks', 'Area Type'];
     }
-    
+
     // Get ALL data rows - check both tbody and direct tr
-    const dataRows = dataTable.querySelectorAll('tbody tr').length > 0 
-      ? Array.from(dataTable.querySelectorAll('tbody tr')) 
+    const dataRows = dataTable.querySelectorAll('tbody tr').length > 0
+      ? Array.from(dataTable.querySelectorAll('tbody tr'))
       : Array.from(dataTable.querySelectorAll('tr'));
-    
+
     const mapped = dataRows.map(row => {
       const cells = Array.from(row.querySelectorAll('td')) as HTMLElement[];
       if (cells.length === 0) return null;
@@ -365,7 +377,7 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
       const anyValue = Object.values(rowData).some(v => v && v.length > 0);
       return anyValue ? rowData : null;
     }).filter(Boolean) as Record<string, string>[];
-    
+
     return { data: mapped, debug: { headersFound: headers.length, rowsFound: mapped.length, totalTrElements: dataRows.length } };
   });
 
@@ -375,12 +387,12 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
 
 export async function GET(request: Request) {
   const startTime = Date.now();
-  
+
   try {
     const { searchParams } = new URL(request.url);
     const refresh = searchParams.get('refresh') === '1' || searchParams.get('refresh') === 'true';
     const forceFullScrape = searchParams.get('full') === '1';
-    
+
     const useNewSystem = await checkNewTablesExist();
 
     if (!refresh) {
@@ -400,46 +412,46 @@ export async function GET(request: Request) {
         { status: 400 }
       );
     }
-    
+
     let fromDate: string | undefined;
     let toDate: string | undefined;
     let scrapeType = 'full';
-    
+
     // Smart incremental scraping based on last scrape metadata
     if (useNewSystem && !forceFullScrape) {
       const lastScrape = await getLastSuccessfulScrape();
-      
+
       if (lastScrape && lastScrape.last_scrape_at) {
         // Scrape from 1 day before last scrape (for safety/overlap)
         const lastScrapeDate = new Date(lastScrape.last_scrape_at);
         const safeDate = new Date(lastScrapeDate);
         safeDate.setDate(safeDate.getDate() - 1);
-        
+
         fromDate = safeDate.toISOString().split('T')[0];
         toDate = new Date().toISOString().split('T')[0];
         scrapeType = 'incremental_from_last_scrape';
       }
     }
-    
+
     const payload = await scrapeWithPuppeteer(username, password, fromDate, toDate);
     const scrapeDuration = Math.round((Date.now() - startTime) / 1000);
     const scrapedAt = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-    
+
     if (!payload.data || payload.data.length === 0) {
-      return NextResponse.json({ 
-        success: false, 
+      return NextResponse.json({
+        success: false,
         error: 'No data scraped. Please check website or try again.',
         scrapeType,
         debug: payload
       }, { status: 500 });
     }
-    
+
     // Filter valid rows (with complaint numbers)
     const validData = payload.data?.filter((r: any) => r['Complaint Number'] && r['Complaint Number'].trim()) || [];
-    
+
     if (!validData.length) {
-      return NextResponse.json({ 
-        success: false, 
+      return NextResponse.json({
+        success: false,
         error: `Scraped ${payload.data?.length || 0} rows but none had valid complaint numbers`,
         scrapeType,
         debug: {
@@ -448,15 +460,15 @@ export async function GET(request: Request) {
         }
       }, { status: 500 });
     }
-    
+
     if (useNewSystem) {
       const saveResult = await saveToNewDb(payload.data, scrapeDuration, scrapeType);
       const { count } = await supabase!.from('complaints').select('id', { count: 'exact', head: true });
-      
-      return NextResponse.json({ 
-        success: true, 
-        cached: false, 
-        lastScrapedAt: scrapedAt, 
+
+      return NextResponse.json({
+        success: true,
+        cached: false,
+        lastScrapedAt: scrapedAt,
         source: 'live',
         system: 'optimized',
         scrapeType,
@@ -472,20 +484,20 @@ export async function GET(request: Request) {
       });
     } else {
       await saveToOldDb(payload, scrapedAt);
-      return NextResponse.json({ 
-        success: true, 
-        cached: false, 
-        lastScrapedAt: scrapedAt, 
+      return NextResponse.json({
+        success: true,
+        cached: false,
+        lastScrapedAt: scrapedAt,
         source: 'live',
         system: 'legacy',
         message: 'Using old system. Run migration to enable optimized features.',
-        ...payload 
+        ...payload
       });
     }
   } catch (error: any) {
     console.error('Scraping error:', error);
     const errorDuration = Math.round((Date.now() - startTime) / 1000);
-    
+
     if (supabase) {
       const now = new Date();
       supabase.from('scrape_metadata').insert({
@@ -498,8 +510,8 @@ export async function GET(request: Request) {
         error_message: error.message
       });
     }
-    
-    return NextResponse.json({ 
+
+    return NextResponse.json({
       success: false,
       error: error.message,
       suggestion: 'Try force full scrape: /api/scrape?refresh=1&full=1'
