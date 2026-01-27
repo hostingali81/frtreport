@@ -1,0 +1,14 @@
+name: Full Scrape Cron
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Full Scrape
+        run: |
+          curl -X GET "${{ secrets.VERCEL_APP_URL }}/api/cron?secret=${{ secrets.CRON_SECRET }}"
