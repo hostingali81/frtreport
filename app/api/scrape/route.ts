@@ -70,7 +70,7 @@ export async function GET(request: Request) {
           fromDate = sevenDaysAgo.toISOString().split('T')[0];
         } else {
           const safeDate = new Date(lastDate);
-          safeDate.setDate(safeDate.getDate() - 2); // Overlap 2 days for safety
+          safeDate.setDate(safeDate.getDate() - 1); // Overlap 1 day as per user request ("day-1 ka")
           fromDate = safeDate.toISOString().split('T')[0];
         }
         toDate = new Date().toISOString().split('T')[0];
