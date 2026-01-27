@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+// Force redeploy
+
 export async function GET(request: Request) {
   try {
     const baseUrl = process.env.VERCEL_URL 
