@@ -3,25 +3,35 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const secret = searchParams.get('secret');
+  try {
+    const { searchParams } = new URL(request.url);
+    const secret = searchParams.get('secret');
 
-  // Temporary: allow any request for testing
-  // if (secret !== process.env.CRON_SECRET) {
-  //   console.log('Auth failed:', { received: secret, expected: process.env.CRON_SECRET });
-  //   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  // }
+    if (secret !== process.env.CRON_SECRET) {
+      return NextResponse.json({ 
+        error: 'Unauthorized',
+        debug: { received: secret, hasEnv: !!process.env.CRON_SECRET }
+      }, { status: 401 });
+    }
 
-  const baseUrl = process.env.VERCEL_URL 
-    ? `https://${process.env.VERCEL_URL}` 
-    : 'http://localhost:3000';
+    const baseUrl = process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'http://localhost:3000';
 
-  const response = await fetch(`${baseUrl}/api/scrape?refresh=1&secret=${secret}`);
-  const data = await response.json();
+    const scrapeUrl = `${baseUrl}/api/scrape?refresh=1&secret=${secret}`;
+    const response = await fetch(scrapeUrl);
+    const data = await response.json();
 
-  return NextResponse.json({ 
-    success: true, 
-    message: 'Full scrape triggered',
-    result: data 
-  });
+    return NextResponse.json({ 
+      success: true, 
+      message: 'Full scrape triggered',
+      scrapeUrl,
+      result: data 
+    });
+  } catch (error: any) {
+    return NextResponse.json({ 
+      error: error.message,
+      stack: error.stack 
+    }, { status: 500 });
+  }
 }
