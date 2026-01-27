@@ -435,8 +435,13 @@ export async function GET(request: Request) {
         toDate = new Date().toISOString().split('T')[0];
       }
     } else if (isCronJob) {
-      scrapeType = 'full_cron';
-      // Full scrape - no date filters
+      scrapeType = 'cron_last_7_days';
+      // Robust incremental scrape for cron checks last 7 days to catch updates/delays
+      // This ensures speed (<10s) and reliability
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      fromDate = sevenDaysAgo.toISOString().split('T')[0];
+      toDate = new Date().toISOString().split('T')[0];
     }
 
     const payload = await scrapeWithPuppeteer(username, password, fromDate, toDate);
