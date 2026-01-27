@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/cron?secret=your-random-secret-key-here-change-this",
+      "path": "/api/cron",
       "schedule": "0 */6 * * *"
     }
   ]
