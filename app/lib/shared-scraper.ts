@@ -279,7 +279,8 @@ export const getSupabaseClient = () => supabase;
 
 export async function scrapeWithPuppeteer(username: string, password: string, fromDate?: string, toDate?: string) {
     // Check if running on Vercel
-    const isVercel = !!process.env.VERCEL_ENV;
+    // Check if running on Vercel (robust check)
+    const isVercel = !!process.env.VERCEL_URL || !!process.env.VERCEL || process.env.NODE_ENV === 'production';
 
     let puppeteer: any;
     let launchOptions: any = {
