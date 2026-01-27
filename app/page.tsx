@@ -4340,11 +4340,43 @@ export default function Home() {
           <div className="flex items-center gap-2">
 
             <button
-              onClick={() => refreshData()}
-              disabled={contextLoading || fullRefreshLoading}
+              onClick={async () => {
+                setLoading(true);
+                setError('');
+                try {
+                  // Call scrape API for incremental refresh (from last complaint date)
+                  const response = await fetch('/api/scrape?refresh=1');
+                  const contentType = response.headers.get('content-type');
+                  if (!response.ok || !contentType?.includes('application/json')) {
+                    const text = await response.text();
+                    throw new Error(`Server error: ${text.substring(0, 100)}...`);
+                  }
+                  const result = await response.json();
+                  if (result.success) {
+                    // Fetch updated data from database
+                    const dbResponse = await fetch('/api/complaints?fetchAll=true');
+                    const dbResult = await dbResponse.json();
+                    if (dbResult.success) {
+                      const dataArray = dbResult.data || [];
+                      setOriginal(dataArray);
+                      setData(dataArray);
+                      setIsPartialData(false);
+                      if (dbResult.lastScrapedAt) setLastUpdated(dbResult.lastScrapedAt);
+                      alert(`✅ Refresh complete! ${result.new_rows || 0} new records added. Total: ${dataArray.length}`);
+                    }
+                  } else {
+                    setError(result.error || 'Refresh failed');
+                  }
+                } catch (err: any) {
+                  setError('Refresh error: ' + err.message);
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              disabled={loading || fullRefreshLoading}
               className="inline-flex items-center gap-2 bg-slate-700 hover:bg-amber-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
             >
-              {contextLoading ? (<><FiClock /> लोड हो रहा है…</>) : (<><FiRefreshCw /> Refresh</>)}
+              {loading ? (<><FiClock /> Scraping...</>) : (<><FiRefreshCw /> Refresh</>)}
             </button>
             <button
               onClick={async (e) => {
@@ -4355,6 +4387,14 @@ export default function Home() {
                 setError('');
                 try {
                   const response = await fetch('/api/scrape?refresh=1&full=1');
+
+                  // Handle non-JSON responses (e.g., Vercel timeout)
+                  const contentType = response.headers.get('content-type');
+                  if (!response.ok || !contentType?.includes('application/json')) {
+                    const text = await response.text();
+                    throw new Error(`Server error (${response.status}): ${text.substring(0, 100)}...`);
+                  }
+
                   const result = await response.json();
                   if (result.success) {
                     // After full refresh, fetch ALL data from database

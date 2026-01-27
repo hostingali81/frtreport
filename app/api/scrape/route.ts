@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // Reduced from 300 to 60 seconds
+export const maxDuration = 300; // 5 minutes for full scrape
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE;
@@ -55,6 +55,20 @@ async function getLastSuccessfulScrape() {
     .limit(1)
     .maybeSingle();
   return data;
+}
+
+// Get the latest complaint date from the database
+async function getLastComplaintDate(): Promise<string | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('complaints')
+    .select('complaint_date')
+    .order('complaint_date', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data?.complaint_date) return null;
+  return data.complaint_date;
 }
 
 async function loadFromNewDb() {
@@ -232,13 +246,17 @@ async function saveToNewDb(rows: any[], scrapeDuration: number, scrapeType: stri
 async function scrapeWithPuppeteer(username: string, password: string, fromDate?: string, toDate?: string) {
   const isVercel = !!process.env.VERCEL_ENV;
   let puppeteer: any;
-  let launchOptions: any = { headless: true };
+  // Use visible browser for local debugging, headless for Vercel
+  let launchOptions: any = { headless: isVercel ? true : false, slowMo: isVercel ? 0 : 50 };
+
+  console.log('[SCRAPER] Starting scraper...', { isVercel, fromDate, toDate });
 
   if (isVercel) {
     const chromium = (await import('@sparticuz/chromium')).default;
     puppeteer = await import('puppeteer-core');
     launchOptions = {
       ...launchOptions,
+      headless: true,
       args: chromium.args,
       executablePath: await chromium.executablePath(),
     };
@@ -249,17 +267,28 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
   const browser = await puppeteer.launch(launchOptions);
   const page = await browser.newPage();
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
+
+  console.log('[SCRAPER] Step 1: Opening website...');
   await page.goto('https://www.frtbarabanki.com', { timeout: 60000, waitUntil: 'domcontentloaded' });
+
+  console.log('[SCRAPER] Step 2: Waiting for login form...');
   await page.waitForSelector('#txtUserName', { timeout: 15000 });
+
+  console.log('[SCRAPER] Step 3: Filling credentials...');
   await page.type('#txtUserName', username);
   await page.type('#txtPassword', password);
   await page.click('#btnlogin');
+
+  console.log('[SCRAPER] Step 4: Waiting for navigation after login...');
   await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+
+  console.log('[SCRAPER] Step 5: Navigating to form page...');
   await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', { timeout: 60000, waitUntil: 'domcontentloaded' });
 
   const now = new Date();
   const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
+  // Input fields use DD-Mon-YYYY format (like 20-Jan-2026)
   const formatDateDisplay = (date: Date) => {
     const day = String(date.getDate()).padStart(2, '0');
     const mon = monthNames[date.getMonth()];
@@ -271,10 +300,13 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
   const fromDateDisplay = fromDate ? formatDateDisplay(new Date(fromDate)) : '01-Nov-2025';
   const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
+  console.log('[SCRAPER] Step 6: Setting dates...', { fromDateDisplay, toDateDisplay });
+
   await page.evaluate(({ fromStr, toStr, todayIsoEval }: { fromStr: string; toStr: string; todayIsoEval: string }) => {
     const fireEvents = (el: HTMLElement) => { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('blur', { bubbles: true })); };
     const fromEl = document.getElementById('ctrl143709') as HTMLInputElement | null;
     const toEl = document.getElementById('ctrl143707') as HTMLInputElement | null;
+    console.log('[SCRAPER] Date fields found:', { fromEl: !!fromEl, toEl: !!toEl });
     if (fromEl) { fromEl.value = fromStr; fireEvents(fromEl); try { (window as any).$ && (window as any)('#ctrl143709').val(fromStr).trigger('change'); } catch { } }
     if (toEl) { toEl.value = toStr; fireEvents(toEl); try { (window as any).$ && (window as any)('#ctrl143707').val(toStr).trigger('change'); } catch { } }
     const dateInputs = Array.from(document.querySelectorAll('input[type="date"]')) as HTMLInputElement[];
@@ -282,59 +314,77 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
     else if (dateInputs.length >= 2) { dateInputs[0].value = '2025-11-01'; fireEvents(dateInputs[0]); dateInputs[1].value = todayIsoEval; fireEvents(dateInputs[1]); }
   }, { fromStr: fromDateDisplay, toStr: toDateDisplay, todayIsoEval: todayIso });
 
-  await page.click('#ctrl143708').catch(() => { });
+  // Small delay to let form process dates
+  await new Promise(r => setTimeout(r, 500));
 
-  // Wait for table to load with data
-  await page.waitForFunction(() => {
-    const container = document.querySelector('#printablediv143706');
-    if (!container) return false;
-    const tables = Array.from(container.querySelectorAll('table'));
-    if (tables.length < 2) return false;
-    const dataTable = tables[1];
-    const rows = dataTable.querySelectorAll('tbody tr').length > 0
-      ? dataTable.querySelectorAll('tbody tr')
-      : dataTable.querySelectorAll('tr');
-    return rows.length > 0;
-  }, { timeout: 60000 });
+  console.log('[SCRAPER] Step 7: Clicking search button...');
+  await page.click('#ctrl143708').catch(() => { console.log('[SCRAPER] Search button click failed!'); });
 
-  // Try to select "Show All" if dropdown exists
-  const hasDropdown = await page.evaluate(() => {
-    const selects = Array.from(document.querySelectorAll('select'));
-    for (const select of selects) {
-      const options = Array.from(select.querySelectorAll('option'));
-      const allOption = options.find(opt => opt.textContent?.toLowerCase().includes('all'));
-      if (allOption) {
-        (select as HTMLSelectElement).value = allOption.value;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
-      }
-      const maxOption = options.reduce((max, opt) => {
-        const val = parseInt(opt.value);
-        const maxVal = parseInt(max.value);
-        return (!isNaN(val) && val > maxVal) ? opt : max;
-      });
-      if (maxOption) {
-        (select as HTMLSelectElement).value = maxOption.value;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
-      }
+  // Optimized wait: shorter timeout with retry
+  let tableLoaded = false;
+  for (let attempt = 0; attempt < 3 && !tableLoaded; attempt++) {
+    try {
+      await page.waitForFunction(() => {
+        const container = document.querySelector('#printablediv143706');
+        if (!container) return false;
+        const tables = Array.from(container.querySelectorAll('table'));
+        if (tables.length < 2) return false;
+        const dataTable = tables[1];
+        const rows = dataTable.querySelectorAll('tbody tr, tr');
+        return rows.length > 0;
+      }, { timeout: 20000 });
+      tableLoaded = true;
+    } catch {
+      // Retry - click button again
+      await page.click('#ctrl143708').catch(() => { });
+      await new Promise(r => setTimeout(r, 1000));
     }
-    return false;
-  }).catch(() => false);
+  }
 
-  // Only wait if dropdown was changed
-  if (hasDropdown) {
-    await page.waitForFunction(() => {
-      const container = document.querySelector('#printablediv143706');
-      if (!container) return false;
-      const tables = Array.from(container.querySelectorAll('table'));
-      if (tables.length < 2) return false;
-      const dataTable = tables[1];
-      const rows = dataTable.querySelectorAll('tbody tr').length > 0
-        ? dataTable.querySelectorAll('tbody tr')
-        : dataTable.querySelectorAll('tr');
-      return rows.length > 0;
-    }, { timeout: 10000 }).catch(() => { });
+  if (!tableLoaded) {
+    await browser.close();
+    throw new Error('Table did not load after retries');
+  }
+
+  // Always select "Show All" to get ALL data (not just first page)
+  console.log('[SCRAPER] Step 8: Selecting Show All in dropdown...');
+  {
+    const hasDropdown = await page.evaluate(() => {
+      const selects = Array.from(document.querySelectorAll('select'));
+      for (const select of selects) {
+        const options = Array.from(select.querySelectorAll('option'));
+        const allOption = options.find(opt => opt.textContent?.toLowerCase().includes('all'));
+        if (allOption) {
+          (select as HTMLSelectElement).value = allOption.value;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        }
+        const maxOption = options.reduce((max, opt) => {
+          const val = parseInt(opt.value);
+          const maxVal = parseInt(max.value);
+          return (!isNaN(val) && val > maxVal) ? opt : max;
+        });
+        if (maxOption) {
+          (select as HTMLSelectElement).value = maxOption.value;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        }
+      }
+      return false;
+    }).catch(() => false);
+
+    // Only wait if dropdown was changed
+    if (hasDropdown) {
+      await page.waitForFunction(() => {
+        const container = document.querySelector('#printablediv143706');
+        if (!container) return false;
+        const tables = Array.from(container.querySelectorAll('table'));
+        if (tables.length < 2) return false;
+        const dataTable = tables[1];
+        const rows = dataTable.querySelectorAll('tbody tr, tr');
+        return rows.length > 0;
+      }, { timeout: 10000 }).catch(() => { });
+    }
   }
 
   const result = await page.evaluate(() => {
@@ -417,19 +467,19 @@ export async function GET(request: Request) {
     let toDate: string | undefined;
     let scrapeType = 'full';
 
-    // Smart incremental scraping based on last scrape metadata
+    // Smart incremental scraping based on last complaint date in database
     if (useNewSystem && !forceFullScrape) {
-      const lastScrape = await getLastSuccessfulScrape();
+      const lastComplaintDate = await getLastComplaintDate();
 
-      if (lastScrape && lastScrape.last_scrape_at) {
-        // Scrape from 1 day before last scrape (for safety/overlap)
-        const lastScrapeDate = new Date(lastScrape.last_scrape_at);
-        const safeDate = new Date(lastScrapeDate);
-        safeDate.setDate(safeDate.getDate() - 1);
+      if (lastComplaintDate) {
+        // Scrape from 3 days before last complaint date (for safety/overlap)
+        const lastDate = new Date(lastComplaintDate);
+        const safeDate = new Date(lastDate);
+        safeDate.setDate(safeDate.getDate() - 3); // Extended from -1 to -3 days
 
         fromDate = safeDate.toISOString().split('T')[0];
         toDate = new Date().toISOString().split('T')[0];
-        scrapeType = 'incremental_from_last_scrape';
+        scrapeType = 'incremental_from_last_complaint';
       }
     }
 
