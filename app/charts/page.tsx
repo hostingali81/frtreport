@@ -444,7 +444,8 @@ export default function ChartsPage() {
     setError('');
 
     try {
-      const response = await fetch('/api/scrape');
+      // Fetch ALL records for accurate trends/analysis
+      const response = await fetch('/api/complaints?fetchAll=true');
       const result = await response.json();
 
       if (result.success && result.data && result.data.length > 0) {

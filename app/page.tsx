@@ -163,7 +163,9 @@ export default function Home() {
     return '';
   };
 
-  const fetchData = async (refresh = false) => {
+  const [isPartialData, setIsPartialData] = useState(true);
+
+  const fetchData = async (refresh = false, forceFull = false) => {
     setLoading(true);
     setError('');
     if (refresh) {
@@ -184,28 +186,60 @@ export default function Home() {
         }
       }
 
-      // Then fetch ALL data from database
-      const endpoint = '/api/complaints?fetchAll=true';
-      const response = await fetch(endpoint);
-      const result = await response.json();
+      // Step 1: Fast Load (Partial) - Only skip if forcing full load initially
+      if (!forceFull) {
+        const partialEndpoint = '/api/complaints?limit=2000';
+        const partialResponse = await fetch(partialEndpoint);
+        const partialResult = await partialResponse.json();
 
-      if (result.success) {
-        const dataArray = result.data || [];
-        if (dataArray.length > 0) {
-          // Keep original order (latest first from database)
-          setOriginal(dataArray);
-          setData(dataArray);
-          if (result.lastScrapedAt) {
-            setLastUpdated(result.lastScrapedAt);
+        if (partialResult.success) {
+          const partialData = partialResult.data || [];
+          if (partialData.length > 0) {
+            setOriginal(partialData);
+            setData(partialData);
+            setIsPartialData(true);
+            if (partialResult.lastScrapedAt) {
+              setLastUpdated(partialResult.lastScrapedAt);
+            }
+          } else {
+            // If partial failed to find data, we might as well just waiting for full load or error out
+            // But let's let background fetch handle it if this is empty
           }
-        } else {
+        }
+      }
+
+      // Step 2: Background Full Load - Always run this unless we just did a refresh which implies getting latest
+      // Actually, user wants "initial load quick, then full loading background".
+      // So we kick off full fetch now, SILENTLY (no loading spinner if we already have data).
+
+      // If we didn't get any data in step 1, keep loading true. Else set false.
+      if (!forceFull) {
+        setLoading(false); // fast load done, user sees data
+      }
+
+      const fullEndpoint = '/api/complaints?fetchAll=true';
+      const fullResponse = await fetch(fullEndpoint);
+      const fullResult = await fullResponse.json();
+
+      if (fullResult.success) {
+        const fullData = fullResult.data || [];
+        if (fullData.length > 0) {
+          setOriginal(fullData);
+          setData(fullData);
+          setIsPartialData(false); // Now we have full data
+          if (fullResult.lastScrapedAt) {
+            setLastUpdated(fullResult.lastScrapedAt);
+          }
+        } else if (forceFull) {
+          // If we forced full and got nothing
           setOriginal([]);
           setData([]);
           setError('कोई डेटा नहीं मिला');
         }
-      } else {
-        setError(result.error || 'डेटा प्राप्त करने में त्रुटि');
+      } else if (forceFull) {
+        setError(fullResult.error || 'डेटा प्राप्त करने में त्रुटि');
       }
+
     } catch (err: any) {
       setError('डेटा प्राप्त करने में त्रुटि: ' + err.message);
     } finally {
@@ -4281,6 +4315,7 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+
             <button
               onClick={() => fetchData(true)}
               disabled={loading || fullRefreshLoading}
@@ -4307,6 +4342,7 @@ export default function Home() {
                       // Keep original order (latest first)
                       setOriginal(dataArray);
                       setData(dataArray);
+                      setIsPartialData(false);
                       if (dbResult.lastScrapedAt) setLastUpdated(dbResult.lastScrapedAt);
                       alert(`✅ Full refresh complete! ${dataArray.length} complaints loaded from database.`);
                     }
@@ -4322,7 +4358,7 @@ export default function Home() {
               disabled={loading || fullRefreshLoading}
               className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
             >
-              {fullRefreshLoading ? (<><FiClock /> Processing...</>) : (<><FiRefreshCw /> Full Refresh</>)}
+              {fullRefreshLoading ? (<><FiClock /> Processing...</>) : (<><FiRefreshCw /> Full Scrape & Refresh</>)}
             </button>
           </div>
         </header>
@@ -4330,6 +4366,18 @@ export default function Home() {
         {lastUpdated && (
           <div className="bg-amber-50 border-l-4 border-amber-500 text-amber-800 px-4 py-3 rounded">
             <p className="font-semibold">⚠️ Data last updated on: {lastUpdated}</p>
+          </div>
+        )}
+
+        {isPartialData && !loading && original.length > 0 && (
+          <div className="bg-blue-50 border-l-4 border-blue-500 text-blue-800 px-4 py-3 rounded flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center gap-2">
+              <FiInfo className="text-xl shrink-0" />
+              <p className="font-medium">
+                Rocket Mode Active 🚀: Loaded recent data instantly. Fetching full history in background...
+              </p>
+            </div>
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700 ml-4"></div>
           </div>
         )}
 

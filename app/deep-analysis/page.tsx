@@ -359,7 +359,8 @@ export default function DeepAnalysisPage() {
         setError('');
 
         try {
-            const response = await fetch('/api/scrape');
+            // Fetch ALL records for deep analysis
+            const response = await fetch('/api/complaints?fetchAll=true');
             const result = await response.json();
 
             if (result.success && result.data && result.data.length > 0) {
