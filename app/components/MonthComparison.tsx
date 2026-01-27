@@ -110,12 +110,12 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
 
     useEffect(() => {
         if (!monthA || !monthB) return;
-        
+
         let mounted = true;
-        
+
         (async () => {
             const { Chart } = await import('chart.js/auto');
-            
+
             if (!mounted) return;
 
             // Cleanup
@@ -131,92 +131,92 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
 
             const createChart = (ctx: any, label: string, data: number[], color: string, formatTime = false) => {
 
-            const formatDuration = (val: number) => {
-                const h = Math.floor(val);
-                const m = Math.round((val - h) * 60);
-                return `${h}h ${m}m`;
-            };
+                const formatDuration = (val: number) => {
+                    const h = Math.floor(val);
+                    const m = Math.round((val - h) * 60);
+                    return `${h}h ${m}m`;
+                };
 
-            const maxValue = Math.max(...data, 0);
+                const maxValue = Math.max(...data, 0);
 
-            const dataLabelPlugin = {
-                id: 'dataLabelPlugin',
-                afterDatasetsDraw(chart: any) {
-                    const { ctx } = chart;
-                    ctx.save();
-                    chart.data.datasets.forEach((dataset: any, i: number) => {
-                        const meta = chart.getDatasetMeta(i);
-                        meta.data.forEach((bar: any, index: number) => {
-                            const value = dataset.data[index];
-                            if (value !== null && value !== undefined) {
-                                const text = formatTime ? formatDuration(value) : value + '';
-                                ctx.fillStyle = '#374151'; // Gray-700
-                                ctx.font = 'bold 12px sans-serif';
-                                ctx.textAlign = 'center';
-                                ctx.textBaseline = 'bottom';
-                                ctx.fillText(text, bar.x, bar.y - 5);
-                            }
+                const dataLabelPlugin = {
+                    id: 'dataLabelPlugin',
+                    afterDatasetsDraw(chart: any) {
+                        const { ctx } = chart;
+                        ctx.save();
+                        chart.data.datasets.forEach((dataset: any, i: number) => {
+                            const meta = chart.getDatasetMeta(i);
+                            meta.data.forEach((bar: any, index: number) => {
+                                const value = dataset.data[index];
+                                if (value !== null && value !== undefined) {
+                                    const text = formatTime ? formatDuration(value) : value + '';
+                                    ctx.fillStyle = '#374151'; // Gray-700
+                                    ctx.font = 'bold 12px sans-serif';
+                                    ctx.textAlign = 'center';
+                                    ctx.textBaseline = 'bottom';
+                                    ctx.fillText(text, bar.x, bar.y - 5);
+                                }
+                            });
                         });
-                    });
-                    ctx.restore();
-                }
-            };
+                        ctx.restore();
+                    }
+                };
 
-            return new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: label,
-                        data: data,
-                        backgroundColor: [color, color], // Same color for simpler look, or differ if needed
-                        borderWidth: 0,
-                        barPercentage: 0.6,
-                        categoryPercentage: 0.8,
-                        borderRadius: 8
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    layout: {
-                        padding: {
-                            top: 20
-                        }
+                return new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: label,
+                            data: data,
+                            backgroundColor: [color, color], // Same color for simpler look, or differ if needed
+                            borderWidth: 0,
+                            barPercentage: 0.6,
+                            categoryPercentage: 0.8,
+                            borderRadius: 8
+                        }]
                     },
-                    plugins: {
-                        legend: { display: false },
-                        title: { display: true, text: label, font: { size: 14, weight: 'bold' }, padding: { bottom: 20 } },
-                        tooltip: {
-                            callbacks: {
-                                label: (ctx) => {
-                                    let val = ctx.parsed.y;
-                                    if (val === null) return '';
-                                    return formatTime ? formatDuration(val) : val + '';
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        layout: {
+                            padding: {
+                                top: 20
+                            }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            title: { display: true, text: label, font: { size: 14, weight: 'bold' }, padding: { bottom: 20 } },
+                            tooltip: {
+                                callbacks: {
+                                    label: (ctx) => {
+                                        let val = ctx.parsed.y;
+                                        if (val === null) return '';
+                                        return formatTime ? formatDuration(val) : val + '';
+                                    }
                                 }
                             }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                grid: { display: true, color: '#f3f4f6' },
+                                suggestedMax: maxValue * 1.2
+                            },
+                            x: { grid: { display: false } }
                         }
                     },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: { display: true, color: '#f3f4f6' },
-                            suggestedMax: maxValue * 1.2
-                        },
-                        x: { grid: { display: false } }
-                    }
-                },
-                plugins: [dataLabelPlugin]
-            });
-        };
+                    plugins: [dataLabelPlugin]
+                });
+            };
 
-        const ctx1 = totalChartRef.current.getContext('2d');
-        const ctx2 = beyondChartRef.current.getContext('2d');
-        const ctx3 = timeChartRef.current.getContext('2d');
+            const ctx1 = totalChartRef.current.getContext('2d');
+            const ctx2 = beyondChartRef.current.getContext('2d');
+            const ctx3 = timeChartRef.current.getContext('2d');
 
-        if (ctx1) totalInstance.current = createChart(ctx1, 'Total Complaints', [m1.total, m2.total], '#3b82f6');
-        if (ctx2) beyondInstance.current = createChart(ctx2, 'Beyond Complaints', [m1.beyond, m2.beyond], '#ef4444');
-        if (ctx3) timeInstance.current = createChart(ctx3, 'Avg Time (Hrs)', [m1.avgTime, m2.avgTime], '#f59e0b', true);
+            if (ctx1) totalInstance.current = createChart(ctx1, 'Total Complaints', [m1.total, m2.total], '#3b82f6');
+            if (ctx2) beyondInstance.current = createChart(ctx2, 'Beyond Complaints', [m1.beyond, m2.beyond], '#ef4444');
+            if (ctx3) timeInstance.current = createChart(ctx3, 'Avg Time (Hrs)', [m1.avgTime, m2.avgTime], '#f59e0b', true);
         })();
 
         return () => {
@@ -236,7 +236,7 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
                         <Select
                             options={monthOptions}
                             value={monthOptions.find(o => o.value === monthA)}
-                            onChange={(opt) => setMonthA(opt?.value || null)}
+                            onChange={(opt: any) => setMonthA(opt?.value || null)}
                             placeholder="Select Month A"
                             isSearchable={true}
                         />
@@ -246,7 +246,7 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
                         <Select
                             options={monthOptions}
                             value={monthOptions.find(o => o.value === monthB)}
-                            onChange={(opt) => setMonthB(opt?.value || null)}
+                            onChange={(opt: any) => setMonthB(opt?.value || null)}
                             placeholder="Select Month B"
                             isSearchable={true}
                         />
