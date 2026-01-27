@@ -128,7 +128,7 @@ export async function GET(request: Request) {
           scraped: validData.length,
           new: saveResult.new_rows,
           updated: saveResult.updated_rows,
-          total_in_db: count?.count || 0,
+          total_in_db: count || 0,
           duration: scrapeDuration
         },
         data: validData.slice(0, 10000) // Limit response data to 10k for performance
