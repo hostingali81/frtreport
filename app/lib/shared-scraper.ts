@@ -320,8 +320,8 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
 
-    // Polyfill for esbuild/tsx __name helper which might be injected into evaluated functions
-    await page.evaluate('window.__name = (func) => func');
+    // Polyfill for esbuild/tsx __name helper - using evaluateOnNewDocument to persist across navigations
+    await page.evaluateOnNewDocument('window.__name = (func) => func');
 
     try {
         console.log('[SCRAPER] Step 1: Opening website...');
