@@ -373,4 +373,4 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ data }) => {
     );
 };
 
-export default ConsumerInsights;
+export default React.memo(ConsumerInsights);

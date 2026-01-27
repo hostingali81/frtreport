@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "analyze": "ANALYZE=true next build",
     "start": "next start",
     "lint": "eslint",
     "postinstall": "echo 'Skipping playwright install'"
@@ -30,6 +31,7 @@
     "react-window": "^2.2.4"
   },
   "devDependencies": {
+    "@next/bundle-analyzer": "^15.5.10",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

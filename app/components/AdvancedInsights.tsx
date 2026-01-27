@@ -1,21 +1,22 @@
 'use client';
 
-import { useMemo, useRef, useEffect, useState } from 'react';
-import { Chart } from 'chart.js/auto';
-import Select from 'react-select';
+import React, { useMemo, useRef, useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
+
+const Select = dynamic(() => import('react-select'), { ssr: false });
 
 interface Props {
     data: any[];
 }
 
-export default function AdvancedInsights({ data }: Props) {
+function AdvancedInsights({ data }: Props) {
     const topAreasRef = useRef<HTMLCanvasElement>(null);
     const trendRef = useRef<HTMLCanvasElement>(null);
     const [selectedMonth, setSelectedMonth] = useState<string | null>(null); // 'Null' means All Time
 
     // Instances
-    const topAreasInstance = useRef<Chart | null>(null);
-    const trendInstance = useRef<Chart | null>(null);
+    const topAreasInstance = useRef<any>(null);
+    const trendInstance = useRef<any>(null);
 
     // Helpers
     const parseDate = (val: string) => {
@@ -89,224 +90,238 @@ export default function AdvancedInsights({ data }: Props) {
 
     // 2. Top Problem Areas (Sub Station)
     useEffect(() => {
-        if (!topAreasRef.current) return;
+        let mounted = true;
 
-        // Destroy old
-        if (topAreasInstance.current) topAreasInstance.current.destroy();
+        (async () => {
+            const { Chart } = await import('chart.js/auto');
 
-        // Calculate
-        const counts: Record<string, number> = {};
-        filteredData.forEach(r => {
-            const div = String(r['Sub Station'] || 'Unknown').trim();
-            counts[div] = (counts[div] || 0) + 1;
-        });
+            if (!mounted || !topAreasRef.current) return;
 
-        // Sort Top 5
-        const sorted = Object.entries(counts)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 5);
+            // Destroy old
+            if (topAreasInstance.current) topAreasInstance.current.destroy();
 
-        const labels = sorted.map(s => s[0]);
-        const values = sorted.map(s => s[1]);
+            // Calculate
+            const counts: Record<string, number> = {};
+            filteredData.forEach(r => {
+                const div = String(r['Sub Station'] || 'Unknown').trim();
+                counts[div] = (counts[div] || 0) + 1;
+            });
 
-        // Plugin to draw data labels
-        const dataLabelPlugin = {
-            id: 'dataLabelPlugin',
-            afterDatasetsDraw(chart: any) {
-                const { ctx } = chart;
-                ctx.save();
-                chart.data.datasets.forEach((dataset: any, i: number) => {
-                    const meta = chart.getDatasetMeta(i);
-                    meta.data.forEach((bar: any, index: number) => {
-                        const value = dataset.data[index];
-                        if (value !== null && value !== undefined) {
-                            ctx.fillStyle = '#374151'; // Gray-700
-                            ctx.font = 'bold 11px sans-serif';
-                            ctx.textAlign = 'left';
-                            ctx.textBaseline = 'middle';
-                            // Draw text slightly to the right of the bar end
-                            ctx.fillText(value, bar.x + 5, bar.y);
-                        }
+            // Sort Top 5
+            const sorted = Object.entries(counts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5);
+
+            const labels = sorted.map(s => s[0]);
+            const values = sorted.map(s => s[1]);
+
+            // Plugin to draw data labels
+            const dataLabelPlugin = {
+                id: 'dataLabelPlugin',
+                afterDatasetsDraw(chart: any) {
+                    const { ctx } = chart;
+                    ctx.save();
+                    chart.data.datasets.forEach((dataset: any, i: number) => {
+                        const meta = chart.getDatasetMeta(i);
+                        meta.data.forEach((bar: any, index: number) => {
+                            const value = dataset.data[index];
+                            if (value !== null && value !== undefined) {
+                                ctx.fillStyle = '#374151'; // Gray-700
+                                ctx.font = 'bold 11px sans-serif';
+                                ctx.textAlign = 'left';
+                                ctx.textBaseline = 'middle';
+                                // Draw text slightly to the right of the bar end
+                                ctx.fillText(value, bar.x + 5, bar.y);
+                            }
+                        });
                     });
-                });
-                ctx.restore();
-            }
-        };
-
-        const maxValue = Math.max(...values, 0);
-
-        topAreasInstance.current = new Chart(topAreasRef.current, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [{
-                    label: 'Complaints',
-                    data: values,
-                    backgroundColor: '#ef4444',
-                    borderRadius: 6,
-                    barPercentage: 0.6
-                }]
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                layout: {
-                    padding: { right: 40 } // Space for labels
-                },
-                plugins: {
-                    legend: { display: false },
-                    title: { display: false }
-                },
-                scales: {
-                    x: {
-                        beginAtZero: true,
-                        grid: { display: false },
-                        suggestedMax: maxValue * 1.15 // Extend axis space
-                    },
-                    y: { grid: { display: false } }
+                    ctx.restore();
                 }
-            },
-            plugins: [dataLabelPlugin]
-        });
+            };
+
+            const maxValue = Math.max(...values, 0);
+
+            topAreasInstance.current = new Chart(topAreasRef.current, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Complaints',
+                        data: values,
+                        backgroundColor: '#ef4444',
+                        borderRadius: 6,
+                        barPercentage: 0.6
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    layout: {
+                        padding: { right: 40 } // Space for labels
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        title: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            grid: { display: false },
+                            suggestedMax: maxValue * 1.15 // Extend axis space
+                        },
+                        y: { grid: { display: false } }
+                    }
+                },
+                plugins: [dataLabelPlugin]
+            });
+        })();
 
         return () => {
+            mounted = false;
             if (topAreasInstance.current) topAreasInstance.current.destroy();
         };
     }, [filteredData]);
 
     // 3. Efficiency Trend (Responds to Filter)
     useEffect(() => {
-        if (!trendRef.current) return;
-        if (trendInstance.current) trendInstance.current.destroy();
+        let mounted = true;
 
-        // 1. Determine Date Range from FILTERED Data
-        let minTime = Infinity;
-        let maxTime = -Infinity;
+        (async () => {
+            const { Chart } = await import('chart.js/auto');
 
-        filteredData.forEach(r => {
-            const d = parseDate(String(r['Complaint Date and Time'] || ''));
-            if (d) {
-                const t = d.getTime();
-                if (t < minTime) minTime = t;
-                if (t > maxTime) maxTime = t;
-            }
-        });
+            if (!mounted || !trendRef.current) return;
+            if (trendInstance.current) trendInstance.current.destroy();
 
-        // Handle case where filteredData is empty
-        if (minTime === Infinity) {
-            // Maybe render empty chart or return
-            return;
-        }
+            // 1. Determine Date Range from FILTERED Data
+            let minTime = Infinity;
+            let maxTime = -Infinity;
 
-        const spanDays = (maxTime - minTime) / (1000 * 60 * 60 * 24);
-
-        // Granularity Logic
-        let granularity: 'daily' | 'weekly' | 'monthly' = 'monthly';
-        if (spanDays <= 35) granularity = 'daily';
-        else if (spanDays <= 90) granularity = 'weekly';
-
-        // 2. Group Data
-        const stats: Record<string, { totalTime: number, count: number, order: number }> = {};
-
-        filteredData.forEach(r => {
-            const open = parseDate(String(r['Complaint Date and Time'] || ''));
-            const close = parseDate(String(r['Closed Date'] || ''));
-
-            if (open && close) {
-                let key = '';
-                let sortKey = 0;
-
-                if (granularity === 'daily') {
-                    // Daily Grouping: "1 Nov", "2 Nov"
-                    key = open.toLocaleString('en-US', { day: 'numeric', month: 'short' });
-                    sortKey = open.getFullYear() * 10000 + open.getMonth() * 100 + open.getDate();
-                } else if (granularity === 'weekly') {
-                    // Weekly Grouping: Start of Week
-                    const d = new Date(open);
-                    const day = d.getDay() || 7;
-                    if (day !== 1) d.setHours(-24 * (day - 1));
-
-                    if (d.getTime() < minTime) d.setTime(minTime);
-
-                    key = d.toLocaleString('en-US', { day: 'numeric', month: 'short' });
-                    sortKey = d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate();
-                } else {
-                    // Monthly Grouping
-                    key = open.toLocaleString('en-US', { month: 'short', year: '2-digit' });
-                    sortKey = open.getFullYear() * 100 + open.getMonth();
+            filteredData.forEach(r => {
+                const d = parseDate(String(r['Complaint Date and Time'] || ''));
+                if (d) {
+                    const t = d.getTime();
+                    if (t < minTime) minTime = t;
+                    if (t > maxTime) maxTime = t;
                 }
+            });
 
-                if (!stats[key]) stats[key] = { totalTime: 0, count: 0, order: sortKey };
-
-                const diff = close.getTime() - open.getTime();
-                if (diff > 0) {
-                    stats[key].totalTime += diff;
-                    stats[key].count++;
-                }
+            // Handle case where filteredData is empty
+            if (minTime === Infinity) {
+                // Maybe render empty chart or return
+                return;
             }
-        });
 
-        // 3. Format Data
-        const trendData = Object.entries(stats)
-            .map(([label, val]) => ({
-                label,
-                avg: val.count > 0 ? (val.totalTime / val.count / 3600000) : 0,
-                order: val.order
-            }))
-            .sort((a, b) => a.order - b.order);
+            const spanDays = (maxTime - minTime) / (1000 * 60 * 60 * 24);
 
-        // Helper to format hours to "1h 30m"
-        const formatDuration = (val: number) => {
-            const h = Math.floor(val);
-            const m = Math.round((val - h) * 60);
-            return `${h}h ${m}m`;
-        };
+            // Granularity Logic
+            let granularity: 'daily' | 'weekly' | 'monthly' = 'monthly';
+            if (spanDays <= 35) granularity = 'daily';
+            else if (spanDays <= 90) granularity = 'weekly';
 
-        trendInstance.current = new Chart(trendRef.current, {
-            type: 'line',
-            data: {
-                labels: trendData.map(d => d.label),
-                datasets: [{
-                    label: 'Avg Resolution Time',
-                    data: trendData.map(d => d.avg),
-                    borderColor: '#10b981', // Emerald
-                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                    fill: true,
-                    tension: 0.4,
-                    pointRadius: 4,
-                    pointHoverRadius: 6
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => {
-                                const val = ctx.parsed.y;
-                                return `Avg Time: ${val !== null ? formatDuration(val) : '0h'}`;
+            // 2. Group Data
+            const stats: Record<string, { totalTime: number, count: number, order: number }> = {};
+
+            filteredData.forEach(r => {
+                const open = parseDate(String(r['Complaint Date and Time'] || ''));
+                const close = parseDate(String(r['Closed Date'] || ''));
+
+                if (open && close) {
+                    let key = '';
+                    let sortKey = 0;
+
+                    if (granularity === 'daily') {
+                        // Daily Grouping: "1 Nov", "2 Nov"
+                        key = open.toLocaleString('en-US', { day: 'numeric', month: 'short' });
+                        sortKey = open.getFullYear() * 10000 + open.getMonth() * 100 + open.getDate();
+                    } else if (granularity === 'weekly') {
+                        // Weekly Grouping: Start of Week
+                        const d = new Date(open);
+                        const day = d.getDay() || 7;
+                        if (day !== 1) d.setHours(-24 * (day - 1));
+
+                        if (d.getTime() < minTime) d.setTime(minTime);
+
+                        key = d.toLocaleString('en-US', { day: 'numeric', month: 'short' });
+                        sortKey = d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate();
+                    } else {
+                        // Monthly Grouping
+                        key = open.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+                        sortKey = open.getFullYear() * 100 + open.getMonth();
+                    }
+
+                    if (!stats[key]) stats[key] = { totalTime: 0, count: 0, order: sortKey };
+
+                    const diff = close.getTime() - open.getTime();
+                    if (diff > 0) {
+                        stats[key].totalTime += diff;
+                        stats[key].count++;
+                    }
+                }
+            });
+
+            // 3. Format Data
+            const trendData = Object.entries(stats)
+                .map(([label, val]) => ({
+                    label,
+                    avg: val.count > 0 ? (val.totalTime / val.count / 3600000) : 0,
+                    order: val.order
+                }))
+                .sort((a, b) => a.order - b.order);
+
+            // Helper to format hours to "1h 30m"
+            const formatDuration = (val: number) => {
+                const h = Math.floor(val);
+                const m = Math.round((val - h) * 60);
+                return `${h}h ${m}m`;
+            };
+
+            trendInstance.current = new Chart(trendRef.current, {
+                type: 'line',
+                data: {
+                    labels: trendData.map(d => d.label),
+                    datasets: [{
+                        label: 'Avg Resolution Time',
+                        data: trendData.map(d => d.avg),
+                        borderColor: '#10b981', // Emerald
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const val = ctx.parsed.y;
+                                    return `Avg Time: ${val !== null ? formatDuration(val) : '0h'}`;
+                                }
                             }
                         }
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: '#f3f4f6' },
-                        title: { display: true, text: 'Time' },
-                        ticks: {
-                            callback: (val) => formatDuration(Number(val))
-                        }
                     },
-                    x: { grid: { display: false } }
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#f3f4f6' },
+                            title: { display: true, text: 'Time' },
+                            ticks: {
+                                callback: (val) => formatDuration(Number(val))
+                            }
+                        },
+                        x: { grid: { display: false } }
+                    }
                 }
-            }
-        });
+            });
+        })();
 
         return () => {
+            mounted = false;
             if (trendInstance.current) trendInstance.current.destroy();
         };
 
@@ -341,7 +356,7 @@ export default function AdvancedInsights({ data }: Props) {
                     <Select
                         options={monthOptions}
                         value={monthOptions.find(o => o.value === (selectedMonth || 'All'))}
-                        onChange={(opt) => setSelectedMonth(opt?.value || 'All')}
+                        onChange={(opt: any) => setSelectedMonth(opt?.value || 'All')}
                         placeholder="Filter by Month"
                         isSearchable={true}
                     />
@@ -410,3 +425,5 @@ export default function AdvancedInsights({ data }: Props) {
         </div>
     );
 }
+
+export default React.memo(AdvancedInsights);

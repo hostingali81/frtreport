@@ -1,8 +1,9 @@
 'use client';
 
 import { useMemo, useState, useEffect, useRef } from 'react';
-import Select from 'react-select';
-import { Chart } from 'chart.js/auto';
+import dynamic from 'next/dynamic';
+
+const Select = dynamic(() => import('react-select'), { ssr: false });
 
 interface MonthComparisonProps {
     data: any[];
@@ -13,9 +14,9 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
     const beyondChartRef = useRef<HTMLCanvasElement>(null);
     const timeChartRef = useRef<HTMLCanvasElement>(null);
 
-    const totalInstance = useRef<Chart | null>(null);
-    const beyondInstance = useRef<Chart | null>(null);
-    const timeInstance = useRef<Chart | null>(null);
+    const totalInstance = useRef<any>(null);
+    const beyondInstance = useRef<any>(null);
+    const timeInstance = useRef<any>(null);
 
     const [monthA, setMonthA] = useState<string | null>(null);
     const [monthB, setMonthB] = useState<string | null>(null);
@@ -109,19 +110,26 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
 
     useEffect(() => {
         if (!monthA || !monthB) return;
+        
+        let mounted = true;
+        
+        (async () => {
+            const { Chart } = await import('chart.js/auto');
+            
+            if (!mounted) return;
 
-        // Cleanup
-        if (totalInstance.current) totalInstance.current.destroy();
-        if (beyondInstance.current) beyondInstance.current.destroy();
-        if (timeInstance.current) timeInstance.current.destroy();
+            // Cleanup
+            if (totalInstance.current) totalInstance.current.destroy();
+            if (beyondInstance.current) beyondInstance.current.destroy();
+            if (timeInstance.current) timeInstance.current.destroy();
 
-        if (!totalChartRef.current || !beyondChartRef.current || !timeChartRef.current) return;
+            if (!totalChartRef.current || !beyondChartRef.current || !timeChartRef.current) return;
 
-        const m1 = getMetrics(monthA);
-        const m2 = getMetrics(monthB);
-        const labels = [monthA, monthB];
+            const m1 = getMetrics(monthA);
+            const m2 = getMetrics(monthB);
+            const labels = [monthA, monthB];
 
-        const createChart = (ctx: any, label: string, data: number[], color: string, formatTime = false) => {
+            const createChart = (ctx: any, label: string, data: number[], color: string, formatTime = false) => {
 
             const formatDuration = (val: number) => {
                 const h = Math.floor(val);
@@ -209,8 +217,10 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
         if (ctx1) totalInstance.current = createChart(ctx1, 'Total Complaints', [m1.total, m2.total], '#3b82f6');
         if (ctx2) beyondInstance.current = createChart(ctx2, 'Beyond Complaints', [m1.beyond, m2.beyond], '#ef4444');
         if (ctx3) timeInstance.current = createChart(ctx3, 'Avg Time (Hrs)', [m1.avgTime, m2.avgTime], '#f59e0b', true);
+        })();
 
         return () => {
+            mounted = false;
             if (totalInstance.current) totalInstance.current.destroy();
             if (beyondInstance.current) beyondInstance.current.destroy();
             if (timeInstance.current) timeInstance.current.destroy();

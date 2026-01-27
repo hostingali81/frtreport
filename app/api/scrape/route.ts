@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300; // 5 minutes for large datasets
+export const maxDuration = 60; // Reduced from 300 to 60 seconds
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE;
@@ -250,7 +250,7 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
   const page = await browser.newPage();
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
   await page.goto('https://www.frtbarabanki.com', { timeout: 60000, waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('#txtUserName', { timeout: 10000 });
+  await page.waitForSelector('#txtUserName', { timeout: 15000 });
   await page.type('#txtUserName', username);
   await page.type('#txtPassword', password);
   await page.click('#btnlogin');

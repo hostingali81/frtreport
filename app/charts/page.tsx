@@ -7,13 +7,16 @@ import { FiArrowLeft, FiRefreshCw } from 'react-icons/fi';
 import FilterBar from '../components/FilterBar';
 import Image from 'next/image';
 import Select from 'react-select';
+import { useData } from '../context/DataContext';
 
 export default function ChartsPage() {
+  const { data: contextData, loading: contextLoading, refreshData } = useData();
   const router = useRouter();
-  const [original, setOriginal] = useState<any[]>([]);
-  const [data, setData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const original = contextData;
   const [error, setError] = useState('');
+
+  // Removed redundant local state and effect
+
   const [search, setSearch] = useState('');
   const [fromDT, setFromDT] = useState('');
   const [toDT, setToDT] = useState('');
@@ -204,9 +207,10 @@ export default function ChartsPage() {
     return rows;
   }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, monthFilter]);
 
-  useEffect(() => {
-    setData(filtered);
-  }, [filtered]);
+  const data = filtered;
+
+  // No need for separate 'data' state
+
 
   const formatDateTimeLocal = (d: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -439,31 +443,7 @@ export default function ChartsPage() {
     </span>
   );
 
-  const fetchData = async () => {
-    setLoading(true);
-    setError('');
 
-    try {
-      // Fetch ALL records for accurate trends/analysis
-      const response = await fetch('/api/complaints?fetchAll=true');
-      const result = await response.json();
-
-      if (result.success && result.data && result.data.length > 0) {
-        setOriginal(result.data);
-        setData(result.data);
-      } else {
-        setError('कोई डेटा नहीं मिला');
-      }
-    } catch (err: any) {
-      setError('डेटा प्राप्त करने में त्रुटि: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, []);
 
   return (
     <div className="min-h-screen p-4 md:p-8 bg-gradient-to-b from-gray-50 to-white">
@@ -490,16 +470,16 @@ export default function ChartsPage() {
               <span className="text-lg">🔍</span> Deep Analysis
             </button>
             <button
-              onClick={fetchData}
-              disabled={loading}
+              onClick={refreshData}
+              disabled={contextLoading}
               className="inline-flex items-center gap-2 bg-sky-700 hover:bg-sky-800 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-sm"
             >
-              <FiRefreshCw className={loading ? 'animate-spin' : ''} /> Refresh
+              <FiRefreshCw className={contextLoading ? 'animate-spin' : ''} /> Refresh
             </button>
           </div>
         </header>
 
-        {loading && (
+        {contextLoading && (
           <div className="flex items-center justify-center py-20">
             <div className="text-center">
               <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
@@ -514,7 +494,7 @@ export default function ChartsPage() {
           </div>
         )}
 
-        {!loading && !error && original.length > 0 && (
+        {!contextLoading && !error && original.length > 0 && (
           <>
             <div className="mb-6">
               <FilterBar
@@ -548,8 +528,8 @@ export default function ChartsPage() {
                 setCustomDate={setCustomDate}
                 applyCustomDateShift={applyCustomDateShift}
                 clearAllFilters={clearAllFilters}
-                onRefresh={fetchData}
-                loading={loading || isPending}
+                onRefresh={refreshData}
+                loading={contextLoading || isPending}
                 dailyCounts={{}}
                 monthFilter={monthFilter}
                 setMonthFilter={handleMonthChange}
@@ -560,7 +540,7 @@ export default function ChartsPage() {
           </>
         )}
 
-        {!loading && !error && data.length === 0 && (
+        {!contextLoading && !error && data.length === 0 && (
           <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 px-4 py-3 rounded">
             <p className="font-semibold">⚠️ No data available to display charts</p>
           </div>

@@ -1,21 +1,51 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useDeferredValue } from 'react';
 import { useRouter } from 'next/navigation';
 import { FiArrowLeft, FiRefreshCw, FiLayers } from 'react-icons/fi';
 import FilterBar from '../components/FilterBar';
-import DeepAnalysisCharts from '../components/DeepAnalysisCharts';
-import MonthComparison from '../components/MonthComparison';
-import AdvancedInsights from '../components/AdvancedInsights';
-import ConsumerInsights from '../components/ConsumerInsights';
+import dynamic from 'next/dynamic';
+
+const LoadingSkeleton = () => (
+    <div className="w-full h-96 bg-gray-100 rounded-2xl animate-pulse flex items-center justify-center text-gray-400 font-medium">
+        Loading Chart Data...
+    </div>
+);
+
+const DeepAnalysisCharts = dynamic(() => import('../components/DeepAnalysisCharts'), {
+    ssr: false,
+    loading: () => <LoadingSkeleton />
+});
+const MonthComparison = dynamic(() => import('../components/MonthComparison'), {
+    ssr: false,
+    loading: () => <LoadingSkeleton />
+});
+const AdvancedInsights = dynamic(() => import('../components/AdvancedInsights'), {
+    ssr: false,
+    loading: () => <LoadingSkeleton />
+});
+const ConsumerInsights = dynamic(() => import('../components/ConsumerInsights'), {
+    ssr: false,
+    loading: () => <LoadingSkeleton />
+});
 import Image from 'next/image';
+import { useData } from '../context/DataContext';
 
 export default function DeepAnalysisPage() {
+    const { data: contextData, loading: contextLoading, refreshData } = useData();
     const router = useRouter();
-    const [original, setOriginal] = useState<any[]>([]);
-    const [data, setData] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const original = contextData;
     const [error, setError] = useState('');
+    const [isReady, setIsReady] = useState(false);
+
+    useEffect(() => {
+        // Defer heavy rendering to unblock navigation
+        const timer = requestAnimationFrame(() => setIsReady(true));
+        return () => cancelAnimationFrame(timer);
+    }, []);
+
+    // Removed redundant local state and effect
+
     const [search, setSearch] = useState('');
     const [fromDT, setFromDT] = useState('');
     const [toDT, setToDT] = useState('');
@@ -125,9 +155,11 @@ export default function DeepAnalysisPage() {
         return rows;
     }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter]);
 
-    useEffect(() => {
-        setData(filtered);
-    }, [filtered]);
+    // output is 'filtered' which is derived from 'original' (contextData)
+    // No need for separate 'data' state
+
+
+    const deferredFiltered = useDeferredValue(filtered);
 
     const formatDateTimeLocal = (d: Date) => {
         const pad = (n: number) => String(n).padStart(2, '0');
@@ -354,31 +386,7 @@ export default function DeepAnalysisPage() {
         setActivePreset('');
     };
 
-    const fetchData = async () => {
-        setLoading(true);
-        setError('');
 
-        try {
-            // Fetch ALL records for deep analysis
-            const response = await fetch('/api/complaints?fetchAll=true');
-            const result = await response.json();
-
-            if (result.success && result.data && result.data.length > 0) {
-                setOriginal(result.data);
-                setData(result.data);
-            } else {
-                setError('कोई डेटा नहीं मिला');
-            }
-        } catch (err: any) {
-            setError('डेटा प्राप्त करने में त्रुटि: ' + err.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        fetchData();
-    }, []);
 
     return (
         <div className="min-h-screen p-4 md:p-8 bg-gradient-to-b from-gray-50 to-white">
@@ -399,16 +407,16 @@ export default function DeepAnalysisPage() {
                             <FiArrowLeft /> Back to Charts
                         </button>
                         <button
-                            onClick={fetchData}
-                            disabled={loading}
+                            onClick={refreshData}
+                            disabled={contextLoading}
                             className="inline-flex items-center gap-2 bg-sky-700 hover:bg-sky-800 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-sm"
                         >
-                            <FiRefreshCw className={loading ? 'animate-spin' : ''} /> Refresh
+                            <FiRefreshCw className={contextLoading ? 'animate-spin' : ''} /> Refresh
                         </button>
                     </div>
                 </header>
 
-                {loading && (
+                {contextLoading && (
                     <div className="flex items-center justify-center py-20">
                         <div className="text-center">
                             <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
@@ -423,7 +431,7 @@ export default function DeepAnalysisPage() {
                     </div>
                 )}
 
-                {!loading && !error && original.length > 0 && (
+                {!contextLoading && !error && original.length > 0 && (
                     <div className="mb-6">
                         <FilterBar
                             search={search}
@@ -460,25 +468,41 @@ export default function DeepAnalysisPage() {
                     </div>
                 )}
 
-                {!loading && !error && data.length === 0 && (
+                {!contextLoading && !error && original.length === 0 && (
                     <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 px-4 py-3 rounded">
                         <p className="font-semibold">⚠️ No data available</p>
                     </div>
                 )}
 
-                {!loading && !error && data.length > 0 && (
+                {!contextLoading && !error && original.length > 0 && (
                     <>
                         <div className="mb-8">
-                            <MonthComparison data={original} />
+                            {isReady ? (
+                                <MonthComparison data={original} />
+                            ) : (
+                                <div className="h-96 bg-gray-100 rounded-2xl animate-pulse flex items-center justify-center text-gray-400">Loading Charts...</div>
+                            )}
                         </div>
 
                         <div className="mb-8">
-                            <ConsumerInsights data={filtered} />
+                            {isReady ? (
+                                <ConsumerInsights data={deferredFiltered} />
+                            ) : (
+                                <div className="h-96 bg-gray-100 rounded-2xl animate-pulse"></div>
+                            )}
                         </div>
 
-                        <DeepAnalysisCharts data={filtered} />
+                        {isReady ? (
+                            <DeepAnalysisCharts data={deferredFiltered} />
+                        ) : (
+                            <div className="h-96 bg-gray-100 rounded-2xl animate-pulse"></div>
+                        )}
 
-                        <AdvancedInsights data={original} />
+                        {isReady ? (
+                            <AdvancedInsights data={original} />
+                        ) : (
+                            <div className="h-96 bg-gray-100 rounded-2xl animate-pulse"></div>
+                        )}
                     </>
                 )}
             </div>

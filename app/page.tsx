@@ -1,17 +1,25 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition, useDeferredValue } from 'react';
+import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers, FiInfo, FiActivity } from 'react-icons/fi';
+import Image from 'next/image';
+import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
+import { useDebounce } from './hooks/useDebounce';
+import { useData } from './context/DataContext';
+
+// Dynamic imports for heavy components
+const Select = dynamic(() => import('react-select'), { ssr: false });
+const FilterBar = dynamic(() => import('./components/FilterBar'), { ssr: false });
+
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers, FiInfo, FiActivity } from 'react-icons/fi';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import Image from 'next/image';
-import Select from 'react-select';
-import { useRouter } from 'next/navigation';
-import FilterBar from './components/FilterBar';
 
 export default function Home() {
+  const { data: contextData, loading: contextLoading, lastUpdated: contextLastUpdated, refreshData } = useData();
+
   const ShiftBadge = ({ letter }: { letter: string }) => (
     <span className="inline-flex items-center justify-center w-5 h-5 bg-emerald-600 text-white text-xs font-bold rounded-md mr-2 shadow-sm border border-emerald-500/50">
       {letter}
@@ -21,6 +29,14 @@ export default function Home() {
   const router = useRouter();
   const [original, setOriginal] = useState<any[]>([]);
   const [data, setData] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (contextData.length > 0) {
+      setOriginal(contextData);
+      setData(contextData);
+    }
+  }, [contextData]);
+
   const [loading, setLoading] = useState(false);
   const [fullRefreshLoading, setFullRefreshLoading] = useState(false);
   const [error, setError] = useState('');
@@ -33,6 +49,10 @@ export default function Home() {
   const [subDivisionFilter, setSubDivisionFilter] = useState('');
   const [subStationFilter, setSubStationFilter] = useState('');
   const [lastUpdated, setLastUpdated] = useState<string>('');
+
+  useEffect(() => {
+    if (contextLastUpdated) setLastUpdated(contextLastUpdated);
+  }, [contextLastUpdated]);
   const [sortColumn, setSortColumn] = useState<string>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [selectedShift, setSelectedShift] = useState<string>(''); // e.g. "Today - Morning (07:00–15:00)"
@@ -298,11 +318,13 @@ export default function Home() {
     });
   };
 
+  const deferredSearch = useDeferredValue(search);
+
   const filtered = useMemo(() => {
     let rows = original;
-    if (search.trim()) {
+    if (deferredSearch.trim()) {
       rows = rows.filter(row =>
-        Object.values(row).some(v => normalizedIncludes(String(v || ''), search.trim()))
+        Object.values(row).some(v => normalizedIncludes(String(v || ''), deferredSearch.trim()))
       );
     }
 
@@ -374,7 +396,7 @@ export default function Home() {
       });
     }
     return rows;
-  }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, sortColumn, sortDirection, monthFilter]);
+  }, [original, deferredSearch, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, sortColumn, sortDirection, monthFilter]);
 
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * rowsPerPage;
@@ -385,7 +407,7 @@ export default function Home() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, monthFilter]);
+  }, [deferredSearch, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, monthFilter]);
 
   // Calculate daily counts for calendar
   const dailyCounts = useMemo(() => {
@@ -3021,6 +3043,7 @@ export default function Home() {
       if (!confirm) return;
     }
 
+    // Dynamic import - load only when needed
     const [excelModule, { saveAs }] = await Promise.all([
       import('exceljs/dist/exceljs.min.js'),
       import('file-saver'),
@@ -4215,7 +4238,7 @@ export default function Home() {
 
     // Headers
     const headerRow = ws.addRow(['Mobile Number', 'Consumer Name (Latest)', 'Address (Latest)', 'Total Complaints', 'Pending', 'Closed']);
-    headerRow.eachCell((cell) => {
+    headerRow.eachCell((cell: any) => {
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } };
       cell.alignment = { horizontal: 'center' };
@@ -4280,7 +4303,7 @@ export default function Home() {
 
     // Headers
     const headerRow = ws.addRow(['Consumer Name', 'Address', 'Last Known Mobile', 'Total Complaints', 'Pending', 'Closed']);
-    headerRow.eachCell((cell) => {
+    headerRow.eachCell((cell: any) => {
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } };
       cell.alignment = { horizontal: 'center' };
@@ -4317,11 +4340,11 @@ export default function Home() {
           <div className="flex items-center gap-2">
 
             <button
-              onClick={() => fetchData(true)}
-              disabled={loading || fullRefreshLoading}
+              onClick={() => refreshData()}
+              disabled={contextLoading || fullRefreshLoading}
               className="inline-flex items-center gap-2 bg-slate-700 hover:bg-amber-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
             >
-              {loading ? (<><FiClock /> लोड हो रहा है…</>) : (<><FiRefreshCw /> Refresh</>)}
+              {contextLoading ? (<><FiClock /> लोड हो रहा है…</>) : (<><FiRefreshCw /> Refresh</>)}
             </button>
             <button
               onClick={async (e) => {
@@ -4381,7 +4404,7 @@ export default function Home() {
           </div>
         )}
 
-        {loading && (
+        {contextLoading && (
           <div className="space-y-6">
             <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg p-6 border border-gray-200">
               <div className="flex items-center gap-3 mb-6">
@@ -4557,13 +4580,8 @@ export default function Home() {
                           'Closed By',
                           'Closing Remarks'
                         ];
-
-                        // Get all unique keys from the first row to check for extra columns
                         const firstRowKeys = Object.keys(filtered[0] || {});
-                        // Remove Resolution Time from generic check as it is computed
                         const otherKeys = firstRowKeys.filter(k => !preferredOrder.includes(k) && k !== 'Resolution Time');
-
-                        // Final headers: Preferred + Others
                         const finalHeaders = [...preferredOrder, ...otherKeys];
 
                         return finalHeaders.map((header) => (
@@ -4584,33 +4602,33 @@ export default function Home() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
-                    {paginatedData.map((row, index) => (
-                      <tr key={index} className="hover:bg-gray-50">
-                        {(() => {
-                          const preferredOrder = [
-                            'Complaint Number',
-                            'Consumer Name',
-                            'Consumer Mobile',
-                            'Consumer Address',
-                            'Complaint Type',
-                            'Complaint Sub Type',
-                            'Status',
-                            'Closed Status',
-                            'Complaint Date and Time',
-                            'Closed Date',
-                            'Resolution Time',
-                            'Area Type',
-                            'Division',
-                            'Sub Division',
-                            'Sub Station',
-                            'Closed By',
-                            'Closing Remarks'
-                          ];
-                          const firstRowKeys = Object.keys(row || {});
-                          const otherKeys = firstRowKeys.filter(k => !preferredOrder.includes(k) && k !== 'Resolution Time');
-                          const finalHeaders = [...preferredOrder, ...otherKeys];
+                    {(() => {
+                      const preferredOrder = [
+                        'Complaint Number',
+                        'Consumer Name',
+                        'Consumer Mobile',
+                        'Consumer Address',
+                        'Complaint Type',
+                        'Complaint Sub Type',
+                        'Status',
+                        'Closed Status',
+                        'Complaint Date and Time',
+                        'Closed Date',
+                        'Resolution Time',
+                        'Area Type',
+                        'Division',
+                        'Sub Division',
+                        'Sub Station',
+                        'Closed By',
+                        'Closing Remarks'
+                      ];
+                      const firstRowKeys = Object.keys(filtered[0] || {});
+                      const otherKeys = firstRowKeys.filter(k => !preferredOrder.includes(k) && k !== 'Resolution Time');
+                      const finalHeaders = [...preferredOrder, ...otherKeys];
 
-                          return finalHeaders.map((h, i) => {
+                      return paginatedData.map((row, index) => (
+                        <tr key={index} className="hover:bg-gray-50">
+                          {finalHeaders.map((h, i) => {
                             let display: any = (row as any)[h];
                             if (h === 'Resolution Time') display = computeResolutionTime(row);
                             const isRemarks = h === 'Closing Remarks';
@@ -4654,10 +4672,10 @@ export default function Home() {
                                 {cellContent}
                               </td>
                             );
-                          });
-                        })()}
-                      </tr>
-                    ))}
+                          })}
+                        </tr>
+                      ));
+                    })()}
                   </tbody>
                 </table>
               </div>

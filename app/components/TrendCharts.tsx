@@ -1,7 +1,39 @@
 'use client';
 
 import { useEffect, useRef, useMemo } from 'react';
-import { Chart, ChartConfiguration } from 'chart.js/auto';
+import {
+  Chart,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  ArcElement,
+  Title,
+  Tooltip,
+  Legend,
+  LineController,
+  BarController,
+  PieController,
+  DoughnutController,
+  ChartConfiguration
+} from 'chart.js';
+
+Chart.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  ArcElement,
+  Title,
+  Tooltip,
+  Legend,
+  LineController,
+  BarController,
+  PieController,
+  DoughnutController
+);
 
 interface TrendChartsProps {
   data: any[];
