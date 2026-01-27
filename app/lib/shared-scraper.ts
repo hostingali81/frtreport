@@ -376,7 +376,7 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
         console.log('[SCRAPER] Step 7: Clicking search button...');
         await page.click('#ctrl143708').catch(() => { console.log('[SCRAPER] Search button click failed!'); });
 
-        // Quick wait for table
+        // Quick wait for table - increased validation time for large data
         await page.waitForFunction(() => {
             const container = document.querySelector('#printablediv143706');
             if (!container) return false;
@@ -385,8 +385,12 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
             const dataTable = tables[1];
             const rows = dataTable.querySelectorAll('tbody tr, tr');
             return rows.length > 0;
-        }, { timeout: 30000 }).catch(() => {
-            throw new Error('Table did not load');
+        }, { timeout: 300000 }).catch(async () => {
+            // Try to capture any visible error message on the page
+            const errorMsg = await page.evaluate(function () {
+                return document.body.innerText.substring(0, 500);
+            });
+            throw new Error(`Table did not load within 5 minutes. Page content snippet: ${errorMsg}`);
         });
 
         console.log('[SCRAPER] Step 8: Scraping first page only...');
