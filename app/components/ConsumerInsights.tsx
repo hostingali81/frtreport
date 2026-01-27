@@ -316,6 +316,7 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ data }) => {
                                 <thead className="bg-gray-100 text-gray-600 text-xs uppercase tracking-wider sticky top-0 z-10 shadow-sm">
                                     <tr>
                                         <th className="px-6 py-3 font-semibold border-b">Complaint No.</th>
+                                        <th className="px-6 py-3 font-semibold border-b">Division / Substation</th>
                                         <th className="px-6 py-3 font-semibold border-b">Date & Time</th>
                                         <th className="px-6 py-3 font-semibold border-b">Status</th>
                                         <th className="px-6 py-3 font-semibold border-b">Closed Status</th>
@@ -327,6 +328,10 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ data }) => {
                                         <tr key={i} className="hover:bg-blue-50 transition-colors">
                                             <td className="px-6 py-4 font-mono font-medium text-blue-600 whitespace-nowrap">
                                                 {c['Complaint Number']}
+                                            </td>
+                                            <td className="px-6 py-4 text-sm text-gray-700">
+                                                <div className="font-semibold">{c['Division']}</div>
+                                                <div className="text-xs text-gray-500">{c['Sub Station']}</div>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                                                 {c['Complaint Date and Time']}
