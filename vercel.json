@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/scrape?refresh=1",
+      "path": "/api/scrape?refresh=1&secret=your-random-secret-key-here-change-this",
       "schedule": "0 */6 * * *"
     }
   ]

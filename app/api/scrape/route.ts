@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // Vercel free tier limit
+export const maxDuration = 10; // Vercel free tier - only incremental scraping
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE;
@@ -269,10 +269,10 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
 
   console.log('[SCRAPER] Step 1: Opening website...');
-  await page.goto('https://www.frtbarabanki.com', { timeout: 60000, waitUntil: 'domcontentloaded' });
+  await page.goto('https://www.frtbarabanki.com', { timeout: 8000, waitUntil: 'domcontentloaded' });
 
   console.log('[SCRAPER] Step 2: Waiting for login form...');
-  await page.waitForSelector('#txtUserName', { timeout: 15000 });
+  await page.waitForSelector('#txtUserName', { timeout: 3000 });
 
   console.log('[SCRAPER] Step 3: Filling credentials...');
   await page.type('#txtUserName', username);
@@ -280,10 +280,10 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
   await page.click('#btnlogin');
 
   console.log('[SCRAPER] Step 4: Waiting for navigation after login...');
-  await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 8000 });
 
   console.log('[SCRAPER] Step 5: Navigating to form page...');
-  await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', { timeout: 60000, waitUntil: 'domcontentloaded' });
+  await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', { timeout: 8000, waitUntil: 'domcontentloaded' });
 
   const now = new Date();
   const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
@@ -315,31 +315,26 @@ async function scrapeWithPuppeteer(username: string, password: string, fromDate?
   }, { fromStr: fromDateDisplay, toStr: toDateDisplay, todayIsoEval: todayIso });
 
   // Small delay to let form process dates
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 200));
 
   console.log('[SCRAPER] Step 7: Clicking search button...');
   await page.click('#ctrl143708').catch(() => { console.log('[SCRAPER] Search button click failed!'); });
 
-  // Fast wait with timeout - if takes too long, return partial data
-  let tableLoaded = false;
-  try {
-    await page.waitForFunction(() => {
-      const container = document.querySelector('#printablediv143706');
-      if (!container) return false;
-      const tables = Array.from(container.querySelectorAll('table'));
-      if (tables.length < 2) return false;
-      const dataTable = tables[1];
-      const rows = dataTable.querySelectorAll('tbody tr, tr');
-      return rows.length > 0;
-    }, { timeout: 15000 }); // Reduced from 20s to 15s
-    tableLoaded = true;
-  } catch (e) {
-    console.log('[SCRAPER] Table load timeout - attempting to extract anyway');
-    tableLoaded = false;
-  }
+  // Quick wait for table
+  await page.waitForFunction(() => {
+    const container = document.querySelector('#printablediv143706');
+    if (!container) return false;
+    const tables = Array.from(container.querySelectorAll('table'));
+    if (tables.length < 2) return false;
+    const dataTable = tables[1];
+    const rows = dataTable.querySelectorAll('tbody tr, tr');
+    return rows.length > 0;
+  }, { timeout: 5000 }).catch(() => {
+    throw new Error('Table did not load');
+  });
 
-  // Skip "Show All" dropdown - just get first page (faster)
-  console.log('[SCRAPER] Step 8: Extracting data (skipping Show All for speed)...');
+  // Skip "Show All" - scrape only first page for speed
+  console.log('[SCRAPER] Step 8: Scraping first page only...');
 
   const result = await page.evaluate(() => {
     const normalize = (s: string | null | undefined) => (s || '').trim();
@@ -395,7 +390,9 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const refresh = searchParams.get('refresh') === '1' || searchParams.get('refresh') === 'true';
-    const forceFullScrape = searchParams.get('full') === '1';
+    const cronSecret = searchParams.get('secret');
+    const isCronJob = cronSecret === process.env.CRON_SECRET;
+    const forceFullScrape = isCronJob; // Only cron can do full scrape
 
     const useNewSystem = await checkNewTablesExist();
 
@@ -419,29 +416,27 @@ export async function GET(request: Request) {
 
     let fromDate: string | undefined;
     let toDate: string | undefined;
-    let scrapeType = 'full';
+    let scrapeType = 'incremental';
 
-    // Smart incremental scraping - scrape only last 7 days by default
-    if (useNewSystem && !forceFullScrape) {
+    // Always incremental unless cron job
+    if (useNewSystem && !isCronJob) {
       const lastComplaintDate = await getLastComplaintDate();
 
       if (lastComplaintDate) {
-        // Scrape from 2 days before last complaint (overlap for safety)
         const lastDate = new Date(lastComplaintDate);
         const safeDate = new Date(lastDate);
         safeDate.setDate(safeDate.getDate() - 2);
-
         fromDate = safeDate.toISOString().split('T')[0];
         toDate = new Date().toISOString().split('T')[0];
-        scrapeType = 'incremental_from_last_complaint';
       } else {
-        // No data in DB - scrape only last 7 days for first run
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         fromDate = sevenDaysAgo.toISOString().split('T')[0];
         toDate = new Date().toISOString().split('T')[0];
-        scrapeType = 'initial_7_days';
       }
+    } else if (isCronJob) {
+      scrapeType = 'full_cron';
+      // Full scrape - no date filters
     }
 
     const payload = await scrapeWithPuppeteer(username, password, fromDate, toDate);
