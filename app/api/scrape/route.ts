@@ -524,3 +524,5 @@ export async function GET(request: Request) {
     }, { status: 500 });
   }
 }
+
+// Forced deployment trigger: 2026-01-27
