@@ -1,0 +1,34 @@
+name: Daily Full Scrape
+
+on:
+  schedule:
+    # Runs at 00:30 UTC every day (approx 6:00 AM IST)
+    # This runs slightly after the Vercel cron to ensure we have a comprehensive backup
+    - cron: '30 0 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  full-scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # 6 Hours max
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Full Scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+          FRT_USERNAME: ${{ secrets.FRT_USERNAME }}
+          FRT_PASSWORD: ${{ secrets.FRT_PASSWORD }}
+        run: npx tsx scripts/full-scrape.ts
