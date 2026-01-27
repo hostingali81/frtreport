@@ -355,7 +355,7 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
 
         console.log('[SCRAPER] Step 6: Setting dates...', { fromDateDisplay, toDateDisplay });
 
-        await page.evaluate(({ fromStr, toStr, todayIsoEval }: { fromStr: string; toStr: string; todayIsoEval: string }) => {
+        await page.evaluate(function ({ fromStr, toStr, todayIsoEval }: { fromStr: string; toStr: string; todayIsoEval: string }) {
             const fireEvents = (el: HTMLElement) => { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('blur', { bubbles: true })); };
             const fromEl = document.getElementById('ctrl143709') as HTMLInputElement | null;
             const toEl = document.getElementById('ctrl143707') as HTMLInputElement | null;
@@ -388,7 +388,7 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
 
         console.log('[SCRAPER] Step 8: Scraping first page only...');
 
-        const result = await page.evaluate(() => {
+        const result = await page.evaluate(function () {
             const normalize = (s: string | null | undefined) => (s || '').trim();
             const container = document.querySelector('#printablediv143706');
             if (!container) return { data: [], debug: 'container not found' };
