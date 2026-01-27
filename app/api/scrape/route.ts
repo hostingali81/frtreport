@@ -13,7 +13,7 @@ import {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 10; // Vercel free tier - only incremental scraping
+export const maxDuration = 60; // Attempt to extend Vercel timeout to 60s
 
 export async function GET(request: Request) {
   const startTime = Date.now();
@@ -60,9 +60,19 @@ export async function GET(request: Request) {
 
       if (lastComplaintDate) {
         const lastDate = new Date(lastComplaintDate);
-        const safeDate = new Date(lastDate);
-        safeDate.setDate(safeDate.getDate() - 2);
-        fromDate = safeDate.toISOString().split('T')[0];
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+        // Cap lookback to 7 days max to prevent timeouts on Vercel
+        // If DB is very old (e.g. months ago), we only backfill last 7 days here.
+        // GitHub Actions handles the deep historical backfill.
+        if (lastDate < sevenDaysAgo) {
+          fromDate = sevenDaysAgo.toISOString().split('T')[0];
+        } else {
+          const safeDate = new Date(lastDate);
+          safeDate.setDate(safeDate.getDate() - 2); // Overlap 2 days for safety
+          fromDate = safeDate.toISOString().split('T')[0];
+        }
         toDate = new Date().toISOString().split('T')[0];
       } else {
         const sevenDaysAgo = new Date();

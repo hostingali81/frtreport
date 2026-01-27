@@ -38,7 +38,7 @@ export default function Home() {
   }, [contextData]);
 
   const [loading, setLoading] = useState(false);
-  const [fullRefreshLoading, setFullRefreshLoading] = useState(false);
+
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [fromDT, setFromDT] = useState(''); // yyyy-mm-ddTHH:mm (datetime-local)
@@ -4373,56 +4373,12 @@ export default function Home() {
                   setLoading(false);
                 }
               }}
-              disabled={loading || fullRefreshLoading}
+              disabled={loading}
               className="inline-flex items-center gap-2 bg-slate-700 hover:bg-amber-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
             >
               {loading ? (<><FiClock /> Scraping...</>) : (<><FiRefreshCw /> Refresh</>)}
             </button>
-            <button
-              onClick={async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (!confirm('⚠️ Full Refresh will re-scrape ALL data from 01/11/2025. This may take 2-3 minutes. Continue?')) return;
-                setFullRefreshLoading(true);
-                setError('');
-                try {
-                  const response = await fetch('/api/scrape?refresh=1&full=1');
 
-                  // Handle non-JSON responses (e.g., Vercel timeout)
-                  const contentType = response.headers.get('content-type');
-                  if (!response.ok || !contentType?.includes('application/json')) {
-                    const text = await response.text();
-                    throw new Error(`Server error (${response.status}): ${text.substring(0, 100)}...`);
-                  }
-
-                  const result = await response.json();
-                  if (result.success) {
-                    // After full refresh, fetch ALL data from database
-                    const dbResponse = await fetch('/api/complaints?fetchAll=true');
-                    const dbResult = await dbResponse.json();
-                    if (dbResult.success) {
-                      const dataArray = dbResult.data || [];
-                      // Keep original order (latest first)
-                      setOriginal(dataArray);
-                      setData(dataArray);
-                      setIsPartialData(false);
-                      if (dbResult.lastScrapedAt) setLastUpdated(dbResult.lastScrapedAt);
-                      alert(`✅ Full refresh complete! ${dataArray.length} complaints loaded from database.`);
-                    }
-                  } else {
-                    setError(result.error || 'Full refresh failed');
-                  }
-                } catch (err: any) {
-                  setError('Full refresh error: ' + err.message);
-                } finally {
-                  setFullRefreshLoading(false);
-                }
-              }}
-              disabled={loading || fullRefreshLoading}
-              className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
-            >
-              {fullRefreshLoading ? (<><FiClock /> Processing...</>) : (<><FiRefreshCw /> Full Scrape & Refresh</>)}
-            </button>
           </div>
         </header>
 
