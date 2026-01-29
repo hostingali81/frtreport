@@ -2,9 +2,9 @@ name: Daily Full Scrape
 
 on:
   schedule:
-    # Runs at 00:30 UTC every day (approx 6:00 AM IST)
+    # Runs at 21:30 UTC every day (approx 3:00 AM IST)
     # This runs slightly after the Vercel cron to ensure we have a comprehensive backup
-    - cron: '30 0 * * *'
+    - cron: '30 21 * * *'
   workflow_dispatch: # Allows manual trigger from GitHub UI
 
 jobs:
