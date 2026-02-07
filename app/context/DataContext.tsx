@@ -26,14 +26,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
       
       const result = await getComplaintsData();
       
-      setData(result.data || []);
-      if (result.lastScrapedAt) setLastUpdated(result.lastScrapedAt);
-      
-      memoryCache = {
-        data: result.data,
-        lastScrapedAt: result.lastScrapedAt || '',
-        timestamp: Date.now()
-      };
+      // Only update if we got newer data
+      if (result.data && result.data.length > 0) {
+        setData(result.data);
+        
+        // Only update timestamp if it's newer or we don't have one
+        if (result.lastScrapedAt) {
+          if (!lastUpdated || new Date(result.lastScrapedAt) >= new Date(lastUpdated)) {
+            setLastUpdated(result.lastScrapedAt);
+          }
+        }
+        
+        memoryCache = {
+          data: result.data,
+          lastScrapedAt: result.lastScrapedAt || lastUpdated,
+          timestamp: Date.now()
+        };
+      }
     } catch (err) {
       console.error('Data fetch error:', err);
     } finally {
