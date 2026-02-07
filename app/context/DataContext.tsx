@@ -26,20 +26,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
       
       const result = await getComplaintsData();
       
-      // Only update if we got newer data
       if (result.data && result.data.length > 0) {
         setData(result.data);
         
-        // Only update timestamp if it's newer or we don't have one
+        // Always update timestamp when we get new data
         if (result.lastScrapedAt) {
-          if (!lastUpdated || new Date(result.lastScrapedAt) >= new Date(lastUpdated)) {
-            setLastUpdated(result.lastScrapedAt);
-          }
+          setLastUpdated(result.lastScrapedAt);
         }
         
         memoryCache = {
           data: result.data,
-          lastScrapedAt: result.lastScrapedAt || lastUpdated,
+          lastScrapedAt: result.lastScrapedAt || '',
           timestamp: Date.now()
         };
       }

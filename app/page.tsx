@@ -194,8 +194,9 @@ export default function Home() {
     }
 
     try {
+      let scrapeTimestamp: string | null = null;
+      
       if (refresh) {
-        // First scrape new data
         const scrapeResponse = await fetch('/api/scrape?refresh=1');
         const scrapeResult = await scrapeResponse.json();
 
@@ -204,9 +205,10 @@ export default function Home() {
           setLoading(false);
           return;
         }
+        
+        scrapeTimestamp = scrapeResult.lastScrapedAt;
       }
 
-      // Step 1: Fast Load (Partial) - Only skip if forcing full load initially
       if (!forceFull) {
         const partialEndpoint = '/api/complaints?limit=2000';
         const partialResponse = await fetch(partialEndpoint);
@@ -221,23 +223,15 @@ export default function Home() {
             if (partialResult.lastScrapedAt) {
               setLastUpdated(partialResult.lastScrapedAt);
             }
-          } else {
-            // If partial failed to find data, we might as well just waiting for full load or error out
-            // But let's let background fetch handle it if this is empty
           }
         }
       }
 
-      // Step 2: Background Full Load - Always run this unless we just did a refresh which implies getting latest
-      // Actually, user wants "initial load quick, then full loading background".
-      // So we kick off full fetch now, SILENTLY (no loading spinner if we already have data).
-
-      // If we didn't get any data in step 1, keep loading true. Else set false.
       if (!forceFull) {
-        setLoading(false); // fast load done, user sees data
+        setLoading(false);
       }
 
-      const fullEndpoint = '/api/complaints?fetchAll=true';
+      const fullEndpoint = `/api/complaints?fetchAll=true${refresh ? '&refresh=1' : ''}`;
       const fullResponse = await fetch(fullEndpoint);
       const fullResult = await fullResponse.json();
 
@@ -246,12 +240,13 @@ export default function Home() {
         if (fullData.length > 0) {
           setOriginal(fullData);
           setData(fullData);
-          setIsPartialData(false); // Now we have full data
-          if (fullResult.lastScrapedAt) {
-            setLastUpdated(fullResult.lastScrapedAt);
+          setIsPartialData(false);
+          
+          const timestamp = scrapeTimestamp || fullResult.lastScrapedAt;
+          if (timestamp) {
+            setLastUpdated(timestamp);
           }
         } else if (forceFull) {
-          // If we forced full and got nothing
           setOriginal([]);
           setData([]);
           setError('कोई डेटा नहीं मिला');
@@ -4347,7 +4342,6 @@ export default function Home() {
                 try {
                   console.log('🔄 Starting refresh...');
                   
-                  // Wait for loader to disappear - max 3 minutes
                   const timeoutPromise = new Promise((_, reject) => 
                     setTimeout(() => reject(new Error('Request timeout after 3 minutes')), 180000)
                   );
@@ -4366,15 +4360,18 @@ export default function Home() {
                   const duration = Math.round((Date.now() - startTime) / 1000);
                   
                   if (result.success) {
-                    // Fetch updated data from database
-                    const dbResponse = await fetch('/api/complaints?fetchAll=true');
+                    const dbResponse = await fetch('/api/complaints?fetchAll=true&refresh=1');
                     const dbResult = await dbResponse.json();
                     if (dbResult.success) {
                       const dataArray = dbResult.data || [];
                       setOriginal(dataArray);
                       setData(dataArray);
                       setIsPartialData(false);
-                      if (dbResult.lastScrapedAt) setLastUpdated(dbResult.lastScrapedAt);
+                      
+                      const timestamp = result.lastScrapedAt || dbResult.lastScrapedAt;
+                      if (timestamp) {
+                        setLastUpdated(timestamp);
+                      }
                       
                       const newRows = result.stats?.new || result.new_rows || 0;
                       const updatedRows = result.stats?.updated || result.updated_rows || 0;

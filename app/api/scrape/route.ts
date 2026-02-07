@@ -97,7 +97,15 @@ export async function GET(request: Request) {
     // Scrape with loader tracking - no retries needed!
     const payload = await scrapeWithPuppeteer(username, password, fromDate, toDate);
     const scrapeDuration = Math.round((Date.now() - startTime) / 1000);
-    const scrapedAt = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    const scrapedAt = new Date().toLocaleString('en-IN', { 
+      timeZone: 'Asia/Kolkata',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
 
     if (!payload.data || payload.data.length === 0) {
       return NextResponse.json({

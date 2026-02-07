@@ -169,10 +169,24 @@ export async function loadFromNewDb() {
         .select('id', { count: 'exact', head: true });
 
     const lastScrape = await getLastSuccessfulScrape();
+    
+    // Format timestamp for display
+    const lastScrapedAt = lastScrape?.last_scrape_at
+        ? new Date(lastScrape.last_scrape_at).toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+          })
+        : null;
+    
     return {
         data: allData.map(row => row.raw_data),
         total: count || 0,
-        lastScrapedAt: lastScrape?.last_scrape_at,
+        lastScrapedAt,
         source: 'supabase_new',
         system: 'optimized'
     };
