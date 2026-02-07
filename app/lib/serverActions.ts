@@ -1,7 +1,6 @@
 'use server';
 
 import { createClient } from '@supabase/supabase-js';
-import { getCachedData, setCachedData } from './cache';
 
 const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE)
@@ -15,12 +14,6 @@ export async function getComplaintsData() {
       lastScrapedAt: null, 
       error: 'Database connection unavailable. Please check configuration.' 
     };
-  }
-
-  const cached = getCachedData();
-  if (cached) {
-    console.log('✅ Serving cached data');
-    return cached;
   }
 
   try {
@@ -78,9 +71,8 @@ export async function getComplaintsData() {
       : null;
 
     const dataArray = allData.map(row => row.raw_data);
-    setCachedData(dataArray, lastScrapedAt);
-
-    console.log('✅ Data cached successfully');
+    
+    console.log('✅ Data fetched successfully');
     return { data: dataArray, lastScrapedAt };
   } catch (err: any) {
     console.error('❌ Critical error fetching complaints:', err);
