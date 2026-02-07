@@ -326,21 +326,41 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
 
     try {
         console.log('[SCRAPER] Step 1: Opening website...');
-        await page.goto('https://www.frtbarabanki.com', { timeout: 30000, waitUntil: 'domcontentloaded' }); // Increased timeout for safety
+        await page.goto('https://www.frtbarabanki.com', { 
+            timeout: 45000, 
+            waitUntil: 'domcontentloaded' // Faster than networkidle2
+        });
 
         console.log('[SCRAPER] Step 2: Waiting for login form...');
-        await page.waitForSelector('#txtUserName', { timeout: 10000 });
+        await page.waitForSelector('#txtUserName', { timeout: 15000 });
 
         console.log('[SCRAPER] Step 3: Filling credentials...');
-        await page.type('#txtUserName', username);
-        await page.type('#txtPassword', password);
+        // Direct value set - instant!
+        await page.evaluate((credentials: { user: string; pass: string }) => {
+            const userEl = document.getElementById('txtUserName') as HTMLInputElement;
+            const passEl = document.getElementById('txtPassword') as HTMLInputElement;
+            if (userEl) userEl.value = credentials.user;
+            if (passEl) passEl.value = credentials.pass;
+        }, { user: username, pass: password });
+        
         await page.click('#btnlogin');
 
-        console.log('[SCRAPER] Step 4: Waiting for navigation after login...');
-        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
+        console.log('[SCRAPER] Step 4: Waiting for successful login...');
+        // SMART: Wait for either dashboard or form page to load
+        await Promise.race([
+            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
+            page.waitForSelector('body', { timeout: 30000 })
+        ]);
 
-        console.log('[SCRAPER] Step 5: Navigating to form page...');
-        await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', { timeout: 30000, waitUntil: 'domcontentloaded' });
+        console.log('[SCRAPER] Step 5: Direct navigation to report form...');
+        // SMART: Direct goto is faster than clicking through menus
+        await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', { 
+            timeout: 30000, 
+            waitUntil: 'domcontentloaded'
+        });
+        
+        // SMART: Wait for form to be ready
+        await page.waitForSelector('#ctrl143708', { timeout: 10000 });
 
         const now = new Date();
         const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
@@ -355,44 +375,49 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
 
         const toDateDisplay = toDate ? formatDateDisplay(new Date(toDate)) : formatDateDisplay(now);
         const fromDateDisplay = fromDate ? formatDateDisplay(new Date(fromDate)) : '01-Nov-2025';
-        const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
         console.log('[SCRAPER] Step 6: Setting dates...', { fromDateDisplay, toDateDisplay });
 
-        await page.evaluate(function ({ fromStr, toStr, todayIsoEval }: { fromStr: string; toStr: string; todayIsoEval: string }) {
-            const fireEvents = (el: HTMLElement) => { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('blur', { bubbles: true })); };
-            const fromEl = document.getElementById('ctrl143709') as HTMLInputElement | null;
-            const toEl = document.getElementById('ctrl143707') as HTMLInputElement | null;
-            console.log('[SCRAPER] Date fields found:', { fromEl: !!fromEl, toEl: !!toEl });
-            if (fromEl) { fromEl.value = fromStr; fireEvents(fromEl); try { (window as any).$ && (window as any)('#ctrl143709').val(fromStr).trigger('change'); } catch { } }
-            if (toEl) { toEl.value = toStr; fireEvents(toEl); try { (window as any).$ && (window as any)('#ctrl143707').val(toStr).trigger('change'); } catch { } }
-            const dateInputs = Array.from(document.querySelectorAll('input[type="date"]')) as HTMLInputElement[];
-            if (dateInputs.length === 1) { dateInputs[0].value = todayIsoEval; fireEvents(dateInputs[0]); }
-            else if (dateInputs.length >= 2) { dateInputs[0].value = '2025-11-01'; fireEvents(dateInputs[0]); dateInputs[1].value = todayIsoEval; fireEvents(dateInputs[1]); }
-        }, { fromStr: fromDateDisplay, toStr: toDateDisplay, todayIsoEval: todayIso });
+        // SMART: Set dates and trigger events efficiently
+        await page.evaluate(function ({ fromStr, toStr }: { fromStr: string; toStr: string }) {
+            const fromEl = document.getElementById('ctrl143709') as HTMLInputElement;
+            const toEl = document.getElementById('ctrl143707') as HTMLInputElement;
+            
+            if (fromEl) {
+                fromEl.value = fromStr;
+                fromEl.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            if (toEl) {
+                toEl.value = toStr;
+                toEl.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }, { fromStr: fromDateDisplay, toStr: toDateDisplay });
 
-        // Small delay to let form process dates
-        await new Promise(r => setTimeout(r, 500));
+        // Quick wait for form to process
+        await new Promise(r => setTimeout(r, 300));
 
         console.log('[SCRAPER] Step 7: Clicking search button...');
-        await page.click('#ctrl143708').catch(() => { console.log('[SCRAPER] Search button click failed!'); });
+        await page.click('#ctrl143708');
 
-        // Quick wait for table - increased validation time for large data
+        // PERFECT FIX: Wait for loader to disappear!
+        console.log('[SCRAPER] Waiting for loader to disappear...');
+        const startWait = Date.now();
+        
         await page.waitForFunction(() => {
-            const container = document.querySelector('#printablediv143706');
-            if (!container) return false;
-            const tables = Array.from(container.querySelectorAll('table'));
-            if (tables.length < 2) return false;
-            const dataTable = tables[1];
-            const rows = dataTable.querySelectorAll('tbody tr, tr');
-            return rows.length > 0;
-        }, { timeout: 300000 }).catch(async () => {
-            // Try to capture any visible error message on the page
-            const errorMsg = await page.evaluate(function () {
-                return document.body.innerText.substring(0, 500);
-            });
-            throw new Error(`Table did not load within 5 minutes. Page content snippet: ${errorMsg}`);
+            const loader = document.querySelector('.loading-bar');
+            if (!loader) return true; // No loader = already loaded
+            const style = window.getComputedStyle(loader);
+            return style.display === 'none'; // Loader hidden = data ready!
+        }, { 
+            timeout: 180000, // 3 minutes max (for very slow server)
+            polling: 500 // Check every 500ms
         });
+        
+        const loadTime = Math.round((Date.now() - startWait) / 1000);
+        console.log(`[SCRAPER] ✅ Data loaded in ${loadTime}s (loader disappeared)`);
+        
+        // Small safety wait for DOM to settle
+        await new Promise(r => setTimeout(r, 1000));
 
         console.log('[SCRAPER] Step 8: Scraping first page only...');
 

@@ -4343,15 +4343,28 @@ export default function Home() {
               onClick={async () => {
                 setLoading(true);
                 setError('');
+                const startTime = Date.now();
                 try {
-                  // Call scrape API for incremental refresh (from last complaint date)
-                  const response = await fetch('/api/scrape?refresh=1');
+                  console.log('🔄 Starting refresh...');
+                  
+                  // Wait for loader to disappear - max 3 minutes
+                  const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Request timeout after 3 minutes')), 180000)
+                  );
+                  
+                  const fetchPromise = fetch('/api/scrape?refresh=1');
+                  
+                  const response = await Promise.race([fetchPromise, timeoutPromise]) as Response;
+                  
                   const contentType = response.headers.get('content-type');
                   if (!response.ok || !contentType?.includes('application/json')) {
                     const text = await response.text();
                     throw new Error(`Server error: ${text.substring(0, 100)}...`);
                   }
+                  
                   const result = await response.json();
+                  const duration = Math.round((Date.now() - startTime) / 1000);
+                  
                   if (result.success) {
                     // Fetch updated data from database
                     const dbResponse = await fetch('/api/complaints?fetchAll=true');
@@ -4362,13 +4375,29 @@ export default function Home() {
                       setData(dataArray);
                       setIsPartialData(false);
                       if (dbResult.lastScrapedAt) setLastUpdated(dbResult.lastScrapedAt);
-                      alert(`✅ Refresh complete! ${result.new_rows || 0} new records added. Total: ${dataArray.length}`);
+                      
+                      const newRows = result.stats?.new || result.new_rows || 0;
+                      const updatedRows = result.stats?.updated || result.updated_rows || 0;
+                      
+                      alert(`✅ Refresh complete in ${duration}s!\n\n📊 New: ${newRows} | Updated: ${updatedRows}\n📈 Total: ${dataArray.length} complaints`);
                     }
                   } else {
                     setError(result.error || 'Refresh failed');
+                    alert(`❌ Refresh failed: ${result.error || 'Unknown error'}\n\n💡 Tip: Website might be slow. Try again in a minute.`);
                   }
                 } catch (err: any) {
-                  setError('Refresh error: ' + err.message);
+                  const duration = Math.round((Date.now() - startTime) / 1000);
+                  console.error('Refresh error:', err);
+                  
+                  let errorMsg = err.message || 'Unknown error';
+                  if (errorMsg.includes('timeout')) {
+                    errorMsg = 'Website is too slow or down. Please try again later.';
+                  } else if (errorMsg.includes('fetch')) {
+                    errorMsg = 'Network error. Check your internet connection.';
+                  }
+                  
+                  setError(errorMsg);
+                  alert(`❌ Refresh failed after ${duration}s\n\n${errorMsg}\n\n💡 Tips:\n• Wait 1-2 minutes and try again\n• Check if website is accessible\n• Try during off-peak hours`);
                 } finally {
                   setLoading(false);
                 }

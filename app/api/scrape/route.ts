@@ -94,6 +94,7 @@ export async function GET(request: Request) {
       // But useful if running locally
     }
 
+    // Scrape with loader tracking - no retries needed!
     const payload = await scrapeWithPuppeteer(username, password, fromDate, toDate);
     const scrapeDuration = Math.round((Date.now() - startTime) / 1000);
     const scrapedAt = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });

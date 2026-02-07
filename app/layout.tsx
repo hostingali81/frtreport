@@ -26,6 +26,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
+  colorScheme: "light", // Force light mode
 };
 
 export default function RootLayout({
