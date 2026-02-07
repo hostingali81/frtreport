@@ -361,17 +361,14 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
         await page.click('#btnlogin');
 
         console.log('[SCRAPER] Step 4: Waiting for successful login...');
-        // SMART: Wait for either dashboard or form page to load
-        await Promise.race([
-            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
-            page.waitForSelector('body', { timeout: 30000 })
-        ]);
+        // Wait for navigation to complete
+        await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 45000 });
 
         console.log('[SCRAPER] Step 5: Direct navigation to report form...');
-        // SMART: Direct goto is faster than clicking through menus
+        // Direct goto with networkidle for Vercel stability
         await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', { 
-            timeout: 60000, // Longer timeout for Vercel
-            waitUntil: 'domcontentloaded'
+            timeout: 60000,
+            waitUntil: 'networkidle0' // More stable on Vercel
         });
         
         // SMART: Wait for form to be ready
