@@ -294,11 +294,26 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
         // Vercel Environment
         const chromium = (await import('@sparticuz/chromium')).default;
         puppeteer = await import('puppeteer-core');
+        
+        // Optimize chromium for Vercel
+        chromium.setHeadlessMode = true;
+        chromium.setGraphicsMode = false;
+        
         launchOptions = {
             ...launchOptions,
             headless: true,
-            args: chromium.args,
+            args: [
+                ...chromium.args,
+                '--disable-gpu',
+                '--disable-dev-shm-usage',
+                '--disable-setuid-sandbox',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-extensions',
+            ],
             executablePath: await chromium.executablePath(),
+            ignoreHTTPSErrors: true,
         };
     } else {
         // Local / GitHub Actions Environment
@@ -355,7 +370,7 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
         console.log('[SCRAPER] Step 5: Direct navigation to report form...');
         // SMART: Direct goto is faster than clicking through menus
         await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', { 
-            timeout: 30000, 
+            timeout: 60000, // Longer timeout for Vercel
             waitUntil: 'domcontentloaded'
         });
         
