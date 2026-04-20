@@ -1,65 +1,79 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition, useDeferredValue } from 'react';
-import { FiDownload, FiRefreshCw, FiFilter, FiSearch, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers, FiInfo, FiActivity } from 'react-icons/fi';
+import { useEffect, useMemo, useState, useTransition } from 'react';
+import { FiDownload, FiRefreshCw, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers, FiInfo, FiActivity } from 'react-icons/fi';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { useDebounce } from './hooks/useDebounce';
-import { useData } from './context/DataContext';
+import { getDefaultTodayFilters, useData } from './context/DataContext';
+import { loadExcelJS } from './utils/lazyImports';
 
 // Dynamic imports for heavy components
-const Select = dynamic(() => import('react-select'), { ssr: false });
 const FilterBar = dynamic(() => import('./components/FilterBar'), { ssr: false });
 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
 
 export default function Home() {
-  const { data: contextData, loading: contextLoading, lastUpdated: contextLastUpdated, refreshData } = useData();
-
-  const ShiftBadge = ({ letter }: { letter: string }) => (
-    <span className="inline-flex items-center justify-center w-5 h-5 bg-emerald-600 text-white text-xs font-bold rounded-md mr-2 shadow-sm border border-emerald-500/50">
-      {letter}
-    </span>
-  );
+  const {
+    data: contextData,
+    loading: contextLoading,
+    lastUpdated: contextLastUpdated,
+    refreshData,
+    applyFilters,
+    filterOptions,
+    currentFilters
+  } = useData();
 
   const router = useRouter();
   const [original, setOriginal] = useState<any[]>([]);
-  const [data, setData] = useState<any[]>([]);
 
   useEffect(() => {
-    if (contextData.length > 0) {
-      setOriginal(contextData);
-      setData(contextData);
-    }
+    router.prefetch('/charts');
+    router.prefetch('/deep-analysis');
+  }, [router]);
+
+  useEffect(() => {
+    setOriginal(contextData);
   }, [contextData]);
 
-  const [loading, setLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const loading = contextLoading || isRefreshing;
 
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [fromDT, setFromDT] = useState(''); // yyyy-mm-ddTHH:mm (datetime-local)
-  const [toDT, setToDT] = useState('');   // yyyy-mm-ddTHH:mm (datetime-local)
-  const [statusFilter, setStatusFilter] = useState(''); // empty = all
-  const [closedStatusFilter, setClosedStatusFilter] = useState(''); // NEW state
-  const [divisionFilter, setDivisionFilter] = useState('');
-  const [subDivisionFilter, setSubDivisionFilter] = useState('');
-  const [subStationFilter, setSubStationFilter] = useState('');
+  const defaultFilters = currentFilters ?? getDefaultTodayFilters();
+  const [search, setSearch] = useState(defaultFilters.search);
+  const [fromDT, setFromDT] = useState(defaultFilters.fromDT); // yyyy-mm-ddTHH:mm (datetime-local)
+  const [toDT, setToDT] = useState(defaultFilters.toDT);   // yyyy-mm-ddTHH:mm (datetime-local)
+  const [statusFilter, setStatusFilter] = useState(defaultFilters.status); // empty = all
+  const [closedStatusFilter, setClosedStatusFilter] = useState(defaultFilters.closedStatus);
+  const [divisionFilter, setDivisionFilter] = useState(defaultFilters.division);
+  const [subDivisionFilter, setSubDivisionFilter] = useState(defaultFilters.subDivision);
+  const [subStationFilter, setSubStationFilter] = useState(defaultFilters.subStation);
   const [lastUpdated, setLastUpdated] = useState<string>('');
 
   useEffect(() => {
     if (contextLastUpdated) setLastUpdated(contextLastUpdated);
   }, [contextLastUpdated]);
+
+  useEffect(() => {
+    setSearch(currentFilters.search);
+    setFromDT(currentFilters.fromDT);
+    setToDT(currentFilters.toDT);
+    setStatusFilter(currentFilters.status);
+    setClosedStatusFilter(currentFilters.closedStatus);
+    setDivisionFilter(currentFilters.division);
+    setSubDivisionFilter(currentFilters.subDivision);
+    setSubStationFilter(currentFilters.subStation);
+    setMonthFilter(currentFilters.monthFilter);
+  }, [currentFilters]);
   const [sortColumn, setSortColumn] = useState<string>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [selectedShift, setSelectedShift] = useState<string>(''); // e.g. "Today - Morning (07:00–15:00)"
   const [showReportModal, setShowReportModal] = useState(false);
   const [customDate, setCustomDate] = useState<string>('');
   const [activePreset, setActivePreset] = useState<string>(''); // Track active preset
-  const [monthFilter, setMonthFilter] = useState<string>('All');
+  const [monthFilter, setMonthFilter] = useState<string>(defaultFilters.monthFilter);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedCellData, setSelectedCellData] = useState<{ title: string, content: string } | null>(null);
   const rowsPerPage = 100;
@@ -101,92 +115,34 @@ export default function Home() {
     return null;
   };
 
-  const statusOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of original) {
-      const s = String((r as any)['Status'] ?? '').trim();
-      if (s) set.add(s);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [original]);
+  const statusOptions = filterOptions.statuses;
+  const closedStatusOptions = filterOptions.closedStatuses;
+  const divisionOptions = filterOptions.divisions;
+  const subDivisionOptions = filterOptions.subDivisions;
+  const subStationOptions = filterOptions.subStations;
+  const monthOptions = filterOptions.months;
 
-  const closedStatusOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of original) {
-      const s = String((r as any)['Closed Status'] ?? '').trim();
-      if (s) set.add(s);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [original]);
+  const applyCurrentFilters = async () => {
+    setError('');
 
-  const divisionOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of original) {
-      const s = String((r as any)['Division'] ?? '').trim();
-      if (s) set.add(s);
+    try {
+      await applyFilters({
+        search,
+        division: divisionFilter,
+        subDivision: subDivisionFilter,
+        subStation: subStationFilter,
+        status: statusFilter,
+        closedStatus: closedStatusFilter,
+        fromDT,
+        toDT,
+        monthFilter
+      });
+    } catch (err: any) {
+      setError(err.message || 'Failed to load filtered complaints');
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [original]);
-
-  const subDivisionOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of original) {
-      const s = String((r as any)['Sub Division'] ?? '').trim();
-      if (s) set.add(s);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [original]);
-
-  const subStationOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of original) {
-      const s = String((r as any)['Sub Station'] ?? '').trim();
-      if (s) set.add(s);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [original]);
-
-  // Extract available months for filter
-  const monthOptions = useMemo(() => {
-    const months = new Set<string>();
-    original.forEach(r => {
-      const val = String(r['Complaint Date and Time'] || r['Complaint Date'] || '');
-      const d = parsePossibleDate(val);
-      if (d) {
-        const key = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-        months.add(key);
-      }
-    });
-    const options = Array.from(months).map(m => ({ value: m, label: m }));
-    // Custom sort could be added here if needed, usually defaults are okay or sort by date
-    return [{ value: 'All', label: 'All Months' }, ...options];
-  }, [original]);
-
-  // Helper function to find parent Division and Sub Division for a Sub Station
-  const findParentsForSubStation = (subStation: string) => {
-    const record = original.find(r => String((r as any)['Sub Station'] ?? '').trim() === subStation);
-    if (record) {
-      return {
-        division: String((record as any)['Division'] ?? '').trim(),
-        subDivision: String((record as any)['Sub Division'] ?? '').trim()
-      };
-    }
-    return null;
   };
 
-  // Helper function to find parent Division for a Sub Division
-  const findParentForSubDivision = (subDivision: string) => {
-    const record = original.find(r => String((r as any)['Sub Division'] ?? '').trim() === subDivision);
-    if (record) {
-      return String((record as any)['Division'] ?? '').trim();
-    }
-    return '';
-  };
-
-  const [isPartialData, setIsPartialData] = useState(true);
-
-  const fetchData = async (refresh = false, forceFull = false) => {
-    setLoading(true);
+  /*
     setError('');
     if (refresh) {
       setOriginal([]);
@@ -261,9 +217,7 @@ export default function Home() {
       setLoading(false);
     }
   };
-
-  const normalizedIncludes = (value: string, query: string) =>
-    value.toLowerCase().includes(query.toLowerCase());
+  */
 
 
 
@@ -313,55 +267,10 @@ export default function Home() {
     });
   };
 
-  const deferredSearch = useDeferredValue(search);
-
   const filtered = useMemo(() => {
-    let rows = original;
-    if (deferredSearch.trim()) {
-      rows = rows.filter(row =>
-        Object.values(row).some(v => normalizedIncludes(String(v || ''), deferredSearch.trim()))
-      );
-    }
-
-    // Month Filter Logic
-    if (monthFilter && monthFilter !== 'All') {
-      rows = rows.filter(row => {
-        const val = String(row['Complaint Date and Time'] || row['Complaint Date'] || '');
-        const d = parsePossibleDate(val);
-        if (!d) return false;
-        return d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) === monthFilter;
-      });
-    }
-
-    if (fromDT || toDT) {
-      const fromDate = fromDT ? new Date(fromDT) : null;
-      const toDate = toDT ? new Date(toDT) : null;
-      rows = rows.filter(row => {
-        const val = String(row['Complaint Date and Time'] || row['Complaint Date'] || '');
-        const dt = parsePossibleDate(val);
-        if (!dt) return false;
-        if (fromDate && dt < fromDate) return false;
-        if (toDate && dt > toDate) return false;
-        return true;
-      });
-    }
-    if (statusFilter) {
-      rows = rows.filter(row => String(row['Status'] ?? '').trim() === statusFilter);
-    }
-    if (closedStatusFilter) {
-      rows = rows.filter(row => String(row['Closed Status'] ?? '').trim() === closedStatusFilter);
-    }
-    if (divisionFilter) {
-      rows = rows.filter(row => String(row['Division'] ?? '').trim() === divisionFilter);
-    }
-    if (subDivisionFilter) {
-      rows = rows.filter(row => String(row['Sub Division'] ?? '').trim() === subDivisionFilter);
-    }
-    if (subStationFilter) {
-      rows = rows.filter(row => String(row['Sub Station'] ?? '').trim() === subStationFilter);
-    }
+    let rows = [...original];
     if (sortColumn) {
-      rows = [...rows].sort((a, b) => {
+      rows = rows.sort((a, b) => {
         let aVal: any, bVal: any;
 
         if (sortColumn === 'Resolution Time') {
@@ -391,7 +300,7 @@ export default function Home() {
       });
     }
     return rows;
-  }, [original, deferredSearch, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, sortColumn, sortDirection, monthFilter]);
+  }, [original, sortColumn, sortDirection]);
 
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * rowsPerPage;
@@ -402,7 +311,7 @@ export default function Home() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [deferredSearch, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, monthFilter]);
+  }, [original]);
 
   // Calculate daily counts for calendar
   const dailyCounts = useMemo(() => {
@@ -631,37 +540,20 @@ export default function Home() {
   };
 
   const clearAllFilters = () => {
-    setSearch('');
-    setDivisionFilter('');
-    setSubDivisionFilter('');
-    setSubStationFilter('');
-    setStatusFilter('');
-    setClosedStatusFilter(''); // Clear new filter
-    setFromDT('');
-    setToDT('');
+    const todayFilters = getDefaultTodayFilters();
+    setSearch(todayFilters.search);
+    setDivisionFilter(todayFilters.division);
+    setSubDivisionFilter(todayFilters.subDivision);
+    setSubStationFilter(todayFilters.subStation);
+    setStatusFilter(todayFilters.status);
+    setClosedStatusFilter(todayFilters.closedStatus);
+    setFromDT(todayFilters.fromDT);
+    setToDT(todayFilters.toDT);
+    setMonthFilter(todayFilters.monthFilter);
     setSelectedShift('');
     setActivePreset('');
+    setCustomDate('');
   };
-
-  // Auto-fill From/To with oldest and latest dates from loaded data
-  useEffect(() => {
-    if (!original.length) return;
-    // only auto-set if user hasn't chosen anything yet
-    if (fromDT || toDT) return;
-    const dateList = original
-      .map(r => parsePossibleDate(String((r as any)['Complaint Date and Time'] || (r as any)['Complaint Date'] || '')))
-      .filter((d): d is Date => !!d);
-    if (dateList.length === 0) return;
-    const min = new Date(Math.min.apply(null, dateList.map(d => d.getTime())));
-    const max = new Date(Math.max.apply(null, dateList.map(d => d.getTime())));
-    // Don't auto-set dates - let user choose
-    // setFromDT(formatDateTimeLocal(min));
-    // setToDT(formatDateTimeLocal(max));
-  }, [original, fromDT, toDT]);
-
-  useEffect(() => {
-    fetchData(false);
-  }, []);
 
   const SkeletonBlock = ({ className = '' }: { className?: string }) => (
     <div className={`animate-pulse bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 rounded ${className}`} style={{ backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite' }} />
@@ -3039,11 +2931,7 @@ export default function Home() {
     }
 
     // Dynamic import - load only when needed
-    const [excelModule, { saveAs }] = await Promise.all([
-      import('exceljs/dist/exceljs.min.js'),
-      import('file-saver'),
-    ]);
-    const ExcelJS: any = (excelModule as any).default || excelModule;
+    const { ExcelJS, saveAs } = await loadExcelJS();
     const wb = new ExcelJS.Workbook();
     // Basic document properties
     wb.creator = 'FRT Report Dashboard';
@@ -4195,6 +4083,7 @@ export default function Home() {
   const exportRepeatedCompliantsByMobile = async () => {
     const rows = filtered;
     if (rows.length === 0) return;
+    const { ExcelJS, saveAs } = await loadExcelJS();
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Repeat Complaints (Mobile)');
     const now = new Date();
@@ -4259,6 +4148,7 @@ export default function Home() {
   const exportRepeatedCompliantsByNameAddress = async () => {
     const rows = filtered;
     if (rows.length === 0) return;
+    const { ExcelJS, saveAs } = await loadExcelJS();
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Repeat Complaints (Name+Address)');
     const now = new Date();
@@ -4321,25 +4211,141 @@ export default function Home() {
     saveAs(new Blob([buf]), `repeat_complaints_consumer_${now.getTime()}.xlsx`);
   };
 
+  const dashboardStats = useMemo(() => {
+    const total = filtered.length;
+    let closed = 0;
+    let within = 0;
+    let beyond = 0;
+
+    for (const row of filtered) {
+      if (isClosedRow(row)) {
+        closed += 1;
+      }
+
+      const closedStatus = String(row['Closed Status'] || '').trim();
+      if (closedStatus === 'Closed Within') within += 1;
+      if (closedStatus === 'Closed Beyond') beyond += 1;
+    }
+
+    const pending = Math.max(0, total - closed);
+    const currentScope = selectedShift || (monthFilter !== 'All' ? monthFilter : 'Current filters');
+
+    return [
+      {
+        label: 'Total Complaints',
+        value: total,
+        helper: currentScope,
+        icon: FiBarChart2,
+        cardClass: 'border-slate-200 bg-white',
+        iconClass: 'bg-slate-900 text-white'
+      },
+      {
+        label: 'Closed',
+        value: closed,
+        helper: total ? `${Math.round((closed / total) * 100)}% resolved` : 'No resolved complaints',
+        icon: FiActivity,
+        cardClass: 'border-emerald-200 bg-emerald-50/70',
+        iconClass: 'bg-emerald-600 text-white'
+      },
+      {
+        label: 'Pending',
+        value: pending,
+        helper: pending ? 'Needs follow-up' : 'Nothing pending',
+        icon: FiClock,
+        cardClass: 'border-amber-200 bg-amber-50/70',
+        iconClass: 'bg-amber-500 text-white'
+      },
+      {
+        label: 'Closed Beyond',
+        value: beyond,
+        helper: `Within SLA: ${within}`,
+        icon: FiTrendingUp,
+        cardClass: 'border-rose-200 bg-rose-50/70',
+        iconClass: 'bg-rose-600 text-white'
+      }
+    ];
+  }, [filtered, monthFilter, selectedShift]);
+
+  const ResultsSkeleton = () => (
+    <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-3">
+                <SkeletonBlock className="h-4 w-28" />
+                <SkeletonBlock className="h-8 w-20" />
+                <SkeletonBlock className="h-3 w-24" />
+              </div>
+              <SkeletonBlock className="h-12 w-12 rounded-2xl" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div className="space-y-2">
+            <SkeletonBlock className="h-5 w-56" />
+            <SkeletonBlock className="h-4 w-36" />
+          </div>
+          <SkeletonBlock className="h-10 w-28 rounded-xl" />
+        </div>
+        <div className="space-y-3 p-5">
+          {Array.from({ length: 8 }).map((_, index) => (
+            <div key={index} className="grid grid-cols-2 gap-3 md:grid-cols-6">
+              {Array.from({ length: 6 }).map((__, cellIndex) => (
+                <SkeletonBlock key={cellIndex} className="h-6 rounded-lg" />
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen p-4 md:p-8 bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-white to-slate-50 p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
-        <header className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <Image src="/logo.png" alt="FRT Logo" width={56} height={56} className="rounded-lg" priority />
-            <div>
+        <header className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-blue-50/80 p-5 shadow-sm md:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <div className="rounded-2xl border border-white/80 bg-white p-3 shadow-sm">
+              <Image src="/logo.png" alt="FRT Logo" width={52} height={52} className="rounded-lg" priority />
+            </div>
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                  Today-first loading
+                </span>
+                <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                  Server-side filters
+                </span>
+              </div>
               <h1 className="text-xl md:text-3xl font-bold">FRT बाराबंकी - सप्लाई कंप्लेंट रिपोर्ट</h1>
-              <p className="text-gray-500 text-sm md:text-base">Analyze, filter and export complaints with ease</p>
+              <p className="text-sm text-slate-600 md:text-base">Fast daily view, safer refresh sync, and cleaner exports for complaint analysis.</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
 
             <button
               onClick={async () => {
-                setLoading(true);
+                setIsRefreshing(true);
                 setError('');
                 const startTime = Date.now();
                 try {
+                  const result = await refreshData();
+                  const duration = Math.round((Date.now() - startTime) / 1000);
+
+                  if (!result.success) {
+                    throw new Error(result.error || 'Refresh failed');
+                  }
+
+                  const newRows = result.stats?.new || 0;
+                  const updatedRows = result.stats?.updated || 0;
+                  alert(`Refresh complete in ${duration}s.\n\nNew: ${newRows} | Updated: ${updatedRows}`);
+                  return;
+                  /*
                   console.log('🔄 Starting refresh...');
                   
                   const timeoutPromise = new Promise((_, reject) => 
@@ -4382,6 +4388,7 @@ export default function Home() {
                     setError(result.error || 'Refresh failed');
                     alert(`❌ Refresh failed: ${result.error || 'Unknown error'}\n\n💡 Tip: Website might be slow. Try again in a minute.`);
                   }
+                  */
                 } catch (err: any) {
                   const duration = Math.round((Date.now() - startTime) / 1000);
                   console.error('Refresh error:', err);
@@ -4396,16 +4403,17 @@ export default function Home() {
                   setError(errorMsg);
                   alert(`❌ Refresh failed after ${duration}s\n\n${errorMsg}\n\n💡 Tips:\n• Wait 1-2 minutes and try again\n• Check if website is accessible\n• Try during off-peak hours`);
                 } finally {
-                  setLoading(false);
+                  setIsRefreshing(false);
                 }
               }}
               disabled={loading}
-              className="inline-flex items-center gap-2 bg-slate-700 hover:bg-amber-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 font-semibold text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
             >
-              {loading ? (<><FiClock /> Scraping...</>) : (<><FiRefreshCw /> Refresh</>)}
+              {isRefreshing ? (<><FiClock /> Refreshing...</>) : (<><FiRefreshCw /> Sync Latest</>)}
             </button>
 
           </div>
+        </div>
         </header>
 
         {lastUpdated && (
@@ -4414,19 +4422,16 @@ export default function Home() {
           </div>
         )}
 
-        {isPartialData && !loading && original.length > 0 && (
-          <div className="bg-blue-50 border-l-4 border-blue-500 text-blue-800 px-4 py-3 rounded flex items-center justify-between animate-in fade-in slide-in-from-top-2">
-            <div className="flex items-center gap-2">
-              <FiInfo className="text-xl shrink-0" />
-              <p className="font-medium">
+        {false && (
+          <div className="bg-blue-50 border-l-4 border-blue-500 text-blue-800 px-4 py-3 rounded">
+            <p className="font-medium flex items-center gap-2">
+              <FiInfo className="text-lg shrink-0" />
                 Rocket Mode Active 🚀: Loaded recent data instantly. Fetching full history in background...
               </p>
-            </div>
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700 ml-4"></div>
           </div>
         )}
 
-        {contextLoading && (
+        {false && (
           <div className="space-y-6">
             <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg p-6 border border-gray-200">
               <div className="flex items-center gap-3 mb-6">
@@ -4480,7 +4485,7 @@ export default function Home() {
           </div>
         )}
 
-        {original.length > 0 && !loading && (
+        {true && (
           <>
             <div className="mb-6">
               <FilterBar
@@ -4513,7 +4518,7 @@ export default function Home() {
                 customDate={customDate} setCustomDate={setCustomDate}
                 applyCustomDateShift={applyCustomDateShift}
                 clearAllFilters={clearAllFilters}
-                onRefresh={() => fetchData(true)}
+                onApply={applyCurrentFilters}
                 loading={loading || isPending}
                 dailyCounts={dailyCounts}
                 monthFilter={monthFilter}
@@ -4522,50 +4527,106 @@ export default function Home() {
               />
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 mt-6 pt-5 border-t border-gray-200">
-              <div className="flex items-center gap-2 text-sm">
-                <FiBarChart2 className="text-sky-600 text-lg" />
-                <span className="font-semibold text-gray-700">Showing {((currentPage - 1) * rowsPerPage) + 1}-{Math.min(currentPage * rowsPerPage, filtered.length)} of {filtered.length} complaints</span>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  onClick={exportSummaryPDF}
-                  className="inline-flex items-center gap-2 bg-indigo-700 hover:bg-indigo-800 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
-                >
-                  <FiBarChart2 className="text-xl" /> <span>Summary PDF</span>
-                </button>
-                <button
-                  onClick={() => router.push('/charts')}
-                  className="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
-                >
-                  <FiBarChart2 className="text-xl" /> <span>View Charts</span>
-                </button>
-                <button
-                  onClick={() => router.push('/deep-analysis')}
-                  className="inline-flex items-center gap-2 bg-pink-600 hover:bg-pink-700 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
-                >
-                  <FiActivity className="text-xl" /> <span>Deep Analysis</span>
-                </button>
-                <button
-                  onClick={exportTrendChartsPDF}
-                  className="inline-flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
-                >
-                  <FiTrendingUp className="text-xl" /> <span>Charts PDF</span>
-                </button>
-                <button
-                  onClick={() => setShowReportModal(true)}
-                  className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
-                >
-                  <FiLayers className="text-xl" /> <span>Detailed Reports</span>
-                </button>
-                <button
-                  onClick={exportExcel}
-                  className="inline-flex items-center gap-2 bg-sky-700 hover:bg-sky-800 text-white font-bold py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all"
-                >
-                  <FiDownload className="text-xl" /> <span>Excel (.xlsx)</span>
-                </button>
-              </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {loading ? (
+                Array.from({ length: 4 }).map((_, index) => (
+                  <div key={index} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="space-y-3">
+                        <SkeletonBlock className="h-4 w-28" />
+                        <SkeletonBlock className="h-8 w-20" />
+                        <SkeletonBlock className="h-3 w-24" />
+                      </div>
+                      <SkeletonBlock className="h-12 w-12 rounded-2xl" />
+                    </div>
+                  </div>
+                ))
+              ) : (
+                dashboardStats.map((stat) => {
+                  const Icon = stat.icon;
+                  return (
+                    <div key={stat.label} className={`rounded-2xl border p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${stat.cardClass}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-slate-600">{stat.label}</p>
+                          <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{stat.value}</p>
+                          <p className="mt-2 text-xs font-medium text-slate-500">{stat.helper}</p>
+                        </div>
+                        <div className={`rounded-2xl p-3 shadow-sm ${stat.iconClass}`}>
+                          <Icon className="text-xl" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
+
+            <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-900 shadow-sm">
+              <p className="font-medium flex items-start gap-2">
+                <FiInfo className="mt-0.5 shrink-0 text-lg" />
+                <span>
+                  Showing today's complaints by default. Change filters, then use Apply Filters to fetch matching data from Supabase.
+                  Refresh sync re-scrapes from the last successful update minus 1 day to catch delayed complaints safely.
+                </span>
+              </p>
+            </div>
+
+            {loading ? (
+              <ResultsSkeleton />
+            ) : filtered.length > 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm">
+                    <FiBarChart2 className="text-sky-600 text-lg" />
+                    <span className="font-semibold text-gray-700">Showing {((currentPage - 1) * rowsPerPage) + 1}-{Math.min(currentPage * rowsPerPage, filtered.length)} of {filtered.length} complaints</span>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={exportSummaryPDF}
+                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-indigo-800"
+                    >
+                      <FiBarChart2 className="text-lg" /> <span>Summary PDF</span>
+                    </button>
+                    <button
+                      onClick={() => router.push('/charts')}
+                      className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-slate-800"
+                    >
+                      <FiBarChart2 className="text-lg" /> <span>View Charts</span>
+                    </button>
+                    <button
+                      onClick={() => router.push('/deep-analysis')}
+                      className="inline-flex items-center gap-2 rounded-xl bg-pink-600 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-pink-700"
+                    >
+                      <FiActivity className="text-lg" /> <span>Deep Analysis</span>
+                    </button>
+                    <button
+                      onClick={exportTrendChartsPDF}
+                      className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-blue-800"
+                    >
+                      <FiTrendingUp className="text-lg" /> <span>Charts PDF</span>
+                    </button>
+                    <button
+                      onClick={() => setShowReportModal(true)}
+                      className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-emerald-800"
+                    >
+                      <FiLayers className="text-lg" /> <span>Detailed Reports</span>
+                    </button>
+                    <button
+                      onClick={exportExcel}
+                      className="inline-flex items-center gap-2 rounded-xl bg-sky-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-sky-800"
+                    >
+                      <FiDownload className="text-lg" /> <span>Excel (.xlsx)</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-yellow-200 bg-yellow-50 px-5 py-5 text-yellow-900 shadow-sm">
+                <p className="font-semibold">No complaints found for the current filters.</p>
+                <p className="mt-1 text-sm">Try another date range, a broader preset, or clear filters and fetch again.</p>
+              </div>
+            )}
           </>
         )}
 
@@ -4575,7 +4636,7 @@ export default function Home() {
           </div>
         )}
 
-        {filtered.length > 0 && (
+        {!loading && filtered.length > 0 && (
           <>
             <div className="bg-white rounded-xl shadow-md border border-gray-100">
               <div className="overflow-x-auto max-h-[70vh] relative">

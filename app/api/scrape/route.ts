@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import {
   checkNewTablesExist,
+  getLastSuccessfulScrape,
   loadFromNewDb,
   loadFromOldDb,
   scrapeWithPuppeteer,
   saveToNewDb,
   saveToOldDb,
-  getLastComplaintDate,
   getCurrentISTTime,
   getSupabaseClient
 } from '../../lib/shared-scraper';
@@ -55,25 +55,14 @@ export async function GET(request: Request) {
 
     // Vercel Logic: Strict limits to avoid timeout
     if (useNewSystem && !isCronJob && !forceFullScrape) {
-      // Normal user refresh - scrape last 2 days or 7 days if empty
-      const lastComplaintDate = await getLastComplaintDate();
+      const lastSuccessfulScrape = await getLastSuccessfulScrape();
 
-      if (lastComplaintDate) {
-        const lastDate = new Date(lastComplaintDate);
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-        // Cap lookback to 7 days max to prevent timeouts on Vercel
-        // If DB is very old (e.g. months ago), we only backfill last 7 days here.
-        // GitHub Actions handles the deep historical backfill.
-        if (lastDate < sevenDaysAgo) {
-          fromDate = sevenDaysAgo.toISOString().split('T')[0];
-        } else {
-          const safeDate = new Date(lastDate);
-          safeDate.setDate(safeDate.getDate() - 1); // Overlap 1 day as per user request ("day-1 ka")
-          fromDate = safeDate.toISOString().split('T')[0];
-        }
+      if (lastSuccessfulScrape?.last_scrape_at) {
+        const safeDate = new Date(lastSuccessfulScrape.last_scrape_at);
+        safeDate.setDate(safeDate.getDate() - 1);
+        fromDate = safeDate.toISOString().split('T')[0];
         toDate = new Date().toISOString().split('T')[0];
+        scrapeType = 'incremental_last_scrape_minus_1_day';
       } else {
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -168,6 +157,7 @@ export async function GET(request: Request) {
     console.error('Scraping error:', error);
     const errorDuration = Math.round((Date.now() - startTime) / 1000);
     const supabase = getSupabaseClient();
+    const isBrowserError = /Local browser launch failed|Could not find Chrome|Could not find expected browser|Browser was not found/i.test(error?.message || '');
 
     if (supabase) {
       const now = new Date();
@@ -185,7 +175,9 @@ export async function GET(request: Request) {
     return NextResponse.json({
       success: false,
       error: error.message,
-      suggestion: 'Try force full scrape: /api/scrape?refresh=1&full=1'
+      suggestion: isBrowserError
+        ? 'Local browser not available. Install Chrome with "npm run install:chrome" or set CHROME_PATH / PUPPETEER_EXECUTABLE_PATH.'
+        : 'Try force full scrape: /api/scrape?refresh=1&full=1'
     }, { status: 500 });
   }
 }

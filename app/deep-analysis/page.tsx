@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useMemo, useDeferredValue } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FiArrowLeft, FiRefreshCw, FiLayers } from 'react-icons/fi';
+import { FiArrowLeft, FiRefreshCw } from 'react-icons/fi';
 import FilterBar from '../components/FilterBar';
 import dynamic from 'next/dynamic';
 
@@ -29,10 +29,17 @@ const ConsumerInsights = dynamic(() => import('../components/ConsumerInsights'),
     loading: () => <LoadingSkeleton />
 });
 import Image from 'next/image';
-import { useData } from '../context/DataContext';
+import { getDefaultTodayFilters, useData } from '../context/DataContext';
 
 export default function DeepAnalysisPage() {
-    const { data: contextData, loading: contextLoading, refreshData } = useData();
+    const {
+        data: contextData,
+        loading: contextLoading,
+        refreshData,
+        applyFilters,
+        filterOptions,
+        currentFilters
+    } = useData();
     const router = useRouter();
     const original = contextData;
     const [error, setError] = useState('');
@@ -44,122 +51,36 @@ export default function DeepAnalysisPage() {
         return () => cancelAnimationFrame(timer);
     }, []);
 
-    // Removed redundant local state and effect
+    const defaultFilters = currentFilters ?? getDefaultTodayFilters();
 
-    const [search, setSearch] = useState('');
-    const [fromDT, setFromDT] = useState('');
-    const [toDT, setToDT] = useState('');
-    const [statusFilter, setStatusFilter] = useState('');
-    const [divisionFilter, setDivisionFilter] = useState('');
-    const [subDivisionFilter, setSubDivisionFilter] = useState('');
-    const [subStationFilter, setSubStationFilter] = useState('');
-    const [closedStatusFilter, setClosedStatusFilter] = useState('');
+    const [search, setSearch] = useState(defaultFilters.search);
+    const [fromDT, setFromDT] = useState(defaultFilters.fromDT);
+    const [toDT, setToDT] = useState(defaultFilters.toDT);
+    const [statusFilter, setStatusFilter] = useState(defaultFilters.status);
+    const [divisionFilter, setDivisionFilter] = useState(defaultFilters.division);
+    const [subDivisionFilter, setSubDivisionFilter] = useState(defaultFilters.subDivision);
+    const [subStationFilter, setSubStationFilter] = useState(defaultFilters.subStation);
+    const [closedStatusFilter, setClosedStatusFilter] = useState(defaultFilters.closedStatus);
     const [selectedShift, setSelectedShift] = useState<string>('');
     const [customDate, setCustomDate] = useState<string>('');
     const [activePreset, setActivePreset] = useState<string>('');
 
-    const closedStatusOptions = useMemo(() => {
-        const set = new Set<string>();
-        for (const r of original) {
-            const s = String(r['Closed Status'] ?? '').trim();
-            if (s) set.add(s);
-        }
-        return Array.from(set).sort();
-    }, [original]);
+    useEffect(() => {
+        setSearch(currentFilters.search);
+        setFromDT(currentFilters.fromDT);
+        setToDT(currentFilters.toDT);
+        setStatusFilter(currentFilters.status);
+        setDivisionFilter(currentFilters.division);
+        setSubDivisionFilter(currentFilters.subDivision);
+        setSubStationFilter(currentFilters.subStation);
+        setClosedStatusFilter(currentFilters.closedStatus);
+    }, [currentFilters]);
 
-    const statusOptions = useMemo(() => {
-        const set = new Set<string>();
-        for (const r of original) {
-            const s = String(r['Status'] ?? '').trim();
-            if (s) set.add(s);
-        }
-        return Array.from(set).sort();
-    }, [original]);
-
-    const divisionOptions = useMemo(() => {
-        const set = new Set<string>();
-        for (const r of original) {
-            const s = String(r['Division'] ?? '').trim();
-            if (s) set.add(s);
-        }
-        return Array.from(set).sort();
-    }, [original]);
-
-    const subDivisionOptions = useMemo(() => {
-        const set = new Set<string>();
-        for (const r of original) {
-            const s = String(r['Sub Division'] ?? '').trim();
-            if (s) set.add(s);
-        }
-        return Array.from(set).sort();
-    }, [original]);
-
-    const subStationOptions = useMemo(() => {
-        const set = new Set<string>();
-        for (const r of original) {
-            const s = String(r['Sub Station'] ?? '').trim();
-            if (s) set.add(s);
-        }
-        return Array.from(set).sort();
-    }, [original]);
-
-    const parsePossibleDate = (value: string) => {
-        const clean = value.trim();
-        if (!clean) return null;
-        const match = clean.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-        if (match) {
-            const day = match[1].padStart(2, '0');
-            const month = match[2].padStart(2, '0');
-            const year = match[3];
-            const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-            let hours = 0;
-            let minutes = 0;
-            if (timeMatch) {
-                hours = parseInt(timeMatch[1], 10);
-                minutes = parseInt(timeMatch[2], 10);
-                if (timeMatch[3]) {
-                    const ampm = timeMatch[3].toUpperCase();
-                    if (ampm === 'PM' && hours < 12) hours += 12;
-                    if (ampm === 'AM' && hours === 12) hours = 0;
-                }
-            }
-            return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hours, minutes);
-        }
-        return null;
-    };
-
-    const filtered = useMemo(() => {
-        let rows = original;
-        if (search.trim()) {
-            rows = rows.filter(row =>
-                Object.values(row).some(v => String(v || '').toLowerCase().includes(search.trim().toLowerCase()))
-            );
-        }
-        if (fromDT || toDT) {
-            const fromDate = fromDT ? new Date(fromDT) : null;
-            const toDate = toDT ? new Date(toDT) : null;
-            rows = rows.filter(row => {
-                const val = String(row['Complaint Date and Time'] || '');
-                const dt = parsePossibleDate(val);
-                if (!dt) return false;
-                if (fromDate && dt < fromDate) return false;
-                if (toDate && dt > toDate) return false;
-                return true;
-            });
-        }
-        if (statusFilter) rows = rows.filter(row => String(row['Status'] ?? '').trim() === statusFilter);
-        if (closedStatusFilter) rows = rows.filter(row => String(row['Closed Status'] ?? '').trim() === closedStatusFilter);
-        if (divisionFilter) rows = rows.filter(row => String(row['Division'] ?? '').trim() === divisionFilter);
-        if (subDivisionFilter) rows = rows.filter(row => String(row['Sub Division'] ?? '').trim() === subDivisionFilter);
-        if (subStationFilter) rows = rows.filter(row => String(row['Sub Station'] ?? '').trim() === subStationFilter);
-        return rows;
-    }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter]);
-
-    // output is 'filtered' which is derived from 'original' (contextData)
-    // No need for separate 'data' state
-
-
-    const deferredFiltered = useDeferredValue(filtered);
+    const closedStatusOptions = filterOptions.closedStatuses;
+    const statusOptions = filterOptions.statuses;
+    const divisionOptions = filterOptions.divisions;
+    const subDivisionOptions = filterOptions.subDivisions;
+    const subStationOptions = filterOptions.subStations;
 
     const formatDateTimeLocal = (d: Date) => {
         const pad = (n: number) => String(n).padStart(2, '0');
@@ -373,17 +294,38 @@ export default function DeepAnalysisPage() {
     };
 
     const clearAllFilters = () => {
-        setSearch('');
-        setDivisionFilter('');
-        setSubDivisionFilter('');
-        setSubStationFilter('');
-        setSubStationFilter('');
-        setStatusFilter('');
-        setClosedStatusFilter('');
-        setFromDT('');
-        setToDT('');
+        const todayFilters = getDefaultTodayFilters();
+        setSearch(todayFilters.search);
+        setDivisionFilter(todayFilters.division);
+        setSubDivisionFilter(todayFilters.subDivision);
+        setSubStationFilter(todayFilters.subStation);
+        setStatusFilter(todayFilters.status);
+        setClosedStatusFilter(todayFilters.closedStatus);
+        setFromDT(todayFilters.fromDT);
+        setToDT(todayFilters.toDT);
         setSelectedShift('');
         setActivePreset('');
+        setCustomDate('');
+    };
+
+    const applyCurrentFilters = async () => {
+        setError('');
+
+        try {
+            await applyFilters({
+                search,
+                division: divisionFilter,
+                subDivision: subDivisionFilter,
+                subStation: subStationFilter,
+                status: statusFilter,
+                closedStatus: closedStatusFilter,
+                fromDT,
+                toDT,
+                monthFilter: 'All'
+            });
+        } catch (err: any) {
+            setError(err.message || 'Failed to load deep analysis data');
+        }
     };
 
 
@@ -407,7 +349,13 @@ export default function DeepAnalysisPage() {
                             <FiArrowLeft /> Back to Charts
                         </button>
                         <button
-                            onClick={refreshData}
+                            onClick={async () => {
+                                setError('');
+                                const result = await refreshData();
+                                if (!result.success) {
+                                    setError(result.error || 'Refresh failed');
+                                }
+                            }}
                             disabled={contextLoading}
                             className="inline-flex items-center gap-2 bg-sky-700 hover:bg-sky-800 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-sm"
                         >
@@ -416,7 +364,7 @@ export default function DeepAnalysisPage() {
                     </div>
                 </header>
 
-                {contextLoading && (
+                {false && (
                     <div className="flex items-center justify-center py-20">
                         <div className="text-center">
                             <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
@@ -431,7 +379,7 @@ export default function DeepAnalysisPage() {
                     </div>
                 )}
 
-                {!contextLoading && !error && original.length > 0 && (
+                {!error && (
                     <div className="mb-6">
                         <FilterBar
                             search={search}
@@ -464,6 +412,8 @@ export default function DeepAnalysisPage() {
                             setCustomDate={setCustomDate}
                             applyCustomDateShift={applyCustomDateShift}
                             clearAllFilters={clearAllFilters}
+                            onApply={applyCurrentFilters}
+                            loading={contextLoading}
                         />
                     </div>
                 )}
@@ -471,6 +421,17 @@ export default function DeepAnalysisPage() {
                 {!contextLoading && !error && original.length === 0 && (
                     <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 px-4 py-3 rounded">
                         <p className="font-semibold">⚠️ No data available</p>
+                    </div>
+                )}
+
+                {contextLoading && !error && (
+                    <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+                        <div className="flex items-center justify-center py-16">
+                            <div className="text-center">
+                                <div className="mx-auto mb-4 h-14 w-14 animate-spin rounded-full border-b-4 border-blue-600"></div>
+                                <p className="font-semibold text-gray-700">Loading deep analysis...</p>
+                            </div>
+                        </div>
                     </div>
                 )}
 
@@ -486,14 +447,14 @@ export default function DeepAnalysisPage() {
 
                         <div className="mb-8">
                             {isReady ? (
-                                <ConsumerInsights data={deferredFiltered} />
+                                <ConsumerInsights data={original} />
                             ) : (
                                 <div className="h-96 bg-gray-100 rounded-2xl animate-pulse"></div>
                             )}
                         </div>
 
                         {isReady ? (
-                            <DeepAnalysisCharts data={deferredFiltered} />
+                            <DeepAnalysisCharts data={original} />
                         ) : (
                             <div className="h-96 bg-gray-100 rounded-2xl animate-pulse"></div>
                         )}

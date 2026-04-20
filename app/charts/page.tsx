@@ -1,34 +1,52 @@
 'use client';
 
-import { useEffect, useState, useMemo, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import TrendCharts from '../components/TrendCharts';
 import { FiArrowLeft, FiRefreshCw } from 'react-icons/fi';
 import FilterBar from '../components/FilterBar';
 import Image from 'next/image';
-import Select from 'react-select';
-import { useData } from '../context/DataContext';
+import { getDefaultTodayFilters, useData } from '../context/DataContext';
 
 export default function ChartsPage() {
-  const { data: contextData, loading: contextLoading, refreshData } = useData();
+  const {
+    data: contextData,
+    loading: contextLoading,
+    refreshData,
+    applyFilters,
+    filterOptions,
+    currentFilters
+  } = useData();
   const router = useRouter();
   const original = contextData;
   const [error, setError] = useState('');
 
-  // Removed redundant local state and effect
+  const defaultFilters = currentFilters ?? getDefaultTodayFilters();
 
-  const [search, setSearch] = useState('');
-  const [fromDT, setFromDT] = useState('');
-  const [toDT, setToDT] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [divisionFilter, setDivisionFilter] = useState('');
-  const [subDivisionFilter, setSubDivisionFilter] = useState('');
-  const [subStationFilter, setSubStationFilter] = useState('');
-  const [closedStatusFilter, setClosedStatusFilter] = useState('');
+  const [search, setSearch] = useState(defaultFilters.search);
+  const [fromDT, setFromDT] = useState(defaultFilters.fromDT);
+  const [toDT, setToDT] = useState(defaultFilters.toDT);
+  const [statusFilter, setStatusFilter] = useState(defaultFilters.status);
+  const [divisionFilter, setDivisionFilter] = useState(defaultFilters.division);
+  const [subDivisionFilter, setSubDivisionFilter] = useState(defaultFilters.subDivision);
+  const [subStationFilter, setSubStationFilter] = useState(defaultFilters.subStation);
+  const [closedStatusFilter, setClosedStatusFilter] = useState(defaultFilters.closedStatus);
   const [selectedShift, setSelectedShift] = useState<string>('');
   const [customDate, setCustomDate] = useState<string>('');
   const [activePreset, setActivePreset] = useState<string>('');
-  const [monthFilter, setMonthFilter] = useState<string>('All');
+  const [monthFilter, setMonthFilter] = useState<string>(defaultFilters.monthFilter);
+
+  useEffect(() => {
+    setSearch(currentFilters.search);
+    setFromDT(currentFilters.fromDT);
+    setToDT(currentFilters.toDT);
+    setStatusFilter(currentFilters.status);
+    setDivisionFilter(currentFilters.division);
+    setSubDivisionFilter(currentFilters.subDivision);
+    setSubStationFilter(currentFilters.subStation);
+    setClosedStatusFilter(currentFilters.closedStatus);
+    setMonthFilter(currentFilters.monthFilter);
+  }, [currentFilters]);
 
   const isClosedRow = (row: any) => {
     const statusRaw = String(row['Status'] ?? '').trim();
@@ -45,114 +63,12 @@ export default function ChartsPage() {
     return false;
   };
 
-  const parsePossibleDate = (value: string) => {
-    const clean = value.trim();
-    if (!clean) return null;
-    const match = clean.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-    if (match) {
-      const day = match[1].padStart(2, '0');
-      const month = match[2].padStart(2, '0');
-      const year = match[3];
-      // Note: handling time if present
-      const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-      let hours = 0;
-      let minutes = 0;
-      if (timeMatch) {
-        hours = parseInt(timeMatch[1], 10);
-        minutes = parseInt(timeMatch[2], 10);
-        if (timeMatch[3]) {
-          const ampm = timeMatch[3].toUpperCase();
-          if (ampm === 'PM' && hours < 12) hours += 12;
-          if (ampm === 'AM' && hours === 12) hours = 0;
-        }
-      }
-      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hours, minutes);
-    }
-    return null;
-  };
-
-  const closedStatusOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of original) {
-      // Use the helper logic or raw column if available. 
-      // The main page uses raw 'Closed Status' column if it exists in data, or derives it.
-      // Based on main page, it uses the 'Closed Status' column directly.
-      const s = String(r['Closed Status'] ?? '').trim();
-      if (s) set.add(s);
-    }
-    return Array.from(set).sort();
-  }, [original]);
-
-  const statusOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of original) {
-      const s = String(r['Status'] ?? '').trim();
-      if (s) set.add(s);
-    }
-    return Array.from(set).sort();
-  }, [original]);
-
-  const divisionOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of original) {
-      const s = String(r['Division'] ?? '').trim();
-      if (s) set.add(s);
-    }
-    return Array.from(set).sort();
-  }, [original]);
-
-  const subDivisionOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of original) {
-      const s = String(r['Sub Division'] ?? '').trim();
-      if (s) set.add(s);
-    }
-    return Array.from(set).sort();
-  }, [original]);
-
-  const subStationOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of original) {
-      const s = String(r['Sub Station'] ?? '').trim();
-      if (s) set.add(s);
-    }
-    return Array.from(set).sort();
-  }, [original]);
-
-  const findParentsForSubStation = (subStation: string) => {
-    const record = original.find(r => String(r['Sub Station'] ?? '').trim() === subStation);
-    if (record) {
-      return {
-        division: String(record['Division'] ?? '').trim(),
-        subDivision: String(record['Sub Division'] ?? '').trim()
-      };
-    }
-    return null;
-  };
-
-  const findParentForSubDivision = (subDivision: string) => {
-    const record = original.find(r => String(r['Sub Division'] ?? '').trim() === subDivision);
-    if (record) {
-      return String(record['Division'] ?? '').trim();
-    }
-    return '';
-  };
-
-
-
-  const monthOptions = useMemo(() => {
-    const months = new Set<string>();
-    original.forEach(r => {
-      const val = String(r['Complaint Date and Time'] || r['Complaint Date'] || '');
-      const d = parsePossibleDate(val);
-      if (d) {
-        const key = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-        months.add(key);
-      }
-    });
-    const options = Array.from(months).map(m => ({ value: m, label: m }));
-    return [{ value: 'All', label: 'All Months' }, ...options];
-  }, [original]);
+  const closedStatusOptions = filterOptions.closedStatuses;
+  const statusOptions = filterOptions.statuses;
+  const divisionOptions = filterOptions.divisions;
+  const subDivisionOptions = filterOptions.subDivisions;
+  const subStationOptions = filterOptions.subStations;
+  const monthOptions = filterOptions.months;
 
   const [isPending, startTransition] = useTransition();
 
@@ -169,47 +85,7 @@ export default function ChartsPage() {
     });
   };
 
-  const filtered = useMemo(() => {
-    let rows = original;
-    if (search.trim()) {
-      rows = rows.filter(row =>
-        Object.values(row).some(v => String(v || '').toLowerCase().includes(search.trim().toLowerCase()))
-      );
-    }
-
-    // Month Filter Logic
-    if (monthFilter && monthFilter !== 'All') {
-      rows = rows.filter(row => {
-        const val = String(row['Complaint Date and Time'] || row['Complaint Date'] || '');
-        const dt = parsePossibleDate(val);
-        if (!dt) return false;
-        return dt.toLocaleString('en-US', { month: 'long', year: 'numeric' }) === monthFilter;
-      });
-    }
-
-    if (fromDT || toDT) {
-      const fromDate = fromDT ? new Date(fromDT) : null;
-      const toDate = toDT ? new Date(toDT) : null;
-      rows = rows.filter(row => {
-        const val = String(row['Complaint Date and Time'] || '');
-        const dt = parsePossibleDate(val);
-        if (!dt) return false;
-        if (fromDate && dt < fromDate) return false;
-        if (toDate && dt > toDate) return false;
-        return true;
-      });
-    }
-    if (statusFilter) rows = rows.filter(row => String(row['Status'] ?? '').trim() === statusFilter);
-    if (closedStatusFilter) rows = rows.filter(row => String(row['Closed Status'] ?? '').trim() === closedStatusFilter);
-    if (divisionFilter) rows = rows.filter(row => String(row['Division'] ?? '').trim() === divisionFilter);
-    if (subDivisionFilter) rows = rows.filter(row => String(row['Sub Division'] ?? '').trim() === subDivisionFilter);
-    if (subStationFilter) rows = rows.filter(row => String(row['Sub Station'] ?? '').trim() === subStationFilter);
-    return rows;
-  }, [original, search, fromDT, toDT, statusFilter, closedStatusFilter, divisionFilter, subDivisionFilter, subStationFilter, monthFilter]);
-
-  const data = filtered;
-
-  // No need for separate 'data' state
+  const data = original;
 
 
   const formatDateTimeLocal = (d: Date) => {
@@ -424,24 +300,40 @@ export default function ChartsPage() {
   };
 
   const clearAllFilters = () => {
-    setSearch('');
-    setDivisionFilter('');
-    setSubDivisionFilter('');
-    setSubStationFilter('');
-    setSubStationFilter('');
-    setStatusFilter('');
-    setClosedStatusFilter('');
-    setFromDT('');
-    setToDT('');
+    const todayFilters = getDefaultTodayFilters();
+    setSearch(todayFilters.search);
+    setDivisionFilter(todayFilters.division);
+    setSubDivisionFilter(todayFilters.subDivision);
+    setSubStationFilter(todayFilters.subStation);
+    setStatusFilter(todayFilters.status);
+    setClosedStatusFilter(todayFilters.closedStatus);
+    setFromDT(todayFilters.fromDT);
+    setToDT(todayFilters.toDT);
+    setMonthFilter(todayFilters.monthFilter);
     setSelectedShift('');
     setActivePreset('');
+    setCustomDate('');
   };
 
-  const ShiftBadge = ({ letter }: { letter: string }) => (
-    <span className="inline-flex items-center justify-center w-5 h-5 bg-emerald-600 text-white text-xs font-bold rounded-md mr-2 shadow-sm border border-emerald-500/50">
-      {letter}
-    </span>
-  );
+  const applyCurrentFilters = async () => {
+    setError('');
+
+    try {
+      await applyFilters({
+        search,
+        division: divisionFilter,
+        subDivision: subDivisionFilter,
+        subStation: subStationFilter,
+        status: statusFilter,
+        closedStatus: closedStatusFilter,
+        fromDT,
+        toDT,
+        monthFilter
+      });
+    } catch (err: any) {
+      setError(err.message || 'Failed to load chart data');
+    }
+  };
 
 
 
@@ -470,7 +362,13 @@ export default function ChartsPage() {
               <span className="text-lg">🔍</span> Deep Analysis
             </button>
             <button
-              onClick={refreshData}
+              onClick={async () => {
+                setError('');
+                const result = await refreshData();
+                if (!result.success) {
+                  setError(result.error || 'Refresh failed');
+                }
+              }}
               disabled={contextLoading}
               className="inline-flex items-center gap-2 bg-sky-700 hover:bg-sky-800 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-sm"
             >
@@ -479,7 +377,7 @@ export default function ChartsPage() {
           </div>
         </header>
 
-        {contextLoading && (
+        {false && (
           <div className="flex items-center justify-center py-20">
             <div className="text-center">
               <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
@@ -494,7 +392,7 @@ export default function ChartsPage() {
           </div>
         )}
 
-        {!contextLoading && !error && original.length > 0 && (
+        {!error && (
           <>
             <div className="mb-6">
               <FilterBar
@@ -528,7 +426,7 @@ export default function ChartsPage() {
                 setCustomDate={setCustomDate}
                 applyCustomDateShift={applyCustomDateShift}
                 clearAllFilters={clearAllFilters}
-                onRefresh={refreshData}
+                onApply={applyCurrentFilters}
                 loading={contextLoading || isPending}
                 dailyCounts={{}}
                 monthFilter={monthFilter}
@@ -536,11 +434,26 @@ export default function ChartsPage() {
                 monthOptions={monthOptions}
               />
             </div>
-            <TrendCharts data={data} isClosedRow={isClosedRow} />
+            {contextLoading ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+                <div className="flex items-center justify-center py-16">
+                  <div className="text-center">
+                    <div className="mx-auto mb-4 h-14 w-14 animate-spin rounded-full border-b-4 border-blue-600"></div>
+                    <p className="font-semibold text-gray-700">Loading chart data...</p>
+                  </div>
+                </div>
+              </div>
+            ) : original.length > 0 ? (
+              <TrendCharts data={data} isClosedRow={isClosedRow} />
+            ) : (
+              <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 px-4 py-3 rounded">
+                <p className="font-semibold">No complaints found for the current filters.</p>
+              </div>
+            )}
           </>
         )}
 
-        {!contextLoading && !error && data.length === 0 && (
+        {false && (
           <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 px-4 py-3 rounded">
             <p className="font-semibold">⚠️ No data available to display charts</p>
           </div>

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { existsSync } from 'fs';
 
 // --- Types ---
 export interface ScrapeResult {
@@ -289,17 +290,47 @@ export async function logScrapeError(error: any, duration: number) {
 
 export const getSupabaseClient = () => supabase;
 
+function resolveExistingBrowserPath(candidates: Array<string | undefined>) {
+    for (const candidate of candidates) {
+        if (candidate && existsSync(candidate)) {
+            return candidate;
+        }
+    }
+    return null;
+}
+
+function getLocalBrowserCandidates() {
+    return [
+        process.env.PUPPETEER_EXECUTABLE_PATH,
+        process.env.CHROME_PATH,
+        process.env.BROWSER_PATH,
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        `${process.env.LOCALAPPDATA || ''}\\Google\\Chrome\\Application\\chrome.exe`,
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        `${process.env.LOCALAPPDATA || ''}\\Microsoft\\Edge\\Application\\msedge.exe`,
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/snap/bin/chromium'
+    ].filter(Boolean);
+}
+
 // --- Puppeteer Scraper ---
 
 export async function scrapeWithPuppeteer(username: string, password: string, fromDate?: string, toDate?: string) {
-    // Check if running on Vercel
-    // Check if running on Vercel (robust check)
-    const isVercel = !!process.env.VERCEL_URL || !!process.env.VERCEL || process.env.NODE_ENV === 'production';
+    const isVercel = !!process.env.VERCEL_URL || !!process.env.VERCEL;
+    const isHeadfulDebug = process.env.SCRAPER_HEADFUL === '1';
+    const slowMo = process.env.SCRAPER_DEBUG === '1' ? 50 : 0;
 
     let puppeteer: any;
     let launchOptions: any = {
-        headless: isVercel ? true : false,
-        slowMo: isVercel ? 0 : 50
+        headless: isHeadfulDebug ? false : true,
+        slowMo
     };
 
     console.log('[SCRAPER] Starting scraper...', { isVercel, fromDate, toDate });
@@ -333,6 +364,23 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
         // Local / GitHub Actions Environment
         // We expect 'puppeteer' to be installed
         puppeteer = await import('puppeteer');
+        let executablePath = resolveExistingBrowserPath(getLocalBrowserCandidates());
+
+        if (!executablePath && typeof puppeteer.executablePath === 'function') {
+            try {
+                const bundledPath = puppeteer.executablePath();
+                if (bundledPath && existsSync(bundledPath)) {
+                    executablePath = bundledPath;
+                }
+            } catch {
+                // Ignore missing bundled browser and fall back to system Chrome/Edge.
+            }
+        }
+
+        launchOptions = {
+            ...launchOptions,
+            executablePath: executablePath || undefined
+        };
 
         // For GitHub Actions (CI), we might need specific args if it fails, 
         // but usually default puppeteer works well if installed correctly.
@@ -345,8 +393,24 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
             }
         }
     }
+    let browser: any;
 
-    const browser = await puppeteer.launch(launchOptions);
+    try {
+        browser = await puppeteer.launch(launchOptions);
+    } catch (error: any) {
+        const missingBrowser = /Could not find Chrome|Could not find expected browser|Browser was not found/i.test(error?.message || '');
+
+        if (!isVercel && missingBrowser) {
+            const detectedBrowser = resolveExistingBrowserPath(getLocalBrowserCandidates());
+            const suggestion = detectedBrowser
+                ? `Detected browser at "${detectedBrowser}". Set CHROME_PATH or PUPPETEER_EXECUTABLE_PATH to that path if launch still fails.`
+                : 'Install Chrome with "npm run install:chrome" or set CHROME_PATH / PUPPETEER_EXECUTABLE_PATH to your Chrome or Edge executable.';
+
+            throw new Error(`Local browser launch failed. ${suggestion}`);
+        }
+
+        throw error;
+    }
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
 
