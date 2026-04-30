@@ -234,13 +234,21 @@ export default function Home() {
     return parts.join(' ');
   };
 
-  const computeResolutionTime = (row: any) => {
+  const computeResolutionTimeMinutes = (row: any) => {
     const openStr = String(row['Complaint Date and Time'] || row['Complaint Date'] || '');
     const closeStr = String(row['Closed Date'] || '');
     const open = parsePossibleDate(openStr);
     const close = parsePossibleDate(closeStr);
-    if (!open || !close) return '';
-    return formatDuration(close.getTime() - open.getTime());
+    if (!open || !close) return null;
+    const diffMs = close.getTime() - open.getTime();
+    if (!Number.isFinite(diffMs) || diffMs <= 0) return null;
+    return Math.floor(diffMs / 60000);
+  };
+
+  const computeResolutionTime = (row: any) => {
+    const minutes = computeResolutionTimeMinutes(row);
+    if (minutes === null) return '';
+    return formatDuration(minutes * 60000);
   };
 
   const handleSort = (column: string) => {
@@ -3093,6 +3101,7 @@ export default function Home() {
       { text: '✅ Within/Beyond Status - Sub Division-wise', sheet: '16. Closed Status Sub Div' },
       { text: '✅ Within/Beyond Status - Sub Station-wise', sheet: '17. Closed Status Sub Stn' },
       { text: '🗺️ Area Type - Within/Beyond Analysis', sheet: '18. Area Type Breakdown' },
+      { text: '⏱️ Average Resolution Time (Minutes) by Area Type', sheet: '19. Avg Res Time Area Type' },
     ];
     navLinks.forEach(link => {
       const row = wsCover.addRow([link.text]);
@@ -3113,7 +3122,8 @@ export default function Home() {
     const headers = (() => {
       const arr = [...baseHeaders];
       const idx = arr.indexOf('Closed Date');
-      if (idx >= 0) arr.splice(idx + 1, 0, 'Resolution Time'); else arr.push('Resolution Time');
+      if (idx >= 0) arr.splice(idx + 1, 0, 'Resolution Time', 'Resolution Time (Minutes)');
+      else arr.push('Resolution Time', 'Resolution Time (Minutes)');
       return arr;
     })();
 
@@ -3126,6 +3136,7 @@ export default function Home() {
     for (const r of rows) {
       const rowVals = headers.map(h => {
         if (h === 'Resolution Time') return computeResolutionTime(r);
+        if (h === 'Resolution Time (Minutes)') return computeResolutionTimeMinutes(r);
         if (h === 'Complaint Date and Time') return formatDateTime(String((r as any)[h] ?? ''));
         if (h === 'Closed Date') return formatDateTime(String((r as any)[h] ?? ''));
         return String((r as any)[h] ?? '');
@@ -3198,12 +3209,18 @@ export default function Home() {
       'Closed Date': 18,
       'Closing Remarks': 40,
       'Resolution Time': 14,
+      'Resolution Time (Minutes)': 22,
     };
     headers.forEach((h, i) => {
-      wsData.getColumn(i + 1).width = widthMap[h] || 18;
+      const column = wsData.getColumn(i + 1);
+      column.width = widthMap[h] || 18;
       // wrap remarks
       if (h === 'Closing Remarks') {
-        wsData.getColumn(i + 1).alignment = { wrapText: true, vertical: 'top' };
+        column.alignment = { wrapText: true, vertical: 'top' };
+      }
+      if (h === 'Resolution Time (Minutes)') {
+        column.numFmt = '0';
+        column.alignment = { vertical: 'middle', horizontal: 'center' };
       }
     });
     // borders + alt rows
@@ -4016,7 +4033,7 @@ export default function Home() {
       cell.font = { bold: true, color: { argb: theme.titleColor } };
     });
 
-    // Sheet 17: Area Type Breakdown
+    // Sheet 18: Area Type Breakdown
     const wsAreaType = wb.addWorksheet('18. Area Type Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
     addTitle(wsAreaType, 'Area Type - Within/Beyond Analysis', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
     const atMap = new Map<string, { within: number; beyond: number }>();
@@ -4062,6 +4079,101 @@ export default function Home() {
     atGt.eachCell((cell: any) => {
       cell.font = { bold: true, color: { argb: theme.titleColor } };
     });
+
+    // Sheet 19: Average Resolution Time by Area Type
+    const wsAreaTypeAvg = wb.addWorksheet('19. Avg Res Time Area Type', { views: [{ state: 'frozen', xSplit: 0, ySplit: 4 }] });
+    const areaTypeResolutionRows: Array<{ monthKey: string; monthLabel: string; areaType: string; minutes: number }> = [];
+    const areaTypesSet = new Set<string>();
+    for (const r of rows) {
+      const minutes = computeResolutionTimeMinutes(r);
+      const open = parsePossibleDate(String(r['Complaint Date and Time'] || r['Complaint Date'] || ''));
+      if (minutes === null || !open) continue;
+      const areaType = String(r['Area Type'] ?? '').trim() || 'Unknown';
+      const monthKey = `${open.getFullYear()}-${String(open.getMonth() + 1).padStart(2, '0')}`;
+      const monthLabel = `${open.toLocaleString('en-US', { month: 'short' })}-${open.getFullYear()}`;
+      areaTypeResolutionRows.push({ monthKey, monthLabel, areaType, minutes });
+      areaTypesSet.add(areaType);
+    }
+
+    addTitle(
+      wsAreaTypeAvg,
+      'Average Resolution Time (Minutes) by Area Type',
+      `Closed complaints with valid resolution time: ${areaTypeResolutionRows.length}   |   ${periodSubtitle}`
+    );
+
+    const areaTypes = Array.from(areaTypesSet).sort((a, b) => {
+      if (a === 'Unknown' && b !== 'Unknown') return 1;
+      if (b === 'Unknown' && a !== 'Unknown') return -1;
+      return a.localeCompare(b);
+    });
+
+    if (areaTypes.length === 0) {
+      wsAreaTypeAvg.getCell('A3').value = 'No complaints with valid resolution time were found for the selected filters.';
+      wsAreaTypeAvg.getCell('A3').font = { italic: true, color: { argb: theme.metaColor } };
+      wsAreaTypeAvg.getColumn(1).width = 80;
+    } else {
+      const monthAreaStats = new Map<string, { label: string; areaStats: Map<string, { total: number; count: number }> }>();
+      for (const entry of areaTypeResolutionRows) {
+        const monthEntry = monthAreaStats.get(entry.monthKey) || { label: entry.monthLabel, areaStats: new Map<string, { total: number; count: number }>() };
+        const stats = monthEntry.areaStats.get(entry.areaType) || { total: 0, count: 0 };
+        stats.total += entry.minutes;
+        stats.count += 1;
+        monthEntry.areaStats.set(entry.areaType, stats);
+        monthAreaStats.set(entry.monthKey, monthEntry);
+      }
+
+      wsAreaTypeAvg.getCell(3, 1).value = 'Month';
+      wsAreaTypeAvg.getCell(3, 2).value = 'AREA TYPE';
+      wsAreaTypeAvg.mergeCells(3, 1, 4, 1);
+      if (areaTypes.length > 1) {
+        wsAreaTypeAvg.mergeCells(3, 2, 3, areaTypes.length + 1);
+      }
+      areaTypes.forEach((areaType, index) => {
+        wsAreaTypeAvg.getCell(4, index + 2).value = `${areaType} (Min)`;
+      });
+
+      const avgHeaderLastCol = areaTypes.length + 1;
+      for (let rowNum = 3; rowNum <= 4; rowNum++) {
+        for (let colNum = 1; colNum <= avgHeaderLastCol; colNum++) {
+          const cell = wsAreaTypeAvg.getCell(rowNum, colNum);
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9EAD3' } };
+          cell.font = { bold: true, color: { argb: theme.titleColor }, size: rowNum === 3 ? 13 : 11 };
+          cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
+          cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        }
+      }
+      wsAreaTypeAvg.getRow(3).height = 24;
+      wsAreaTypeAvg.getRow(4).height = 22;
+
+      const monthRows = Array.from(monthAreaStats.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+      monthRows.forEach(([, monthEntry]) => {
+        const rowValues: Array<string | number | null> = [monthEntry.label];
+        areaTypes.forEach(areaType => {
+          const stats = monthEntry.areaStats.get(areaType);
+          rowValues.push(stats ? Number((stats.total / stats.count).toFixed(2)) : null);
+        });
+        wsAreaTypeAvg.addRow(rowValues);
+      });
+
+      wsAreaTypeAvg.getColumn(1).width = 18;
+      areaTypes.forEach((_, index) => {
+        const column = wsAreaTypeAvg.getColumn(index + 2);
+        column.width = 16;
+        column.numFmt = '0.00';
+      });
+
+      const avgBodyStart = 5;
+      const avgBodyEnd = wsAreaTypeAvg.lastRow.number;
+      for (let r = 3; r <= avgBodyEnd; r++) {
+        wsAreaTypeAvg.getRow(r).eachCell((cell: any) => {
+          cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
+          if (r >= avgBodyStart) {
+            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+          }
+        });
+      }
+      setAlternatingRows(wsAreaTypeAvg, avgBodyStart, avgBodyEnd);
+    }
 
     // File name
     const now = new Date();
