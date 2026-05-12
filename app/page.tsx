@@ -71,6 +71,7 @@ export default function Home() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [selectedShift, setSelectedShift] = useState<string>(''); // e.g. "Today - Morning (07:00–15:00)"
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showExcelMenu, setShowExcelMenu] = useState(false);
   const [customDate, setCustomDate] = useState<string>('');
   const [activePreset, setActivePreset] = useState<string>(''); // Track active preset
   const [monthFilter, setMonthFilter] = useState<string>(defaultFilters.monthFilter);
@@ -4192,6 +4193,121 @@ export default function Home() {
     saveAs(blob, fileName);
   };
 
+  const exportReviewExcel = async () => {
+    const getReviewDateTime = (row: Record<string, unknown>) => {
+      const dateStr = String(row['Complaint Date and Time'] || row['Complaint Date'] || '');
+      const parsed = parsePossibleDate(dateStr);
+      if (parsed) return parsed.getTime();
+
+      const fallback = new Date(dateStr);
+      const time = fallback.getTime();
+      return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time;
+    };
+    const rows = [...filtered].sort((a, b) => getReviewDateTime(a) - getReviewDateTime(b));
+    if (rows.length === 0) return;
+
+    if (rows.length > 5000) {
+      const confirmExport = window.confirm(`You are exporting ${rows.length} rows. This may take some time. Continue?`);
+      if (!confirmExport) return;
+    }
+
+    const formatReviewDate = (dateStr: string) => {
+      if (!dateStr) return '';
+
+      const parsed = parsePossibleDate(dateStr);
+      if (parsed) {
+        const day = String(parsed.getDate()).padStart(2, '0');
+        const month = String(parsed.getMonth() + 1).padStart(2, '0');
+        return `${day}/${month}/${parsed.getFullYear()}`;
+      }
+
+      const isoMatch = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+
+      const dateMatch = dateStr.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+      if (dateMatch) {
+        return `${dateMatch[1].padStart(2, '0')}/${dateMatch[2].padStart(2, '0')}/${dateMatch[3]}`;
+      }
+
+      return dateStr;
+    };
+
+    const { ExcelJS, saveAs } = await loadExcelJS();
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'FRT Report Dashboard';
+    wb.created = new Date();
+    wb.modified = new Date();
+    wb.properties = {
+      title: 'Excel For Review',
+      subject: 'Review export',
+      category: 'Report',
+      description: 'Filtered complaint data prepared for review',
+      lastModifiedBy: 'FRT Report Dashboard',
+    };
+
+    const ws = wb.addWorksheet('Excel For Review', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1 }] });
+    type ExcelCell = { fill?: unknown; font?: unknown; alignment?: unknown; border?: unknown };
+    const headers = ['Date', 'Division', 'Substation', 'Complaint No', 'Consumer Name', 'Consumer Mobile'];
+    const headerRow = ws.addRow(headers);
+    headerRow.height = 26;
+    headerRow.eachCell((cell: ExcelCell) => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4DDCE' } };
+      cell.font = { bold: true, size: 13, color: { argb: 'FF000000' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FF000000' } },
+        left: { style: 'thin', color: { argb: 'FF000000' } },
+        bottom: { style: 'thin', color: { argb: 'FF000000' } },
+        right: { style: 'thin', color: { argb: 'FF000000' } },
+      };
+    });
+
+    rows.forEach((row) => {
+      ws.addRow([
+        formatReviewDate(String(row['Complaint Date and Time'] || row['Complaint Date'] || '')),
+        String(row['Division'] ?? ''),
+        String(row['Sub Station'] ?? row['Substation'] ?? ''),
+        String(row['Complaint Number'] ?? row['Complaint No'] ?? ''),
+        String(row['Consumer Name'] ?? ''),
+        String(row['Consumer Mobile'] ?? ''),
+      ]);
+    });
+
+    [14, 22, 24, 22, 30, 18].forEach((width, index) => {
+      ws.getColumn(index + 1).width = width;
+    });
+    ws.getColumn(4).numFmt = '@';
+    ws.getColumn(6).numFmt = '@';
+    ws.autoFilter = { from: 'A1', to: 'F1' };
+
+    for (let r = 2; r <= ws.lastRow.number; r++) {
+      ws.getRow(r).eachCell((cell: ExcelCell) => {
+        cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        };
+      });
+    }
+
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mi = String(now.getMinutes()).padStart(2, '0');
+    const safeShift = selectedShift ? selectedShift.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') : '';
+    const fileName = `excel-for-review-${yyyy}${mm}${dd}-${hh}${mi}${safeShift ? '-' + safeShift : ''}.xlsx`;
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    saveAs(blob, fileName);
+  };
+
   const exportRepeatedCompliantsByMobile = async () => {
     const rows = filtered;
     if (rows.length === 0) return;
@@ -4724,12 +4840,40 @@ export default function Home() {
                     >
                       <FiLayers className="text-lg" /> <span>Detailed Reports</span>
                     </button>
-                    <button
-                      onClick={exportExcel}
-                      className="inline-flex items-center gap-2 rounded-xl bg-sky-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-sky-800"
-                    >
-                      <FiDownload className="text-lg" /> <span>Excel (.xlsx)</span>
-                    </button>
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowExcelMenu((value) => !value)}
+                        className="inline-flex items-center gap-2 rounded-xl bg-sky-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-sky-800"
+                        aria-haspopup="menu"
+                        aria-expanded={showExcelMenu}
+                      >
+                        <FiDownload className="text-lg" /> <span>Excel (.xlsx)</span>
+                      </button>
+                      {showExcelMenu && (
+                        <div className="absolute left-0 z-30 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg sm:left-auto sm:right-0" role="menu">
+                          <button
+                            onClick={() => {
+                              setShowExcelMenu(false);
+                              exportExcel();
+                            }}
+                            className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:bg-sky-50 hover:text-sky-800"
+                            role="menuitem"
+                          >
+                            <FiDownload className="text-base" /> <span>Current Excel</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setShowExcelMenu(false);
+                              exportReviewExcel();
+                            }}
+                            className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:bg-emerald-50 hover:text-emerald-800"
+                            role="menuitem"
+                          >
+                            <FiFileText className="text-base" /> <span>Excel For Review</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
