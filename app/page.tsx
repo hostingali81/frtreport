@@ -4236,6 +4236,11 @@ export default function Home() {
       return dateStr;
     };
 
+    const getReviewMobileNumber = (value: unknown) => {
+      const digits = String(value ?? '').replace(/\D/g, '');
+      return digits ? Number(digits) : '';
+    };
+
     const { ExcelJS, saveAs } = await loadExcelJS();
     const wb = new ExcelJS.Workbook();
     wb.creator = 'FRT Report Dashboard';
@@ -4273,7 +4278,7 @@ export default function Home() {
         String(row['Sub Station'] ?? row['Substation'] ?? ''),
         String(row['Complaint Number'] ?? row['Complaint No'] ?? ''),
         String(row['Consumer Name'] ?? ''),
-        String(row['Consumer Mobile'] ?? ''),
+        getReviewMobileNumber(row['Consumer Mobile']),
       ]);
     });
 
@@ -4281,7 +4286,7 @@ export default function Home() {
       ws.getColumn(index + 1).width = width;
     });
     ws.getColumn(4).numFmt = '@';
-    ws.getColumn(6).numFmt = '@';
+    ws.getColumn(6).numFmt = '0';
 
     for (let r = 2; r <= ws.lastRow.number; r++) {
       ws.getRow(r).eachCell((cell: ExcelCell) => {
