@@ -4211,14 +4211,18 @@ export default function Home() {
       if (!confirmExport) return;
     }
 
-    const formatReviewDate = (dateStr: string) => {
+    const formatReviewDateTime = (dateStr: string) => {
       if (!dateStr) return '';
 
       const parsed = parsePossibleDate(dateStr);
       if (parsed) {
         const day = String(parsed.getDate()).padStart(2, '0');
         const month = String(parsed.getMonth() + 1).padStart(2, '0');
-        return `${day}/${month}/${parsed.getFullYear()}`;
+        const hours24 = parsed.getHours();
+        const minutes = String(parsed.getMinutes()).padStart(2, '0');
+        const period = hours24 >= 12 ? 'PM' : 'AM';
+        const hours12 = hours24 % 12 || 12;
+        return `${day}/${month}/${parsed.getFullYear()} ${hours12}:${minutes} ${period}`;
       }
 
       const isoMatch = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
@@ -4264,7 +4268,7 @@ export default function Home() {
 
     rows.forEach((row) => {
       ws.addRow([
-        formatReviewDate(String(row['Complaint Date and Time'] || row['Complaint Date'] || '')),
+        formatReviewDateTime(String(row['Complaint Date and Time'] || row['Complaint Date'] || '')),
         String(row['Division'] ?? ''),
         String(row['Sub Station'] ?? row['Substation'] ?? ''),
         String(row['Complaint Number'] ?? row['Complaint No'] ?? ''),
@@ -4273,7 +4277,7 @@ export default function Home() {
       ]);
     });
 
-    [14, 22, 24, 22, 30, 18].forEach((width, index) => {
+    [22, 22, 24, 22, 30, 18].forEach((width, index) => {
       ws.getColumn(index + 1).width = width;
     });
     ws.getColumn(4).numFmt = '@';
