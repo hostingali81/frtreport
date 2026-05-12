@@ -4282,7 +4282,6 @@ export default function Home() {
     });
     ws.getColumn(4).numFmt = '@';
     ws.getColumn(6).numFmt = '@';
-    ws.autoFilter = { from: 'A1', to: 'F1' };
 
     for (let r = 2; r <= ws.lastRow.number; r++) {
       ws.getRow(r).eachCell((cell: ExcelCell) => {
