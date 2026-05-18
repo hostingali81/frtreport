@@ -59,7 +59,7 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
             }
         });
         return Array.from(months)
-            .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
+            .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
             .map(m => ({ value: m, label: m }));
     }, [data]);
 
@@ -68,8 +68,8 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
         if (!monthA && !monthB && monthOptions.length >= 1) {
             // User requested: 1st selector (Month A) = Current - 1 (Previous)
             // 2nd selector (Month B) = Current (Latest)
-            const latest = monthOptions[monthOptions.length - 1];
-            const previous = monthOptions.length >= 2 ? monthOptions[monthOptions.length - 2] : latest;
+            const latest = monthOptions[0];
+            const previous = monthOptions.length >= 2 ? monthOptions[1] : latest;
 
             setMonthA(previous.value);
             setMonthB(latest.value);

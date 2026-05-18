@@ -72,8 +72,9 @@ function DeepAnalysisCharts({ data }: DeepAnalysisChartsProps) {
                 months.add(key);
             }
         });
-        // Convert to options
-        const options = Array.from(months).map(m => ({ value: m, label: m }));
+        const options = Array.from(months)
+            .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
+            .map(m => ({ value: m, label: m }));
         return [{ value: 'All', label: 'All Months' }, ...options];
     }, [data]);
 

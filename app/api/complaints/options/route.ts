@@ -53,7 +53,7 @@ export async function GET() {
         ?.map((row) => formatMonthLabel(row.complaint_date))
         .filter(Boolean)
     )]
-      .sort((a, b) => new Date(a!).getTime() - new Date(b!).getTime())
+      .sort((a, b) => new Date(b!).getTime() - new Date(a!).getTime())
       .map((month) => ({ value: month!, label: month! }));
 
     const payload = {

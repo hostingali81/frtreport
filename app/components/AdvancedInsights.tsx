@@ -54,7 +54,7 @@ function AdvancedInsights({ data }: Props) {
             }
         });
         const opts = Array.from(months)
-            .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
+            .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
             .map(m => ({ value: m, label: m }));
 
         return [{ value: 'All', label: 'All Time' }, ...opts];

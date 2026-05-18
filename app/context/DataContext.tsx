@@ -55,7 +55,7 @@ const emptyOptions: FilterOptions = {
   months: [{ value: 'All', label: 'All Months' }]
 };
 
-const FILTER_OPTIONS_CACHE_KEY = 'frt-filter-options-v1';
+const FILTER_OPTIONS_CACHE_KEY = 'frt-filter-options-v2';
 const TODAY_DATA_CACHE_KEY = 'frt-today-data-v1';
 const FILTER_OPTIONS_CACHE_TTL = 6 * 60 * 60 * 1000;
 const TODAY_DATA_CACHE_TTL = 3 * 60 * 1000;
@@ -134,6 +134,23 @@ const areFiltersEqual = (left: ComplaintFilters, right: ComplaintFilters) =>
   left.monthFilter === right.monthFilter;
 
 const isTodayLandingFilters = (filters: ComplaintFilters) => areFiltersEqual(filters, getDefaultTodayFilters());
+
+function getMonthSortTime(month: string) {
+  const parsed = new Date(month);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function normalizeFilterOptions(options: FilterOptions): FilterOptions {
+  const allMonth = options.months.find((month) => month.value === 'All') || { value: 'All', label: 'All Months' };
+  const months = options.months
+    .filter((month) => month.value !== 'All')
+    .sort((left, right) => getMonthSortTime(right.value) - getMonthSortTime(left.value));
+
+  return {
+    ...options,
+    months: [allMonth, ...months]
+  };
+}
 
 function readClientCache<T>(storageType: 'localStorage' | 'sessionStorage', key: string, ttl: number): T | null {
   if (typeof window === 'undefined') return null;
@@ -219,8 +236,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const result = await response.json();
 
       if (result.success && result.options) {
-        setFilterOptions(result.options);
-        writeClientCache('localStorage', FILTER_OPTIONS_CACHE_KEY, result.options);
+        const normalizedOptions = normalizeFilterOptions(result.options);
+        setFilterOptions(normalizedOptions);
+        writeClientCache('localStorage', FILTER_OPTIONS_CACHE_KEY, normalizedOptions);
       }
     } catch (error) {
       console.error('Failed to load filter options:', error);
@@ -318,7 +336,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const cachedTodayData = readClientCache<CachedTodayData>('sessionStorage', TODAY_DATA_CACHE_KEY, TODAY_DATA_CACHE_TTL);
 
     if (cachedOptions) {
-      setFilterOptions(cachedOptions);
+      setFilterOptions(normalizeFilterOptions(cachedOptions));
     }
 
     if (
