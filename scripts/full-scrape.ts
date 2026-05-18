@@ -117,7 +117,25 @@ function formatAttempt(attempt: number, maxRetries: number) {
 }
 
 function getErrorMessage(error: unknown) {
-    return error instanceof Error ? error.message : String(error);
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'string') return error;
+
+    if (error && typeof error === 'object') {
+        const maybeError = error as Record<string, unknown>;
+        const parts = ['message', 'details', 'hint', 'code']
+            .map(key => maybeError[key] ? `${key}: ${String(maybeError[key])}` : '')
+            .filter(Boolean);
+
+        if (parts.length > 0) return parts.join(' | ');
+
+        try {
+            return JSON.stringify(error);
+        } catch {
+            return String(error);
+        }
+    }
+
+    return String(error);
 }
 
 function isSessionConflictError(message: string) {
@@ -153,6 +171,8 @@ async function scrapeAndSaveMonth(
             if (!validRows.length) {
                 throw new Error(`No valid complaint rows scraped for ${range.label}`);
             }
+
+            console.log(`[SCRIPT] ${range.label} scraped ${rows.length} rows, ${validRows.length} valid. Saving...`);
 
             let newRows = 0;
             let updatedRows = 0;
