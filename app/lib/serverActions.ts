@@ -6,6 +6,12 @@ const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE)
   : null;
 
+function getFetchAllMaxRecords() {
+  const value = process.env.COMPLAINTS_FETCH_ALL_MAX_RECORDS;
+  const parsed = Number.parseInt(value || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 export async function getComplaintsData() {
   if (!supabase) {
     console.error('❌ Database connection not configured');
@@ -21,14 +27,17 @@ export async function getComplaintsData() {
     let allData: any[] = [];
     let from = 0;
     const batchSize = 1000;
-    const maxRecords = 50000;
+    const maxRecords = getFetchAllMaxRecords();
     
-    while (from < maxRecords) {
+    while (maxRecords === null || from < maxRecords) {
+      const to = maxRecords === null
+        ? from + batchSize - 1
+        : Math.min(from + batchSize - 1, maxRecords - 1);
       const { data, error } = await supabase
         .from('complaints')
         .select('raw_data')
         .order('complaint_date', { ascending: false })
-        .range(from, from + batchSize - 1);
+        .range(from, to);
       
       if (error) {
         console.error(`❌ Database query error at offset ${from}:`, error.message);
