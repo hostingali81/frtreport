@@ -54,7 +54,6 @@ function subtractDaysFromDateOnly(dateOnly: string, days: number) {
 
 export async function GET(request: Request) {
   const startTime = Date.now();
-  const supabase = getSupabaseClient();
 
   try {
     const { searchParams } = new URL(request.url);
@@ -157,8 +156,7 @@ export async function GET(request: Request) {
     }
 
     if (useNewSystem) {
-      const saveResult = await saveToNewDb(payload.data, scrapeDuration, scrapeType);
-      const { count } = supabase ? await supabase.from('complaints').select('id', { count: 'exact', head: true }) : { count: 0 };
+      const saveResult = await saveToNewDb(validData, scrapeDuration, scrapeType);
 
       return NextResponse.json({
         success: true,
@@ -172,10 +170,8 @@ export async function GET(request: Request) {
           scraped: validData.length,
           new: saveResult.new_rows,
           updated: saveResult.updated_rows,
-          total_in_db: count || 0,
           duration: scrapeDuration
-        },
-        data: validData.slice(0, 10000) // Limit response data to 10k for performance
+        }
       });
     } else {
       await saveToOldDb(payload, scrapedAt);
@@ -196,7 +192,6 @@ export async function GET(request: Request) {
     const isBrowserError = /Local browser launch failed|Could not find Chrome|Could not find expected browser|Browser was not found/i.test(error?.message || '');
 
     if (supabase) {
-      const now = new Date();
       supabase.from('scrape_metadata').insert({
         last_scrape_at: getCurrentISTTime(),
         total_rows: 0,

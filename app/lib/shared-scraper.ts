@@ -71,6 +71,46 @@ function isTransientDbError(error: unknown) {
     );
 }
 
+function parsePositiveInteger(value: string | undefined, fallback: number, max: number) {
+    const parsed = Number.parseInt(value || '', 10);
+    if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+    return Math.min(parsed, max);
+}
+
+async function runWithConcurrency<T>(
+    items: T[],
+    concurrency: number,
+    worker: (item: T, index: number) => Promise<void>
+) {
+    if (items.length === 0) return;
+
+    let nextIndex = 0;
+    let firstError: unknown;
+    let hasError = false;
+    const workerCount = Math.min(Math.max(concurrency, 1), items.length);
+
+    await Promise.all(
+        Array.from({ length: workerCount }, async () => {
+            while (!hasError) {
+                const currentIndex = nextIndex;
+                nextIndex += 1;
+
+                if (currentIndex >= items.length) return;
+
+                try {
+                    await worker(items[currentIndex], currentIndex);
+                } catch (error) {
+                    hasError = true;
+                    firstError = error;
+                    return;
+                }
+            }
+        })
+    );
+
+    if (hasError) throw firstError;
+}
+
 // Parse date in IST timezone (India Standard Time)
 export function parseDate(dateStr: string): Date | null {
     if (!dateStr) return null;
@@ -256,22 +296,34 @@ export async function saveToNewDb(
     if (!validRows.length) return { new_rows: 0, updated_rows: 0 };
 
     const complaintNumbers = validRows.map(r => r['Complaint Number']);
-    const existingRecords: Array<{ complaint_number: string }> = [];
+    const complaintNumberBatches: string[][] = [];
 
     for (let i = 0; i < complaintNumbers.length; i += 500) {
-        const batch = complaintNumbers.slice(i, i + 500);
+        complaintNumberBatches.push(complaintNumbers.slice(i, i + 500));
+    }
+
+    const lookupConcurrency = parsePositiveInteger(
+        process.env.SUPABASE_LOOKUP_CONCURRENCY || process.env.SUPABASE_SAVE_CONCURRENCY,
+        4,
+        8
+    );
+    const existingRecordBatches: Array<Array<{ complaint_number: string }>> = new Array(complaintNumberBatches.length);
+
+    await runWithConcurrency(complaintNumberBatches, lookupConcurrency, async (batch, batchIndex) => {
         const { data, error } = await supabase
             .from('complaints')
             .select('complaint_number')
             .in('complaint_number', batch);
 
         if (error) {
-            throw new Error(`Existing complaint lookup failed (${i + 1}-${i + batch.length}): ${describeError(error)}`);
+            const start = batchIndex * 500 + 1;
+            throw new Error(`Existing complaint lookup failed (${start}-${start + batch.length - 1}): ${describeError(error)}`);
         }
 
-        existingRecords.push(...(data || []));
-    }
+        existingRecordBatches[batchIndex] = data || [];
+    });
 
+    const existingRecords = existingRecordBatches.flat();
     const existingSet = new Set(existingRecords.map(r => r.complaint_number));
     const newRowsCount = validRows.filter(r => !existingSet.has(r['Complaint Number'])).length;
     const updatedRowsCount = validRows.length - newRowsCount;
@@ -301,34 +353,40 @@ export async function saveToNewDb(
         };
     });
 
-    const batches = [];
+    const batches: Array<typeof upsertData> = [];
     for (let i = 0; i < upsertData.length; i += 250) {
         batches.push(upsertData.slice(i, i + 250));
     }
 
-    for (let i = 0; i < batches.length; i++) {
+    const upsertConcurrency = parsePositiveInteger(
+        process.env.SUPABASE_UPSERT_CONCURRENCY || process.env.SUPABASE_SAVE_CONCURRENCY,
+        3,
+        6
+    );
+
+    await runWithConcurrency(batches, upsertConcurrency, async (batch, batchIndex) => {
         let attempt = 0;
 
         while (true) {
             attempt += 1;
             const { error } = await supabase
                 .from('complaints')
-                .upsert(batches[i], { onConflict: 'complaint_number', ignoreDuplicates: false });
+                .upsert(batch, { onConflict: 'complaint_number', ignoreDuplicates: false });
 
             if (!error) break;
 
             const description = describeError(error);
             if (attempt >= 3 || !isTransientDbError(error)) {
-                throw new Error(`Failed to upsert complaint batch ${i + 1}/${batches.length}: ${description}`);
+                throw new Error(`Failed to upsert complaint batch ${batchIndex + 1}/${batches.length}: ${description}`);
             }
 
             const delay = Math.min(2000 * attempt, 10000);
             console.warn(
-                `Complaint batch ${i + 1}/${batches.length} failed on attempt ${attempt}/3: ${description}. Retrying in ${delay}ms.`
+                `Complaint batch ${batchIndex + 1}/${batches.length} failed on attempt ${attempt}/3: ${description}. Retrying in ${delay}ms.`
             );
             await sleep(delay);
         }
-    }
+    });
 
     if (options.recordMetadata !== false) {
         await logScrapeSuccess(validRows.length, newRowsCount, updatedRowsCount, scrapeDuration);
@@ -531,12 +589,12 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
             if (passEl) passEl.value = credentials.pass;
         }, { user: username, pass: password });
         
-        await page.click('#btnlogin');
-
         console.log('[SCRAPER] Step 4: Waiting for successful login...');
-        // Wait for navigation to complete
         try {
-            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 45000 });
+            await Promise.all([
+                page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }),
+                page.click('#btnlogin')
+            ]);
         } catch (error) {
             const sessionDialogError = getSessionDialogError();
             if (sessionDialogError) throw sessionDialogError;
@@ -544,15 +602,14 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
         }
 
         console.log('[SCRAPER] Step 5: Direct navigation to report form...');
-        // Direct goto with networkidle for Vercel stability
         await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', { 
             timeout: 60000,
-            waitUntil: 'networkidle0' // More stable on Vercel
+            waitUntil: 'domcontentloaded'
         });
         
         // SMART: Wait for form to be ready
         try {
-            await page.waitForSelector('#ctrl143708', { timeout: 10000 });
+            await page.waitForSelector('#ctrl143708', { timeout: 10000, visible: true });
         } catch (error) {
             const sessionDialogError = getSessionDialogError();
             if (sessionDialogError) throw sessionDialogError;
@@ -598,32 +655,177 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
             }
         }, { fromStr: fromDateDisplay, toStr: toDateDisplay });
 
-        // Quick wait for form to process
-        await new Promise(r => setTimeout(r, 300));
+        await page.waitForFunction(
+            ({ fromStr, toStr }: { fromStr: string; toStr: string }) => {
+                const fromEl = document.getElementById('ctrl143709') as HTMLInputElement | null;
+                const toEl = document.getElementById('ctrl143707') as HTMLInputElement | null;
+                const button = document.getElementById('ctrl143708') as HTMLButtonElement | HTMLInputElement | null;
+                return (
+                    fromEl?.value === fromStr &&
+                    toEl?.value === toStr &&
+                    !!button &&
+                    !button.disabled
+                );
+            },
+            { timeout: 5000, polling: 100 },
+            { fromStr: fromDateDisplay, toStr: toDateDisplay }
+        );
 
         console.log('[SCRAPER] Step 7: Clicking search button...');
+        await page.evaluate(function () {
+            type SearchWaitState = {
+                startedAt: number;
+                initialText: string;
+                loaderSeen: boolean;
+                lastContentChangeAt: number;
+                lastObservedText: string;
+                loaderFinishedAt: number;
+                observer: MutationObserver | null;
+            };
+
+            const win = window as Window & { __frtSearchWait?: SearchWaitState };
+            const previousState = win.__frtSearchWait;
+
+            if (previousState?.observer && typeof previousState.observer.disconnect === 'function') {
+                previousState.observer.disconnect();
+            }
+
+            const getTableText = () => {
+                const container = document.querySelector('#printablediv143706') as HTMLElement | null;
+                const tables = container ? Array.from(container.querySelectorAll('table')) : [];
+                const dataTable = tables[1] as HTMLElement | undefined;
+                return (dataTable?.innerText || dataTable?.textContent || '').trim();
+            };
+
+            const initialText = getTableText();
+            const state = {
+                startedAt: Date.now(),
+                initialText,
+                loaderSeen: false,
+                lastContentChangeAt: 0,
+                lastObservedText: initialText,
+                loaderFinishedAt: 0,
+                observer: null as MutationObserver | null
+            };
+
+            const container = document.querySelector('#printablediv143706');
+            if (container && typeof MutationObserver !== 'undefined') {
+                const observer = new MutationObserver(() => {
+                    const text = getTableText();
+                    if (text !== state.lastObservedText) {
+                        state.lastObservedText = text;
+                        state.lastContentChangeAt = Date.now();
+                    }
+                });
+                observer.observe(container, { childList: true, subtree: true, characterData: true });
+                state.observer = observer;
+            }
+
+            win.__frtSearchWait = state;
+        });
+
         await page.click('#ctrl143708');
 
-        // PERFECT FIX: Wait for loader to disappear!
-        console.log('[SCRAPER] Waiting for loader to disappear...');
+        console.log('[SCRAPER] Waiting for search results...');
         const startWait = Date.now();
         
-        await page.waitForFunction(() => {
-            const loader = document.querySelector('.loading-bar');
-            if (!loader) return true; // No loader = already loaded
-            const style = window.getComputedStyle(loader);
-            return style.display === 'none'; // Loader hidden = data ready!
-        }, { 
-            timeout: Number.isFinite(loadTimeout) ? loadTimeout : 300000,
-            polling: 1000
+        await page.waitForFunction(
+            function () {
+                type SearchWaitState = {
+                    startedAt: number;
+                    initialText: string;
+                    loaderSeen: boolean;
+                    lastContentChangeAt: number;
+                    lastObservedText: string;
+                    loaderFinishedAt: number;
+                };
+
+                const win = window as Window & { __frtSearchWait?: SearchWaitState };
+                const state = win.__frtSearchWait || {
+                    startedAt: Date.now(),
+                    initialText: '',
+                    loaderSeen: false,
+                    lastContentChangeAt: 0,
+                    lastObservedText: '',
+                    loaderFinishedAt: 0
+                };
+                win.__frtSearchWait = state;
+
+                const normalize = (value: string | null | undefined) => (value || '').replace(/\s+/g, ' ').trim();
+                const loader = document.querySelector('.loading-bar') as HTMLElement | null;
+                const style = loader ? window.getComputedStyle(loader) : null;
+                const loaderActive = !!loader &&
+                    !!style &&
+                    style.display !== 'none' &&
+                    style.visibility !== 'hidden' &&
+                    style.opacity !== '0' &&
+                    loader.getClientRects().length > 0;
+
+                if (loaderActive) {
+                    state.loaderSeen = true;
+                    state.loaderFinishedAt = 0;
+                    return false;
+                }
+
+                if (state.loaderSeen && !state.loaderFinishedAt) {
+                    state.loaderFinishedAt = Date.now();
+                }
+
+                const container = document.querySelector('#printablediv143706') as HTMLElement | null;
+                if (!container) return false;
+
+                const tables = Array.from(container.querySelectorAll('table')) as HTMLTableElement[];
+                const dataTable = tables[1];
+                if (!dataTable) return false;
+
+                const rows = Array.from(dataTable.querySelectorAll('tbody tr, tr')) as HTMLTableRowElement[];
+                const dataRows = rows.filter((row) => {
+                    const cells = Array.from(row.querySelectorAll('td'));
+                    return cells.some((cell) => normalize(cell.textContent).length > 0);
+                });
+
+                const now = Date.now();
+                const tableText = normalize(dataTable.textContent);
+                const containerText = normalize(container.textContent);
+                const hasRows = dataRows.length > 0;
+                const hasEmptyMessage = /no\s+(record|records|data|rows)|not\s+found/i.test(containerText);
+                const contentChanged = tableText !== normalize(state.initialText);
+
+                if (contentChanged && tableText !== state.lastObservedText) {
+                    state.lastObservedText = tableText;
+                    state.lastContentChangeAt = now;
+                }
+
+                const contentSettled = state.lastContentChangeAt > 0 && now - state.lastContentChangeAt >= 200;
+                const loaderSettled = state.loaderFinishedAt > 0 && now - state.loaderFinishedAt >= 200;
+
+                if (state.loaderSeen) return loaderSettled && (hasRows || hasEmptyMessage);
+                if (contentChanged) return contentSettled && (hasRows || hasEmptyMessage);
+
+                return false;
+            },
+            {
+                timeout: Number.isFinite(loadTimeout) ? loadTimeout : 300000,
+                polling: 100
+            }
+        );
+
+        await page.evaluate(function () {
+            type SearchWaitState = {
+                observer?: MutationObserver | null;
+            };
+
+            const win = window as Window & { __frtSearchWait?: SearchWaitState };
+            const state = win.__frtSearchWait;
+            if (state?.observer && typeof state.observer.disconnect === 'function') {
+                state.observer.disconnect();
+            }
+            delete win.__frtSearchWait;
         });
         
         const loadTime = Math.round((Date.now() - startWait) / 1000);
-        console.log(`[SCRAPER] ✅ Data loaded in ${loadTime}s (loader disappeared)`);
+        console.log(`[SCRAPER] Data loaded in ${loadTime}s`);
         
-        // Small safety wait for DOM to settle
-        await new Promise(r => setTimeout(r, 1000));
-
         console.log('[SCRAPER] Step 8: Scraping first page only...');
 
         const result = await page.evaluate(function () {
