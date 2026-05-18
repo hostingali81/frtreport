@@ -48,6 +48,28 @@ function describeError(error: unknown) {
     return String(error);
 }
 
+function sleep(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isTransientDbError(error: unknown) {
+    const description = describeError(error).toLowerCase();
+    return (
+        description.includes('57014') ||
+        description.includes('timeout') ||
+        description.includes('temporarily') ||
+        description.includes('network') ||
+        description.includes('fetch failed') ||
+        description.includes('too many connections') ||
+        description.includes('rate limit') ||
+        description.includes('429') ||
+        description.includes('500') ||
+        description.includes('502') ||
+        description.includes('503') ||
+        description.includes('504')
+    );
+}
+
 // Parse date in IST timezone (India Standard Time)
 export function parseDate(dateStr: string): Date | null {
     if (!dateStr) return null;
@@ -264,30 +286,33 @@ export async function saveToNewDb(
         };
     });
 
-    // Parallel upserts - much faster
     const batches = [];
-    for (let i = 0; i < upsertData.length; i += 500) {
-        batches.push(upsertData.slice(i, i + 500));
+    for (let i = 0; i < upsertData.length; i += 250) {
+        batches.push(upsertData.slice(i, i + 250));
     }
 
-    const results = await Promise.allSettled(batches.map(batch =>
-        supabase
-            .from('complaints')
-            .upsert(batch, { onConflict: 'complaint_number', ignoreDuplicates: false })
-    ));
+    for (let i = 0; i < batches.length; i++) {
+        let attempt = 0;
 
-    const batchErrors: string[] = [];
+        while (true) {
+            attempt += 1;
+            const { error } = await supabase
+                .from('complaints')
+                .upsert(batches[i], { onConflict: 'complaint_number', ignoreDuplicates: false });
 
-    results.forEach((result, i) => {
-        if (result.status === 'rejected' || (result.status === 'fulfilled' && result.value.error)) {
-            const error = result.status === 'rejected' ? result.reason : result.value.error;
-            console.error(`Batch ${i + 1} error:`, error);
-            batchErrors.push(`Batch ${i + 1}: ${describeError(error)}`);
+            if (!error) break;
+
+            const description = describeError(error);
+            if (attempt >= 3 || !isTransientDbError(error)) {
+                throw new Error(`Failed to upsert complaint batch ${i + 1}/${batches.length}: ${description}`);
+            }
+
+            const delay = Math.min(2000 * attempt, 10000);
+            console.warn(
+                `Complaint batch ${i + 1}/${batches.length} failed on attempt ${attempt}/3: ${description}. Retrying in ${delay}ms.`
+            );
+            await sleep(delay);
         }
-    });
-
-    if (batchErrors.length > 0) {
-        throw new Error(`Failed to upsert complaint batches. ${batchErrors.slice(0, 3).join(' | ')}`);
     }
 
     if (options.recordMetadata !== false) {
