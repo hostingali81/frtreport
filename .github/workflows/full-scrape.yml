@@ -31,4 +31,10 @@ jobs:
           SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
           FRT_USERNAME: ${{ secrets.FRT_USERNAME }}
           FRT_PASSWORD: ${{ secrets.FRT_PASSWORD }}
+          FULL_SCRAPE_START_DATE: '2025-11-01'
+          FULL_SCRAPE_MAX_RETRIES: '5'
+          FULL_SCRAPE_RETRY_DELAY_MS: '30000'
+          FULL_SCRAPE_SESSION_RETRY_DELAY_MS: '120000'
+          SCRAPER_PROTOCOL_TIMEOUT_MS: '600000'
+          SCRAPER_LOAD_TIMEOUT_MS: '300000'
         run: npx tsx scripts/full-scrape.ts
