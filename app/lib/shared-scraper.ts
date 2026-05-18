@@ -178,7 +178,12 @@ export async function loadFromNewDb() {
     };
 }
 
-export async function saveToNewDb(rows: any[], scrapeDuration: number, scrapeType: string) {
+export async function saveToNewDb(
+    rows: any[],
+    scrapeDuration: number,
+    scrapeType: string,
+    options: { recordMetadata?: boolean } = {}
+) {
     if (!supabase || !rows.length) return { new_rows: 0, updated_rows: 0 };
 
     // Deduplicate rows based on Complaint Number
@@ -194,10 +199,14 @@ export async function saveToNewDb(rows: any[], scrapeDuration: number, scrapeTyp
     const complaintNumbers = validRows.map(r => r['Complaint Number']);
 
     // Single query for all existing records - much faster
-    const { data: existingRecords } = await supabase
+    const { data: existingRecords, error: existingRecordsError } = await supabase
         .from('complaints')
         .select('complaint_number')
         .in('complaint_number', complaintNumbers);
+
+    if (existingRecordsError) {
+        throw existingRecordsError;
+    }
 
     const existingSet = new Set(existingRecords?.map(r => r.complaint_number) || []);
     const newRowsCount = validRows.filter(r => !existingSet.has(r['Complaint Number'])).length;
@@ -240,23 +249,38 @@ export async function saveToNewDb(rows: any[], scrapeDuration: number, scrapeTyp
             .upsert(batch, { onConflict: 'complaint_number', ignoreDuplicates: false })
     ));
 
+    const batchErrors: string[] = [];
+
     results.forEach((result, i) => {
         if (result.status === 'rejected' || (result.status === 'fulfilled' && result.value.error)) {
-            console.error(`Batch ${i + 1} error:`, result.status === 'rejected' ? result.reason : result.value.error);
+            const error = result.status === 'rejected' ? result.reason : result.value.error;
+            console.error(`Batch ${i + 1} error:`, error);
+            batchErrors.push(`Batch ${i + 1}: ${error?.message || error}`);
         }
     });
 
-    const now = new Date();
-    await supabase.from('scrape_metadata').insert({
-        last_scrape_at: getCurrentISTTime(),
-        total_rows: validRows.length,
-        new_rows: newRowsCount,
-        updated_rows: updatedRowsCount,
-        duration_seconds: scrapeDuration,
-        status: 'success'
-    });
+    if (batchErrors.length > 0) {
+        throw new Error(`Failed to upsert complaint batches. ${batchErrors.slice(0, 3).join(' | ')}`);
+    }
+
+    if (options.recordMetadata !== false) {
+        await logScrapeSuccess(validRows.length, newRowsCount, updatedRowsCount, scrapeDuration);
+    }
 
     return { new_rows: newRowsCount, updated_rows: updatedRowsCount };
+}
+
+export async function logScrapeSuccess(totalRows: number, newRows: number, updatedRows: number, duration: number) {
+    if (supabase) {
+        await supabase.from('scrape_metadata').insert({
+            last_scrape_at: getCurrentISTTime(),
+            total_rows: totalRows,
+            new_rows: newRows,
+            updated_rows: updatedRows,
+            duration_seconds: duration,
+            status: 'success'
+        });
+    }
 }
 
 export async function logScrapeError(error: any, duration: number) {
@@ -278,14 +302,20 @@ export const getSupabaseClient = () => supabase;
 // --- Puppeteer Scraper ---
 
 export async function scrapeWithPuppeteer(username: string, password: string, fromDate?: string, toDate?: string) {
-    // Check if running on Vercel
-    // Check if running on Vercel (robust check)
-    const isVercel = !!process.env.VERCEL_URL || !!process.env.VERCEL || process.env.NODE_ENV === 'production';
+    const isVercel = !!process.env.VERCEL_URL || !!process.env.VERCEL;
+    const isHeadfulDebug = process.env.SCRAPER_HEADFUL === '1';
+    const slowMo = process.env.SCRAPER_DEBUG === '1' ? 50 : 0;
+    const protocolTimeout = Number.parseInt(
+        process.env.SCRAPER_PROTOCOL_TIMEOUT_MS || process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS || '600000',
+        10
+    );
+    const loadTimeout = Number.parseInt(process.env.SCRAPER_LOAD_TIMEOUT_MS || '300000', 10);
 
     let puppeteer: any;
     let launchOptions: any = {
-        headless: isVercel ? true : false,
-        slowMo: isVercel ? 0 : 50
+        headless: isHeadfulDebug ? false : true,
+        slowMo,
+        protocolTimeout: Number.isFinite(protocolTimeout) ? protocolTimeout : 600000
     };
 
     console.log('[SCRAPER] Starting scraper...', { isVercel, fromDate, toDate });
@@ -320,6 +350,19 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
     const browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
+    let lastDialogMessage = '';
+    page.on('dialog', async (dialog: { message: () => string; accept: () => Promise<void> }) => {
+        lastDialogMessage = dialog.message();
+        console.log('[SCRAPER] Browser dialog:', lastDialogMessage);
+        await dialog.accept();
+    });
+
+    const getSessionDialogError = () => {
+        if (/session|login|logged|already|active|unauthorized|unauthorised/i.test(lastDialogMessage)) {
+            return new Error(`FRT session/login dialog: ${lastDialogMessage}`);
+        }
+        return null;
+    };
 
     // Polyfill for esbuild/tsx __name helper - using evaluateOnNewDocument to persist across navigations
     await page.evaluateOnNewDocument('window.__name = (func) => func');
@@ -336,11 +379,30 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
         await page.type('#txtPassword', password);
         await page.click('#btnlogin');
 
-        console.log('[SCRAPER] Step 4: Waiting for navigation after login...');
-        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
+        console.log('[SCRAPER] Step 4: Waiting for successful login...');
+        try {
+            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 45000 });
+        } catch (error) {
+            const sessionDialogError = getSessionDialogError();
+            if (sessionDialogError) throw sessionDialogError;
+            throw error;
+        }
 
-        console.log('[SCRAPER] Step 5: Navigating to form page...');
-        await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', { timeout: 30000, waitUntil: 'domcontentloaded' });
+        console.log('[SCRAPER] Step 5: Direct navigation to report form...');
+        // Direct goto with networkidle for Vercel stability
+        await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', {
+            timeout: 60000,
+            waitUntil: 'networkidle0' // More stable on Vercel
+        });
+
+        // SMART: Wait for form to be ready
+        try {
+            await page.waitForSelector('#ctrl143708', { timeout: 10000 });
+        } catch (error) {
+            const sessionDialogError = getSessionDialogError();
+            if (sessionDialogError) throw sessionDialogError;
+            throw error;
+        }
 
         const now = new Date();
         const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
@@ -353,13 +415,30 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
             return `${day}-${mon}-${yr}`;
         };
 
-        const toDateDisplay = toDate ? formatDateDisplay(new Date(toDate)) : formatDateDisplay(now);
-        const fromDateDisplay = fromDate ? formatDateDisplay(new Date(fromDate)) : '01-Nov-2025';
-        const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const parseDateOnly = (value: string) => {
+            const parts = value.split('-').map(Number);
+            if (parts.length === 3 && parts.every(Number.isFinite)) {
+                return new Date(parts[0], parts[1] - 1, parts[2]);
+            }
+            return new Date(value);
+        };
+
+        const formatDateIso = (date: Date) => {
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${date.getFullYear()}-${month}-${day}`;
+        };
+
+        const toDateValue = toDate ? parseDateOnly(toDate) : now;
+        const fromDateValue = fromDate ? parseDateOnly(fromDate) : parseDateOnly('2025-11-01');
+        const toDateDisplay = formatDateDisplay(toDateValue);
+        const fromDateDisplay = formatDateDisplay(fromDateValue);
+        const toDateIso = formatDateIso(toDateValue);
+        const fromDateIso = formatDateIso(fromDateValue);
 
         console.log('[SCRAPER] Step 6: Setting dates...', { fromDateDisplay, toDateDisplay });
 
-        await page.evaluate(function ({ fromStr, toStr, todayIsoEval }: { fromStr: string; toStr: string; todayIsoEval: string }) {
+        await page.evaluate(function ({ fromStr, toStr, fromIsoEval, toIsoEval }: { fromStr: string; toStr: string; fromIsoEval: string; toIsoEval: string }) {
             const fireEvents = (el: HTMLElement) => { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('blur', { bubbles: true })); };
             const fromEl = document.getElementById('ctrl143709') as HTMLInputElement | null;
             const toEl = document.getElementById('ctrl143707') as HTMLInputElement | null;
@@ -367,9 +446,9 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
             if (fromEl) { fromEl.value = fromStr; fireEvents(fromEl); try { (window as any).$ && (window as any)('#ctrl143709').val(fromStr).trigger('change'); } catch { } }
             if (toEl) { toEl.value = toStr; fireEvents(toEl); try { (window as any).$ && (window as any)('#ctrl143707').val(toStr).trigger('change'); } catch { } }
             const dateInputs = Array.from(document.querySelectorAll('input[type="date"]')) as HTMLInputElement[];
-            if (dateInputs.length === 1) { dateInputs[0].value = todayIsoEval; fireEvents(dateInputs[0]); }
-            else if (dateInputs.length >= 2) { dateInputs[0].value = '2025-11-01'; fireEvents(dateInputs[0]); dateInputs[1].value = todayIsoEval; fireEvents(dateInputs[1]); }
-        }, { fromStr: fromDateDisplay, toStr: toDateDisplay, todayIsoEval: todayIso });
+            if (dateInputs.length === 1) { dateInputs[0].value = toIsoEval; fireEvents(dateInputs[0]); }
+            else if (dateInputs.length >= 2) { dateInputs[0].value = fromIsoEval; fireEvents(dateInputs[0]); dateInputs[1].value = toIsoEval; fireEvents(dateInputs[1]); }
+        }, { fromStr: fromDateDisplay, toStr: toDateDisplay, fromIsoEval: fromDateIso, toIsoEval: toDateIso });
 
         // Small delay to let form process dates
         await new Promise(r => setTimeout(r, 500));
@@ -377,7 +456,7 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
         console.log('[SCRAPER] Step 7: Clicking search button...');
         await page.click('#ctrl143708').catch(() => { console.log('[SCRAPER] Search button click failed!'); });
 
-        // Quick wait for table - increased validation time for large data
+        console.log('[SCRAPER] Waiting for data table...');
         await page.waitForFunction(() => {
             const container = document.querySelector('#printablediv143706');
             if (!container) return false;
@@ -386,8 +465,10 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
             const dataTable = tables[1];
             const rows = dataTable.querySelectorAll('tbody tr, tr');
             return rows.length > 0;
-        }, { timeout: 300000 }).catch(async () => {
-            // Try to capture any visible error message on the page
+        }, {
+            timeout: Number.isFinite(loadTimeout) ? loadTimeout : 300000,
+            polling: 1000
+        }).catch(async () => {
             const errorMsg = await page.evaluate(function () {
                 return document.body.innerText.substring(0, 500);
             });
@@ -398,6 +479,25 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
 
         const result = await page.evaluate(function () {
             const normalize = (s: string | null | undefined) => (s || '').trim();
+            const url = window.location.href;
+            const title = document.title || '';
+            const bodyText = normalize(document.body?.innerText || '');
+            const loginForm = document.querySelector('#txtUserName, #txtPassword, #btnlogin');
+            const sessionText = /session|expired|unauthorized|unauthorised|please\s+log\s*in|login\s+again/i.test(bodyText);
+            const looksLikeLoginPage = !!loginForm || /login|session|expired|unauthorized|unauthorised/i.test(`${url} ${title}`) || sessionText;
+
+            if (looksLikeLoginPage) {
+                return {
+                    data: [],
+                    debug: {
+                        reason: 'session_expired',
+                        url,
+                        title,
+                        bodySample: bodyText.slice(0, 250)
+                    }
+                };
+            }
+
             const container = document.querySelector('#printablediv143706');
             if (!container) return { data: [], debug: 'container not found' };
             const tables = Array.from(container.querySelectorAll('table')) as HTMLTableElement[];
@@ -439,6 +539,10 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
 
             return { data: mapped, debug: { headersFound: headers.length, rowsFound: mapped.length, totalTrElements: dataRows.length } };
         });
+
+        if (result.debug?.reason === 'session_expired') {
+            throw new Error('FRT session expired or another login replaced this session');
+        }
 
         await browser.close();
         return { clickedAction: '#ctrl143708', data: result.data, pageInfo: { totalPages: 1, totalRows: result.data.length } };
