@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import {
   checkNewTablesExist,
+  getLastSuccessfulScrape,
   loadFromNewDb,
   loadFromOldDb,
   scrapeWithPuppeteer,
   saveToNewDb,
   saveToOldDb,
-  getLastSuccessfulScrape,
   getCurrentISTTime,
   getSupabaseClient
 } from '../../lib/shared-scraper';
@@ -119,9 +119,18 @@ export async function GET(request: Request) {
       // But useful if running locally
     }
 
+    // Scrape with loader tracking - no retries needed!
     const payload = await scrapeWithPuppeteer(username, password, fromDate, toDate);
     const scrapeDuration = Math.round((Date.now() - startTime) / 1000);
-    const scrapedAt = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    const scrapedAt = new Date().toLocaleString('en-IN', { 
+      timeZone: 'Asia/Kolkata',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
 
     if (!payload.data || payload.data.length === 0) {
       return NextResponse.json({
@@ -184,6 +193,7 @@ export async function GET(request: Request) {
     console.error('Scraping error:', error);
     const errorDuration = Math.round((Date.now() - startTime) / 1000);
     const supabase = getSupabaseClient();
+    const isBrowserError = /Local browser launch failed|Could not find Chrome|Could not find expected browser|Browser was not found/i.test(error?.message || '');
 
     if (supabase) {
       const now = new Date();
@@ -201,7 +211,9 @@ export async function GET(request: Request) {
     return NextResponse.json({
       success: false,
       error: error.message,
-      suggestion: 'Try force full scrape: /api/scrape?refresh=1&full=1'
+      suggestion: isBrowserError
+        ? 'Local browser not available. Install Chrome with "npm run install:chrome" or set CHROME_PATH / PUPPETEER_EXECUTABLE_PATH.'
+        : 'Try force full scrape: /api/scrape?refresh=1&full=1'
     }, { status: 500 });
   }
 }

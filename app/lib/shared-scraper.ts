@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { existsSync } from 'fs';
 
 // --- Types ---
 export interface ScrapeResult {
@@ -213,10 +214,24 @@ export async function loadFromNewDb() {
         .select('id', { count: 'exact', head: true });
 
     const lastScrape = await getLastSuccessfulScrape();
+    
+    // Format timestamp for display
+    const lastScrapedAt = lastScrape?.last_scrape_at
+        ? new Date(lastScrape.last_scrape_at).toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+          })
+        : null;
+    
     return {
         data: allData.map(row => row.raw_data),
         total: count || 0,
-        lastScrapedAt: lastScrape?.last_scrape_at,
+        lastScrapedAt,
         source: 'supabase_new',
         system: 'optimized'
     };
@@ -351,6 +366,36 @@ export async function logScrapeError(error: any, duration: number) {
 
 export const getSupabaseClient = () => supabase;
 
+function resolveExistingBrowserPath(candidates: Array<string | undefined>) {
+    for (const candidate of candidates) {
+        if (candidate && existsSync(candidate)) {
+            return candidate;
+        }
+    }
+    return null;
+}
+
+function getLocalBrowserCandidates() {
+    return [
+        process.env.PUPPETEER_EXECUTABLE_PATH,
+        process.env.CHROME_PATH,
+        process.env.BROWSER_PATH,
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        `${process.env.LOCALAPPDATA || ''}\\Google\\Chrome\\Application\\chrome.exe`,
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        `${process.env.LOCALAPPDATA || ''}\\Microsoft\\Edge\\Application\\msedge.exe`,
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/snap/bin/chromium'
+    ].filter(Boolean);
+}
+
 // --- Puppeteer Scraper ---
 
 export async function scrapeWithPuppeteer(username: string, password: string, fromDate?: string, toDate?: string) {
@@ -376,16 +421,48 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
         // Vercel Environment
         const chromium = (await import('@sparticuz/chromium')).default;
         puppeteer = await import('puppeteer-core');
+        
+        // Optimize chromium for Vercel
+        chromium.setHeadlessMode = true;
+        chromium.setGraphicsMode = false;
+        
         launchOptions = {
             ...launchOptions,
             headless: true,
-            args: chromium.args,
+            args: [
+                ...chromium.args,
+                '--disable-gpu',
+                '--disable-dev-shm-usage',
+                '--disable-setuid-sandbox',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-extensions',
+            ],
             executablePath: await chromium.executablePath(),
+            ignoreHTTPSErrors: true,
         };
     } else {
         // Local / GitHub Actions Environment
         // We expect 'puppeteer' to be installed
         puppeteer = await import('puppeteer');
+        let executablePath = resolveExistingBrowserPath(getLocalBrowserCandidates());
+
+        if (!executablePath && typeof puppeteer.executablePath === 'function') {
+            try {
+                const bundledPath = puppeteer.executablePath();
+                if (bundledPath && existsSync(bundledPath)) {
+                    executablePath = bundledPath;
+                }
+            } catch {
+                // Ignore missing bundled browser and fall back to system Chrome/Edge.
+            }
+        }
+
+        launchOptions = {
+            ...launchOptions,
+            executablePath: executablePath || undefined
+        };
 
         // For GitHub Actions (CI), we might need specific args if it fails, 
         // but usually default puppeteer works well if installed correctly.
@@ -398,8 +475,24 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
             }
         }
     }
+    let browser: any;
 
-    const browser = await puppeteer.launch(launchOptions);
+    try {
+        browser = await puppeteer.launch(launchOptions);
+    } catch (error: any) {
+        const missingBrowser = /Could not find Chrome|Could not find expected browser|Browser was not found/i.test(error?.message || '');
+
+        if (!isVercel && missingBrowser) {
+            const detectedBrowser = resolveExistingBrowserPath(getLocalBrowserCandidates());
+            const suggestion = detectedBrowser
+                ? `Detected browser at "${detectedBrowser}". Set CHROME_PATH or PUPPETEER_EXECUTABLE_PATH to that path if launch still fails.`
+                : 'Install Chrome with "npm run install:chrome" or set CHROME_PATH / PUPPETEER_EXECUTABLE_PATH to your Chrome or Edge executable.';
+
+            throw new Error(`Local browser launch failed. ${suggestion}`);
+        }
+
+        throw error;
+    }
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
     let lastDialogMessage = '';
@@ -421,17 +514,27 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
 
     try {
         console.log('[SCRAPER] Step 1: Opening website...');
-        await page.goto('https://www.frtbarabanki.com', { timeout: 30000, waitUntil: 'domcontentloaded' }); // Increased timeout for safety
+        await page.goto('https://www.frtbarabanki.com', { 
+            timeout: 45000, 
+            waitUntil: 'domcontentloaded' // Faster than networkidle2
+        });
 
         console.log('[SCRAPER] Step 2: Waiting for login form...');
-        await page.waitForSelector('#txtUserName', { timeout: 10000 });
+        await page.waitForSelector('#txtUserName', { timeout: 15000 });
 
         console.log('[SCRAPER] Step 3: Filling credentials...');
-        await page.type('#txtUserName', username);
-        await page.type('#txtPassword', password);
+        // Direct value set - instant!
+        await page.evaluate((credentials: { user: string; pass: string }) => {
+            const userEl = document.getElementById('txtUserName') as HTMLInputElement;
+            const passEl = document.getElementById('txtPassword') as HTMLInputElement;
+            if (userEl) userEl.value = credentials.user;
+            if (passEl) passEl.value = credentials.pass;
+        }, { user: username, pass: password });
+        
         await page.click('#btnlogin');
 
         console.log('[SCRAPER] Step 4: Waiting for successful login...');
+        // Wait for navigation to complete
         try {
             await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 45000 });
         } catch (error) {
@@ -442,11 +545,11 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
 
         console.log('[SCRAPER] Step 5: Direct navigation to report form...');
         // Direct goto with networkidle for Vercel stability
-        await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', {
+        await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', { 
             timeout: 60000,
             waitUntil: 'networkidle0' // More stable on Vercel
         });
-
+        
         // SMART: Wait for form to be ready
         try {
             await page.waitForSelector('#ctrl143708', { timeout: 10000 });
@@ -475,57 +578,51 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
             return new Date(value);
         };
 
-        const formatDateIso = (date: Date) => {
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const day = String(date.getDate()).padStart(2, '0');
-            return `${date.getFullYear()}-${month}-${day}`;
-        };
-
-        const toDateValue = toDate ? parseDateOnly(toDate) : now;
-        const fromDateValue = fromDate ? parseDateOnly(fromDate) : parseDateOnly('2025-11-01');
-        const toDateDisplay = formatDateDisplay(toDateValue);
-        const fromDateDisplay = formatDateDisplay(fromDateValue);
-        const toDateIso = formatDateIso(toDateValue);
-        const fromDateIso = formatDateIso(fromDateValue);
+        const toDateDisplay = toDate ? formatDateDisplay(parseDateOnly(toDate)) : formatDateDisplay(now);
+        const fromDateDisplay = fromDate ? formatDateDisplay(parseDateOnly(fromDate)) : '01-Nov-2025';
 
         console.log('[SCRAPER] Step 6: Setting dates...', { fromDateDisplay, toDateDisplay });
 
-        await page.evaluate(function ({ fromStr, toStr, fromIsoEval, toIsoEval }: { fromStr: string; toStr: string; fromIsoEval: string; toIsoEval: string }) {
-            const fireEvents = (el: HTMLElement) => { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('blur', { bubbles: true })); };
-            const fromEl = document.getElementById('ctrl143709') as HTMLInputElement | null;
-            const toEl = document.getElementById('ctrl143707') as HTMLInputElement | null;
-            console.log('[SCRAPER] Date fields found:', { fromEl: !!fromEl, toEl: !!toEl });
-            if (fromEl) { fromEl.value = fromStr; fireEvents(fromEl); try { (window as any).$ && (window as any)('#ctrl143709').val(fromStr).trigger('change'); } catch { } }
-            if (toEl) { toEl.value = toStr; fireEvents(toEl); try { (window as any).$ && (window as any)('#ctrl143707').val(toStr).trigger('change'); } catch { } }
-            const dateInputs = Array.from(document.querySelectorAll('input[type="date"]')) as HTMLInputElement[];
-            if (dateInputs.length === 1) { dateInputs[0].value = toIsoEval; fireEvents(dateInputs[0]); }
-            else if (dateInputs.length >= 2) { dateInputs[0].value = fromIsoEval; fireEvents(dateInputs[0]); dateInputs[1].value = toIsoEval; fireEvents(dateInputs[1]); }
-        }, { fromStr: fromDateDisplay, toStr: toDateDisplay, fromIsoEval: fromDateIso, toIsoEval: toDateIso });
+        // SMART: Set dates and trigger events efficiently
+        await page.evaluate(function ({ fromStr, toStr }: { fromStr: string; toStr: string }) {
+            const fromEl = document.getElementById('ctrl143709') as HTMLInputElement;
+            const toEl = document.getElementById('ctrl143707') as HTMLInputElement;
+            
+            if (fromEl) {
+                fromEl.value = fromStr;
+                fromEl.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            if (toEl) {
+                toEl.value = toStr;
+                toEl.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }, { fromStr: fromDateDisplay, toStr: toDateDisplay });
 
-        // Small delay to let form process dates
-        await new Promise(r => setTimeout(r, 500));
+        // Quick wait for form to process
+        await new Promise(r => setTimeout(r, 300));
 
         console.log('[SCRAPER] Step 7: Clicking search button...');
-        await page.click('#ctrl143708').catch(() => { console.log('[SCRAPER] Search button click failed!'); });
+        await page.click('#ctrl143708');
 
-        console.log('[SCRAPER] Waiting for data table...');
+        // PERFECT FIX: Wait for loader to disappear!
+        console.log('[SCRAPER] Waiting for loader to disappear...');
+        const startWait = Date.now();
+        
         await page.waitForFunction(() => {
-            const container = document.querySelector('#printablediv143706');
-            if (!container) return false;
-            const tables = Array.from(container.querySelectorAll('table'));
-            if (tables.length < 2) return false;
-            const dataTable = tables[1];
-            const rows = dataTable.querySelectorAll('tbody tr, tr');
-            return rows.length > 0;
-        }, {
+            const loader = document.querySelector('.loading-bar');
+            if (!loader) return true; // No loader = already loaded
+            const style = window.getComputedStyle(loader);
+            return style.display === 'none'; // Loader hidden = data ready!
+        }, { 
             timeout: Number.isFinite(loadTimeout) ? loadTimeout : 300000,
             polling: 1000
-        }).catch(async () => {
-            const errorMsg = await page.evaluate(function () {
-                return document.body.innerText.substring(0, 500);
-            });
-            throw new Error(`Table did not load within 5 minutes. Page content snippet: ${errorMsg}`);
         });
+        
+        const loadTime = Math.round((Date.now() - startWait) / 1000);
+        console.log(`[SCRAPER] ✅ Data loaded in ${loadTime}s (loader disappeared)`);
+        
+        // Small safety wait for DOM to settle
+        await new Promise(r => setTimeout(r, 1000));
 
         console.log('[SCRAPER] Step 8: Scraping first page only...');
 

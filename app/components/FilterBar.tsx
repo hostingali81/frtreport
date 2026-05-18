@@ -7,11 +7,6 @@ import { FiSearch, FiFilter, FiCalendar, FiClock, FiX, FiLayers, FiChevronDown, 
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 
-interface Option {
-  value: string;
-  label: string;
-}
-
 interface FilterBarProps {
   // Search
   search: string;
@@ -59,7 +54,7 @@ interface FilterBarProps {
 
   // Actions
   clearAllFilters: () => void;
-  onRefresh?: () => void;
+  onApply?: () => void;
   loading?: boolean;
 
   // Month Filter
@@ -71,11 +66,22 @@ interface FilterBarProps {
   dailyCounts?: Record<string, number>;
 }
 
-const ShiftBadge = ({ letter }: { letter: string }) => (
-  <span className="inline-flex items-center justify-center w-5 h-5 bg-emerald-600 text-white text-xs font-bold rounded-md mr-1 shadow-sm border border-emerald-500/50">
-    {letter}
-  </span>
-);
+const buildDateTimeLocal = (date: Date, hours: number, minutes: number) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+
+  const partMap = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value])
+  );
+
+  return `${partMap.year}-${partMap.month}-${partMap.day}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
 
 export default function FilterBar({
   search, setSearch,
@@ -87,12 +93,19 @@ export default function FilterBar({
   fromDT, setFromDT, toDT, setToDT,
   selectedShift, setSelectedShift, activePreset, applyPreset, applyShiftPreset,
   customDate, setCustomDate, applyCustomDateShift,
-  clearAllFilters, onRefresh, loading, dailyCounts = {},
+  clearAllFilters, onApply, loading, dailyCounts = {},
   monthFilter, setMonthFilter, monthOptions = []
 }: FilterBarProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
+  const defaultTodayRange = React.useMemo(() => {
+    const now = new Date();
+    return {
+      fromDT: buildDateTimeLocal(now, 0, 0),
+      toDT: buildDateTimeLocal(now, 23, 59)
+    };
+  }, []);
 
   React.useEffect(() => {
     if (customDate) setDateError(null);
@@ -109,7 +122,9 @@ export default function FilterBar({
   // Helper to count active filters
   const activeCount = [
     search, divisionFilter, subDivisionFilter, subStationFilter, statusFilter, closedStatusFilter,
-    fromDT, toDT, selectedShift,
+    fromDT && fromDT !== defaultTodayRange.fromDT ? fromDT : null,
+    toDT && toDT !== defaultTodayRange.toDT ? toDT : null,
+    selectedShift,
     (monthFilter !== 'All' && monthFilter !== '') ? monthFilter : null
   ].filter(Boolean).length;
 
@@ -256,6 +271,17 @@ export default function FilterBar({
               <span className="text-blue-400">→</span>
               <span>{formatDate(toDT)}</span>
             </div>
+          )}
+
+          {onApply && (
+            <button
+              onClick={onApply}
+              disabled={loading}
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+            >
+              <FiFilter />
+              <span>{loading ? 'Fetching...' : 'Apply Filters'}</span>
+            </button>
           )}
 
           {activeCount > 0 && (

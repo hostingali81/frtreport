@@ -8,6 +8,7 @@
     "analyze": "ANALYZE=true next build",
     "start": "next start",
     "lint": "eslint",
+    "install:chrome": "npx puppeteer browsers install chrome",
     "postinstall": "echo 'Skipping playwright install'"
   },
   "dependencies": {
