@@ -26,6 +26,28 @@ const supabase = supabaseUrl && supabaseServiceKey
 
 // --- Helper Functions ---
 
+function describeError(error: unknown) {
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'string') return error;
+
+    if (error && typeof error === 'object') {
+        const maybeError = error as Record<string, unknown>;
+        const parts = ['message', 'details', 'hint', 'code']
+            .map(key => maybeError[key] ? `${key}: ${String(maybeError[key])}` : '')
+            .filter(Boolean);
+
+        if (parts.length > 0) return parts.join(' | ');
+
+        try {
+            return JSON.stringify(error);
+        } catch {
+            return String(error);
+        }
+    }
+
+    return String(error);
+}
+
 // Parse date in IST timezone (India Standard Time)
 export function parseDate(dateStr: string): Date | null {
     if (!dateStr) return null;
@@ -197,18 +219,23 @@ export async function saveToNewDb(
     if (!validRows.length) return { new_rows: 0, updated_rows: 0 };
 
     const complaintNumbers = validRows.map(r => r['Complaint Number']);
+    const existingRecords: Array<{ complaint_number: string }> = [];
 
-    // Single query for all existing records - much faster
-    const { data: existingRecords, error: existingRecordsError } = await supabase
-        .from('complaints')
-        .select('complaint_number')
-        .in('complaint_number', complaintNumbers);
+    for (let i = 0; i < complaintNumbers.length; i += 500) {
+        const batch = complaintNumbers.slice(i, i + 500);
+        const { data, error } = await supabase
+            .from('complaints')
+            .select('complaint_number')
+            .in('complaint_number', batch);
 
-    if (existingRecordsError) {
-        throw existingRecordsError;
+        if (error) {
+            throw new Error(`Existing complaint lookup failed (${i + 1}-${i + batch.length}): ${describeError(error)}`);
+        }
+
+        existingRecords.push(...(data || []));
     }
 
-    const existingSet = new Set(existingRecords?.map(r => r.complaint_number) || []);
+    const existingSet = new Set(existingRecords.map(r => r.complaint_number));
     const newRowsCount = validRows.filter(r => !existingSet.has(r['Complaint Number'])).length;
     const updatedRowsCount = validRows.length - newRowsCount;
 
@@ -239,8 +266,8 @@ export async function saveToNewDb(
 
     // Parallel upserts - much faster
     const batches = [];
-    for (let i = 0; i < upsertData.length; i += 1000) {
-        batches.push(upsertData.slice(i, i + 1000));
+    for (let i = 0; i < upsertData.length; i += 500) {
+        batches.push(upsertData.slice(i, i + 500));
     }
 
     const results = await Promise.allSettled(batches.map(batch =>
@@ -255,7 +282,7 @@ export async function saveToNewDb(
         if (result.status === 'rejected' || (result.status === 'fulfilled' && result.value.error)) {
             const error = result.status === 'rejected' ? result.reason : result.value.error;
             console.error(`Batch ${i + 1} error:`, error);
-            batchErrors.push(`Batch ${i + 1}: ${error?.message || error}`);
+            batchErrors.push(`Batch ${i + 1}: ${describeError(error)}`);
         }
     });
 
@@ -292,7 +319,7 @@ export async function logScrapeError(error: any, duration: number) {
             updated_rows: 0,
             duration_seconds: duration,
             status: 'failed',
-            error_message: error.message
+            error_message: describeError(error)
         });
     }
 }
