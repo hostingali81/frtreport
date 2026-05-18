@@ -266,7 +266,7 @@ export default function Home() {
   const handleMonthChange = (val: string) => {
     startTransition(() => {
       setMonthFilter(val);
-      if (val !== 'All') {
+      if (val) {
         setFromDT('');
         setToDT('');
         setActivePreset('');

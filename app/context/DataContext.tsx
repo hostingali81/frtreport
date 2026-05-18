@@ -118,7 +118,7 @@ export const getDefaultTodayFilters = (): ComplaintFilters => {
     closedStatus: '',
     fromDT: buildDateTimeLocal(now, 0, 0),
     toDT: buildDateTimeLocal(now, 23, 59),
-    monthFilter: 'All'
+    monthFilter: ''
   };
 };
 

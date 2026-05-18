@@ -237,7 +237,7 @@ export default function FilterBar({
               <Select
                 options={monthOptions}
                 value={monthOptions?.find(o => o.value === monthFilter)}
-                onChange={(opt) => setMonthFilter(opt?.value || 'All')}
+                onChange={(opt) => setMonthFilter(opt?.value || '')}
                 className="basic-single text-sm flex-1"
                 classNamePrefix="select"
                 placeholder="Month"
