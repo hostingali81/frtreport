@@ -6,14 +6,51 @@ import {
   scrapeWithPuppeteer,
   saveToNewDb,
   saveToOldDb,
-  getLastComplaintDate,
+  getLastSuccessfulScrape,
   getCurrentISTTime,
   getSupabaseClient
 } from '../../lib/shared-scraper';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 10; // Vercel free tier - only incremental scraping
+export const maxDuration = 60; // Incremental sync only; keep the date range small.
+
+function getISTDateParts(date: Date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+
+  const partMap = Object.fromEntries(
+    parts
+      .filter(part => part.type !== 'literal')
+      .map(part => [part.type, part.value])
+  );
+
+  return {
+    year: Number(partMap.year),
+    month: Number(partMap.month),
+    day: Number(partMap.day)
+  };
+}
+
+function formatDateOnly(date: Date) {
+  const { year, month, day } = getISTDateParts(date);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function subtractDaysFromDateOnly(dateOnly: string, days: number) {
+  const match = dateOnly.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return dateOnly;
+
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  date.setUTCDate(date.getUTCDate() - days);
+
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
 
 export async function GET(request: Request) {
   const startTime = Date.now();
@@ -53,31 +90,29 @@ export async function GET(request: Request) {
     let toDate: string | undefined;
     let scrapeType = 'incremental';
 
-    // Vercel Logic: Strict limits to avoid timeout
+    // Website sync stays small: last successful update day - 1 through today.
     if (useNewSystem && !isCronJob && !forceFullScrape) {
-      // Normal user refresh - scrape last 2 days or 7 days if empty
-      const lastComplaintDate = await getLastComplaintDate();
+      const lastSuccessfulScrape = await getLastSuccessfulScrape();
+      toDate = formatDateOnly(new Date());
 
-      if (lastComplaintDate) {
-        const lastDate = new Date(lastComplaintDate);
-        const safeDate = new Date(lastDate);
-        safeDate.setDate(safeDate.getDate() - 2);
-        fromDate = safeDate.toISOString().split('T')[0];
-        toDate = new Date().toISOString().split('T')[0];
+      if (lastSuccessfulScrape?.last_scrape_at) {
+        const lastUpdateDay = formatDateOnly(new Date(lastSuccessfulScrape.last_scrape_at));
+        fromDate = subtractDaysFromDateOnly(lastUpdateDay, 1);
+        scrapeType = 'manual_sync_last_update_minus_1_day';
       } else {
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        fromDate = sevenDaysAgo.toISOString().split('T')[0];
-        toDate = new Date().toISOString().split('T')[0];
+        fromDate = subtractDaysFromDateOnly(toDate, 1);
+        scrapeType = 'manual_sync_last_2_days_initial';
       }
     } else if (isCronJob) {
-      scrapeType = 'cron_last_7_days';
-      // Robust incremental scrape for cron checks last 7 days to catch updates/delays
-      // This ensures speed (<10s) and reliability
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      fromDate = sevenDaysAgo.toISOString().split('T')[0];
-      toDate = new Date().toISOString().split('T')[0];
+      scrapeType = 'cron_last_update_minus_1_day';
+      const lastSuccessfulScrape = await getLastSuccessfulScrape();
+      toDate = formatDateOnly(new Date());
+      if (lastSuccessfulScrape?.last_scrape_at) {
+        const lastUpdateDay = formatDateOnly(new Date(lastSuccessfulScrape.last_scrape_at));
+        fromDate = subtractDaysFromDateOnly(lastUpdateDay, 1);
+      } else {
+        fromDate = subtractDaysFromDateOnly(toDate, 1);
+      }
     } else if (forceFullScrape) {
       scrapeType = 'manual_full_attempt';
       // Manual override - will likely timeout on Vercel if range is large

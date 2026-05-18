@@ -237,7 +237,7 @@ export default function Home() {
         setLoading(false); // fast load done, user sees data
       }
 
-      const fullEndpoint = '/api/complaints?fetchAll=true';
+      const fullEndpoint = refresh ? '/api/complaints?fetchAll=true&refresh=1' : '/api/complaints?fetchAll=true';
       const fullResponse = await fetch(fullEndpoint);
       const fullResult = await fullResponse.json();
 
@@ -4344,7 +4344,7 @@ export default function Home() {
                 setLoading(true);
                 setError('');
                 try {
-                  // Call scrape API for incremental refresh (from last complaint date)
+                  // Website sync only scrapes last successful update day - 1 through today.
                   const response = await fetch('/api/scrape?refresh=1');
                   const contentType = response.headers.get('content-type');
                   if (!response.ok || !contentType?.includes('application/json')) {
@@ -4354,7 +4354,7 @@ export default function Home() {
                   const result = await response.json();
                   if (result.success) {
                     // Fetch updated data from database
-                    const dbResponse = await fetch('/api/complaints?fetchAll=true');
+                    const dbResponse = await fetch('/api/complaints?fetchAll=true&refresh=1');
                     const dbResult = await dbResponse.json();
                     if (dbResult.success) {
                       const dataArray = dbResult.data || [];
@@ -4373,7 +4373,7 @@ export default function Home() {
                   setLoading(false);
                 }
               }}
-              disabled={loading || fullRefreshLoading}
+              disabled={loading}
               className="inline-flex items-center gap-2 bg-slate-700 hover:bg-amber-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
             >
               {loading ? (<><FiClock /> Scraping...</>) : (<><FiRefreshCw /> Refresh</>)}
@@ -4419,7 +4419,7 @@ export default function Home() {
                 }
               }}
               disabled={loading || fullRefreshLoading}
-              className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
+              className="hidden items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition"
             >
               {fullRefreshLoading ? (<><FiClock /> Processing...</>) : (<><FiRefreshCw /> Full Scrape & Refresh</>)}
             </button>
