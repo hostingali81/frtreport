@@ -454,11 +454,43 @@ function getLocalBrowserCandidates() {
     ].filter(Boolean);
 }
 
+type FrtLoginType = 'L' | 'M';
+
+function resolveFrtLoginType(username: string): FrtLoginType {
+    const configuredType = (process.env.FRT_LOGIN_TYPE || '').trim().toUpperCase();
+
+    if (configuredType === 'M' || configuredType === 'MOBILE') return 'M';
+    if (configuredType === 'L' || configuredType === 'USERID' || configuredType === 'USER_ID') return 'L';
+
+    // The current FRT login page has separate UserID and Mobile tabs. A 10 digit
+    // login must be submitted in Mobile mode, otherwise the server counts it as invalid.
+    return /^\d{10}$/.test(username.trim()) ? 'M' : 'L';
+}
+
+function getLoginTypeLabel(loginType: FrtLoginType) {
+    return loginType === 'M' ? 'mobile' : 'user_id';
+}
+
+function getFrtLoginFailureMessage(response: unknown) {
+    const responseRecord = response && typeof response === 'object'
+        ? response as Record<string, unknown>
+        : null;
+    const message = responseRecord?.Message || responseRecord?.message || responseRecord?.Error || responseRecord?.error;
+    if (message) return `FRT login failed: ${String(message)}`;
+
+    try {
+        return `FRT login failed: ${JSON.stringify(response)}`;
+    } catch {
+        return 'FRT login failed.';
+    }
+}
+
 // --- Puppeteer Scraper ---
 
 export async function scrapeWithPuppeteer(username: string, password: string, fromDate?: string, toDate?: string) {
     const isVercel = !!process.env.VERCEL_URL || !!process.env.VERCEL;
     const isHeadfulDebug = process.env.SCRAPER_HEADFUL === '1';
+    const loginType = resolveFrtLoginType(username);
     const slowMo = process.env.SCRAPER_DEBUG === '1' ? 50 : 0;
     const protocolTimeout = Number.parseInt(
         process.env.SCRAPER_PROTOCOL_TIMEOUT_MS || process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS || '600000',
@@ -473,7 +505,7 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
         protocolTimeout: Number.isFinite(protocolTimeout) ? protocolTimeout : 600000
     };
 
-    console.log('[SCRAPER] Starting scraper...', { isVercel, fromDate, toDate });
+    console.log('[SCRAPER] Starting scraper...', { isVercel, fromDate, toDate, loginType: getLoginTypeLabel(loginType) });
 
     if (isVercel) {
         // Vercel Environment
@@ -561,8 +593,8 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
     });
 
     const getSessionDialogError = () => {
-        if (/session|login|logged|already|active|unauthorized|unauthorised/i.test(lastDialogMessage)) {
-            return new Error(`FRT session/login dialog: ${lastDialogMessage}`);
+        if (/session|login|logged|already|active|unauthorized|unauthorised|unsuccessful|invalid|blocked|captcha|password/i.test(lastDialogMessage)) {
+            return new Error(`FRT login dialog: ${lastDialogMessage}`);
         }
         return null;
     };
@@ -579,22 +611,90 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
 
         console.log('[SCRAPER] Step 2: Waiting for login form...');
         await page.waitForSelector('#txtUserName', { timeout: 15000 });
+        await page.waitForFunction(
+            () => typeof (window as Window & { AuthCrypto?: { encryptPayload?: unknown } }).AuthCrypto?.encryptPayload === 'function',
+            { timeout: 15000 }
+        );
 
-        console.log('[SCRAPER] Step 3: Filling credentials...');
-        // Direct value set - instant!
-        await page.evaluate((credentials: { user: string; pass: string }) => {
+        console.log('[SCRAPER] Step 3: Selecting login mode and filling credentials...');
+        await page.evaluate((credentials: { user: string; pass: string; loginType: FrtLoginType }) => {
+            const win = window as Window & {
+                fnbtncheckrd?: (type: FrtLoginType) => void;
+                fnBtnCheckChangeRadio?: (type: FrtLoginType) => void;
+            };
+            const userIdRadio = document.getElementById('rdbUserID') as HTMLInputElement | null;
+            const mobileRadio = document.getElementById('rdbMobile') as HTMLInputElement | null;
             const userEl = document.getElementById('txtUserName') as HTMLInputElement;
             const passEl = document.getElementById('txtPassword') as HTMLInputElement;
-            if (userEl) userEl.value = credentials.user;
-            if (passEl) passEl.value = credentials.pass;
-        }, { user: username, pass: password });
+
+            if (typeof win.fnbtncheckrd === 'function') {
+                win.fnbtncheckrd(credentials.loginType);
+            } else if (typeof win.fnBtnCheckChangeRadio === 'function') {
+                win.fnBtnCheckChangeRadio(credentials.loginType);
+            }
+
+            if (credentials.loginType === 'M') {
+                if (userIdRadio) userIdRadio.checked = false;
+                if (mobileRadio) {
+                    mobileRadio.checked = true;
+                    mobileRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            } else {
+                if (mobileRadio) mobileRadio.checked = false;
+                if (userIdRadio) {
+                    userIdRadio.checked = true;
+                    userIdRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+
+            const setValue = (element: HTMLInputElement | null, value: string) => {
+                if (!element) return;
+                element.disabled = false;
+                element.focus();
+                element.value = value;
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+                element.blur();
+            };
+
+            setValue(userEl, credentials.user);
+            setValue(passEl, credentials.pass);
+        }, { user: username, pass: password, loginType });
         
         console.log('[SCRAPER] Step 4: Waiting for successful login...');
         try {
-            await Promise.all([
-                page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }),
-                page.click('#btnlogin')
-            ]);
+            const loginResponsePromise = page.waitForResponse(
+                (response: { url: () => string; request: () => { method: () => string } }) =>
+                    response.url().includes('/UserAccounts/Login') &&
+                    response.request().method() === 'POST',
+                { timeout: 45000 }
+            ).catch(() => null);
+            const navigationPromise = page.waitForNavigation({
+                waitUntil: 'domcontentloaded',
+                timeout: 45000
+            }).catch((error: unknown) => error);
+
+            await page.click('#btnlogin');
+
+            const loginResponse = await loginResponsePromise;
+            if (loginResponse) {
+                const loginJson = await loginResponse.json().catch(() => null);
+                if (!loginJson || String(loginJson.Status) !== '1') {
+                    throw new Error(getFrtLoginFailureMessage(loginJson));
+                }
+
+                const navigationResult = await navigationPromise;
+                if (navigationResult instanceof Error) {
+                    console.warn('[SCRAPER] Login succeeded but redirect wait timed out. Continuing to report form...');
+                }
+            } else {
+                const navigationResult = await navigationPromise;
+                if (navigationResult instanceof Error) {
+                    const sessionDialogError = getSessionDialogError();
+                    if (sessionDialogError) throw sessionDialogError;
+                    throw navigationResult;
+                }
+            }
         } catch (error) {
             const sessionDialogError = getSessionDialogError();
             if (sessionDialogError) throw sessionDialogError;

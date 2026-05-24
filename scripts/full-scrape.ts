@@ -142,6 +142,10 @@ function isSessionConflictError(message: string) {
     return /session expired|another login|login replaced|logged in|unauthorized|unauthorised/i.test(message);
 }
 
+function isFatalLoginError(message: string) {
+    return /unsuccessful attempt|maximum retry attempts|temporarily blocked|blocked till|five invalid attempts|invalid credentials|invalid user|invalid password|invalid captcha|enter captcha|FRT login failed/i.test(message);
+}
+
 async function scrapeAndSaveMonth(
     range: MonthRange,
     username: string,
@@ -208,6 +212,11 @@ async function scrapeAndSaveMonth(
             console.error(
                 `[SCRIPT] ${range.label} failed on attempt ${formatAttempt(attempt, maxRetries)} after ${duration}s: ${message}`
             );
+
+            if (isFatalLoginError(message)) {
+                console.error('[SCRIPT] Login/auth failure detected. Stopping retries to avoid locking the FRT account.');
+                break;
+            }
 
             if (maxRetries !== 0 && attempt >= maxRetries) {
                 break;
