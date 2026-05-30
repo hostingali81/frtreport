@@ -20,6 +20,10 @@ on:
         required: false
         default: '5'
 
+concurrency:
+  group: full-scrape
+  cancel-in-progress: false
+
 jobs:
   full-scrape:
     runs-on: ubuntu-latest

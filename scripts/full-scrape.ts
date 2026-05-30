@@ -1,6 +1,6 @@
 import {
     checkNewTablesExist,
-    scrapeWithPuppeteer,
+    createFrtScraperSession,
     saveToNewDb,
     saveToOldDb,
     logScrapeError,
@@ -24,6 +24,8 @@ type MonthResult = {
     duration: number;
     rows: ScrapedRow[];
 };
+
+type ScraperSession = Awaited<ReturnType<typeof createFrtScraperSession>>;
 
 const DEFAULT_START_DATE = '2025-11-01';
 const DEFAULT_MAX_RETRIES = 5;
@@ -139,17 +141,57 @@ function getErrorMessage(error: unknown) {
 }
 
 function isSessionConflictError(message: string) {
-    return /session expired|another login|login replaced|logged in|unauthorized|unauthorised/i.test(message);
+    return /session expired|another login|login replaced|logged in|unauthorized|unauthorised|FRT login failed: (empty|null) response/i.test(message);
 }
 
 function isFatalLoginError(message: string) {
-    return /unsuccessful attempt|maximum retry attempts|temporarily blocked|blocked till|five invalid attempts|invalid credentials|invalid user|invalid password|invalid captcha|enter captcha|FRT login failed/i.test(message);
+    return /unsuccessful attempt|maximum retry attempts|temporarily blocked|blocked till|five invalid attempts|invalid credentials|invalid user|invalid password|invalid captcha|enter captcha/i.test(message);
+}
+
+async function createScraperSessionWithRetries(
+    username: string,
+    password: string,
+    maxRetries: number,
+    retryDelayMs: number,
+    sessionRetryDelayMs: number
+): Promise<ScraperSession> {
+    let attempt = 0;
+    let lastError: unknown;
+
+    while (maxRetries === 0 || attempt < maxRetries) {
+        attempt += 1;
+
+        try {
+            console.log(`[SCRIPT] Opening FRT session - attempt ${formatAttempt(attempt, maxRetries)}`);
+            return await createFrtScraperSession(username, password);
+        } catch (error: unknown) {
+            lastError = error;
+            const message = getErrorMessage(error);
+            console.error(`[SCRIPT] FRT session open failed on attempt ${formatAttempt(attempt, maxRetries)}: ${message}`);
+
+            if (isFatalLoginError(message)) {
+                console.error('[SCRIPT] Login/auth failure detected. Stopping retries to avoid locking the FRT account.');
+                break;
+            }
+
+            if (maxRetries !== 0 && attempt >= maxRetries) {
+                break;
+            }
+
+            const baseDelay = isSessionConflictError(message) ? sessionRetryDelayMs : retryDelayMs;
+            const delay = Math.min(baseDelay * attempt, 10 * 60 * 1000);
+            const reason = isSessionConflictError(message) ? 'session/login conflict' : 'transient failure';
+            console.log(`[SCRIPT] Retrying FRT session open in ${Math.round(delay / 1000)}s after ${reason}...`);
+            await sleep(delay);
+        }
+    }
+
+    throw new Error(`[session] ${lastError ? getErrorMessage(lastError) : 'Failed to open FRT session'}`);
 }
 
 async function scrapeAndSaveMonth(
     range: MonthRange,
-    username: string,
-    password: string,
+    scraperSession: ScraperSession,
     useNewSystem: boolean,
     maxRetries: number,
     retryDelayMs: number,
@@ -167,7 +209,7 @@ async function scrapeAndSaveMonth(
                 `[SCRIPT] Scraping ${range.label} (${range.from} to ${range.to}) - attempt ${formatAttempt(attempt, maxRetries)}`
             );
 
-            const payload = await scrapeWithPuppeteer(username, password, range.from, range.to);
+            const payload = await scraperSession.scrapeRange(range.from, range.to);
             const duration = Math.round((Date.now() - monthStart) / 1000);
             const rows = (payload.data || []) as ScrapedRow[];
             const validRows = rows.filter(row => row['Complaint Number']?.trim());
@@ -266,23 +308,33 @@ async function main() {
 
         const results: MonthResult[] = [];
         const legacyRows: ScrapedRow[] = [];
+        const scraperSession = await createScraperSessionWithRetries(
+            process.env.FRT_USERNAME,
+            process.env.FRT_PASSWORD,
+            maxRetries,
+            retryDelayMs,
+            sessionRetryDelayMs
+        );
 
-        for (const range of ranges) {
-            const result = await scrapeAndSaveMonth(
-                range,
-                process.env.FRT_USERNAME,
-                process.env.FRT_PASSWORD,
-                useNewSystem,
-                maxRetries,
-                retryDelayMs,
-                sessionRetryDelayMs
-            );
+        try {
+            for (const range of ranges) {
+                const result = await scrapeAndSaveMonth(
+                    range,
+                    scraperSession,
+                    useNewSystem,
+                    maxRetries,
+                    retryDelayMs,
+                    sessionRetryDelayMs
+                );
 
-            results.push(result);
+                results.push(result);
 
-            if (!useNewSystem) {
-                legacyRows.push(...result.rows);
+                if (!useNewSystem) {
+                    legacyRows.push(...result.rows);
+                }
             }
+        } finally {
+            await scraperSession.close();
         }
 
         const totalDuration = Math.round((Date.now() - startTime) / 1000);

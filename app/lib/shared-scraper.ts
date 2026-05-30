@@ -471,21 +471,660 @@ function getLoginTypeLabel(loginType: FrtLoginType) {
     return loginType === 'M' ? 'mobile' : 'user_id';
 }
 
-function getFrtLoginFailureMessage(response: unknown) {
+function getFrtLoginFailureMessage(response: unknown, fallbackText = '', status?: number) {
     const responseRecord = response && typeof response === 'object'
         ? response as Record<string, unknown>
         : null;
     const message = responseRecord?.Message || responseRecord?.message || responseRecord?.Error || responseRecord?.error;
     if (message) return `FRT login failed: ${String(message)}`;
 
+    const statusText = typeof status === 'number' ? ` (HTTP ${status})` : '';
+    const trimmedText = fallbackText.replace(/\s+/g, ' ').trim();
+    if (trimmedText && trimmedText !== 'null') {
+        return `FRT login failed${statusText}: ${trimmedText.slice(0, 250)}`;
+    }
+    if (trimmedText === 'null') return `FRT login failed: null response${statusText}`;
+    if (response == null) return `FRT login failed: empty response${statusText}`;
+
     try {
         return `FRT login failed: ${JSON.stringify(response)}`;
     } catch {
-        return 'FRT login failed.';
+        return `FRT login failed: empty response${statusText}`;
     }
 }
 
 // --- Puppeteer Scraper ---
+
+type FrtScrapePayload = {
+    clickedAction: string;
+    data: Array<Record<string, string>>;
+    pageInfo: { totalPages: number; totalRows: number };
+};
+
+type FrtDialogLike = {
+    message: () => string;
+    accept: () => Promise<void>;
+};
+
+type FrtResponseLike = {
+    url: () => string;
+    request: () => { method: () => string };
+    text: () => Promise<string>;
+    status?: () => number;
+};
+
+type FrtPageLike = {
+    setUserAgent: (userAgent: string) => Promise<void>;
+    on: (event: 'dialog', handler: (dialog: FrtDialogLike) => Promise<void>) => void;
+    evaluateOnNewDocument: (source: string) => Promise<void>;
+    goto: (url: string, options?: Record<string, unknown>) => Promise<unknown>;
+    waitForSelector: (selector: string, options?: Record<string, unknown>) => Promise<unknown>;
+    waitForFunction: (pageFunction: unknown, options?: Record<string, unknown>, ...args: unknown[]) => Promise<unknown>;
+    evaluate: {
+        <Result>(pageFunction: () => Result | Promise<Result>): Promise<Result>;
+        <Arg, Result>(pageFunction: (arg: Arg) => Result | Promise<Result>, arg: Arg): Promise<Result>;
+    };
+    click: (selector: string) => Promise<void>;
+    waitForResponse: (predicate: (response: FrtResponseLike) => boolean, options?: Record<string, unknown>) => Promise<FrtResponseLike>;
+    waitForNavigation: (options?: Record<string, unknown>) => Promise<unknown>;
+};
+
+type FrtBrowserLike = {
+    newPage: () => Promise<FrtPageLike>;
+    close: () => Promise<void>;
+};
+
+type PuppeteerModuleLike = {
+    launch: (options: Record<string, unknown>) => Promise<FrtBrowserLike>;
+    executablePath?: () => string;
+};
+
+type FrtRangeEvalResult = {
+    data: Array<Record<string, string>>;
+    debug?: string | {
+        reason?: string;
+        url?: string;
+        title?: string;
+        bodySample?: string;
+        headersFound?: number;
+        rowsFound?: number;
+        totalTrElements?: number;
+    };
+};
+
+type FrtSessionDialogControls = {
+    getSessionDialogError: () => Error | null;
+    clearDialogMessage: () => void;
+};
+
+export type FrtScraperSession = {
+    scrapeRange: (fromDate?: string, toDate?: string) => Promise<FrtScrapePayload>;
+    close: () => Promise<void>;
+};
+
+async function scrapeAuthenticatedRange(
+    page: FrtPageLike,
+    fromDate: string | undefined,
+    toDate: string | undefined,
+    dialogControls: FrtSessionDialogControls,
+    loadTimeout: number
+): Promise<FrtScrapePayload> {
+    dialogControls.clearDialogMessage();
+
+    console.log('[SCRAPER] Step 5: Direct navigation to report form...');
+    await page.goto('https://www.frtbarabanki.com/UI/Form?FormId=13345', {
+        timeout: 60000,
+        waitUntil: 'domcontentloaded'
+    });
+
+    try {
+        await page.waitForSelector('#ctrl143708', { timeout: 10000, visible: true });
+    } catch (error) {
+        const sessionDialogError = dialogControls.getSessionDialogError();
+        if (sessionDialogError) throw sessionDialogError;
+        throw error;
+    }
+
+    const now = new Date();
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+    const formatDateDisplay = (date: Date) => {
+        const day = String(date.getDate()).padStart(2, '0');
+        const mon = monthNames[date.getMonth()];
+        const yr = date.getFullYear();
+        return `${day}-${mon}-${yr}`;
+    };
+
+    const parseDateOnly = (value: string) => {
+        const parts = value.split('-').map(Number);
+        if (parts.length === 3 && parts.every(Number.isFinite)) {
+            return new Date(parts[0], parts[1] - 1, parts[2]);
+        }
+        return new Date(value);
+    };
+
+    const toDateDisplay = toDate ? formatDateDisplay(parseDateOnly(toDate)) : formatDateDisplay(now);
+    const fromDateDisplay = fromDate ? formatDateDisplay(parseDateOnly(fromDate)) : '01-Nov-2025';
+
+    console.log('[SCRAPER] Step 6: Setting dates...', { fromDateDisplay, toDateDisplay });
+
+    await page.evaluate(function ({ fromStr, toStr }: { fromStr: string; toStr: string }) {
+        const fromEl = document.getElementById('ctrl143709') as HTMLInputElement;
+        const toEl = document.getElementById('ctrl143707') as HTMLInputElement;
+
+        if (fromEl) {
+            fromEl.value = fromStr;
+            fromEl.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        if (toEl) {
+            toEl.value = toStr;
+            toEl.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }, { fromStr: fromDateDisplay, toStr: toDateDisplay });
+
+    await page.waitForFunction(
+        ({ fromStr, toStr }: { fromStr: string; toStr: string }) => {
+            const fromEl = document.getElementById('ctrl143709') as HTMLInputElement | null;
+            const toEl = document.getElementById('ctrl143707') as HTMLInputElement | null;
+            const button = document.getElementById('ctrl143708') as HTMLButtonElement | HTMLInputElement | null;
+            return (
+                fromEl?.value === fromStr &&
+                toEl?.value === toStr &&
+                !!button &&
+                !button.disabled
+            );
+        },
+        { timeout: 5000, polling: 100 },
+        { fromStr: fromDateDisplay, toStr: toDateDisplay }
+    );
+
+    console.log('[SCRAPER] Step 7: Clicking search button...');
+    await page.evaluate(function () {
+        type SearchWaitState = {
+            startedAt: number;
+            initialText: string;
+            loaderSeen: boolean;
+            lastContentChangeAt: number;
+            lastObservedText: string;
+            loaderFinishedAt: number;
+            observer: MutationObserver | null;
+        };
+
+        const win = window as Window & { __frtSearchWait?: SearchWaitState };
+        const previousState = win.__frtSearchWait;
+
+        if (previousState?.observer && typeof previousState.observer.disconnect === 'function') {
+            previousState.observer.disconnect();
+        }
+
+        const getTableText = () => {
+            const container = document.querySelector('#printablediv143706') as HTMLElement | null;
+            const tables = container ? Array.from(container.querySelectorAll('table')) : [];
+            const dataTable = tables[1] as HTMLElement | undefined;
+            return (dataTable?.innerText || dataTable?.textContent || '').trim();
+        };
+
+        const initialText = getTableText();
+        const state = {
+            startedAt: Date.now(),
+            initialText,
+            loaderSeen: false,
+            lastContentChangeAt: 0,
+            lastObservedText: initialText,
+            loaderFinishedAt: 0,
+            observer: null as MutationObserver | null
+        };
+
+        const container = document.querySelector('#printablediv143706');
+        if (container && typeof MutationObserver !== 'undefined') {
+            const observer = new MutationObserver(() => {
+                const text = getTableText();
+                if (text !== state.lastObservedText) {
+                    state.lastObservedText = text;
+                    state.lastContentChangeAt = Date.now();
+                }
+            });
+            observer.observe(container, { childList: true, subtree: true, characterData: true });
+            state.observer = observer;
+        }
+
+        win.__frtSearchWait = state;
+    });
+
+    await page.click('#ctrl143708');
+
+    console.log('[SCRAPER] Waiting for search results...');
+    const startWait = Date.now();
+
+    await page.waitForFunction(
+        function () {
+            type SearchWaitState = {
+                startedAt: number;
+                initialText: string;
+                loaderSeen: boolean;
+                lastContentChangeAt: number;
+                lastObservedText: string;
+                loaderFinishedAt: number;
+            };
+
+            const win = window as Window & { __frtSearchWait?: SearchWaitState };
+            const state = win.__frtSearchWait || {
+                startedAt: Date.now(),
+                initialText: '',
+                loaderSeen: false,
+                lastContentChangeAt: 0,
+                lastObservedText: '',
+                loaderFinishedAt: 0
+            };
+            win.__frtSearchWait = state;
+
+            const normalize = (value: string | null | undefined) => (value || '').replace(/\s+/g, ' ').trim();
+            const loader = document.querySelector('.loading-bar') as HTMLElement | null;
+            const style = loader ? window.getComputedStyle(loader) : null;
+            const loaderActive = !!loader &&
+                !!style &&
+                style.display !== 'none' &&
+                style.visibility !== 'hidden' &&
+                style.opacity !== '0' &&
+                loader.getClientRects().length > 0;
+
+            if (loaderActive) {
+                state.loaderSeen = true;
+                state.loaderFinishedAt = 0;
+                return false;
+            }
+
+            if (state.loaderSeen && !state.loaderFinishedAt) {
+                state.loaderFinishedAt = Date.now();
+            }
+
+            const container = document.querySelector('#printablediv143706') as HTMLElement | null;
+            if (!container) return false;
+
+            const tables = Array.from(container.querySelectorAll('table')) as HTMLTableElement[];
+            const dataTable = tables[1];
+            if (!dataTable) return false;
+
+            const rows = Array.from(dataTable.querySelectorAll('tbody tr, tr')) as HTMLTableRowElement[];
+            const dataRows = rows.filter((row) => {
+                const cells = Array.from(row.querySelectorAll('td'));
+                return cells.some((cell) => normalize(cell.textContent).length > 0);
+            });
+
+            const now = Date.now();
+            const tableText = normalize(dataTable.textContent);
+            const containerText = normalize(container.textContent);
+            const hasRows = dataRows.length > 0;
+            const hasEmptyMessage = /no\s+(record|records|data|rows)|not\s+found/i.test(containerText);
+            const contentChanged = tableText !== normalize(state.initialText);
+
+            if (contentChanged && tableText !== state.lastObservedText) {
+                state.lastObservedText = tableText;
+                state.lastContentChangeAt = now;
+            }
+
+            const contentSettled = state.lastContentChangeAt > 0 && now - state.lastContentChangeAt >= 200;
+            const loaderSettled = state.loaderFinishedAt > 0 && now - state.loaderFinishedAt >= 200;
+
+            if (state.loaderSeen) return loaderSettled && (hasRows || hasEmptyMessage);
+            if (contentChanged) return contentSettled && (hasRows || hasEmptyMessage);
+
+            return false;
+        },
+        {
+            timeout: Number.isFinite(loadTimeout) ? loadTimeout : 300000,
+            polling: 100
+        }
+    );
+
+    await page.evaluate(function () {
+        type SearchWaitState = {
+            observer?: MutationObserver | null;
+        };
+
+        const win = window as Window & { __frtSearchWait?: SearchWaitState };
+        const state = win.__frtSearchWait;
+        if (state?.observer && typeof state.observer.disconnect === 'function') {
+            state.observer.disconnect();
+        }
+        delete win.__frtSearchWait;
+    });
+
+    const loadTime = Math.round((Date.now() - startWait) / 1000);
+    console.log(`[SCRAPER] Data loaded in ${loadTime}s`);
+
+    console.log('[SCRAPER] Step 8: Scraping first page only...');
+
+    const result = await page.evaluate<FrtRangeEvalResult>(function () {
+        const normalize = (s: string | null | undefined) => (s || '').trim();
+        const url = window.location.href;
+        const title = document.title || '';
+        const bodyText = normalize(document.body?.innerText || '');
+        const loginForm = document.querySelector('#txtUserName, #txtPassword, #btnlogin');
+        const sessionText = /session|expired|unauthorized|unauthorised|please\s+log\s*in|login\s+again/i.test(bodyText);
+        const looksLikeLoginPage = !!loginForm || /login|session|expired|unauthorized|unauthorised/i.test(`${url} ${title}`) || sessionText;
+
+        if (looksLikeLoginPage) {
+            return {
+                data: [],
+                debug: {
+                    reason: 'session_expired',
+                    url,
+                    title,
+                    bodySample: bodyText.slice(0, 250)
+                }
+            };
+        }
+
+        const container = document.querySelector('#printablediv143706');
+        if (!container) return { data: [], debug: 'container not found' };
+        const tables = Array.from(container.querySelectorAll('table')) as HTMLTableElement[];
+        if (tables.length < 2) return { data: [], debug: 'tables not found' };
+        const headerTable = tables[0];
+        const dataTable = tables[1];
+
+        const headerRows = Array.from(headerTable.querySelectorAll('tr'));
+        let headers: string[] = [];
+
+        for (let rowIdx = 0; rowIdx < Math.min(3, headerRows.length); rowIdx++) {
+            const headerCells = Array.from(headerRows[rowIdx].querySelectorAll('th, td')) as HTMLElement[];
+            const tempHeaders = headerCells.map((cell, i) => normalize(cell.textContent) || `Column ${i + 1}`);
+            if (tempHeaders.length > 1 && tempHeaders.some(h => h && h !== `Column ${tempHeaders.indexOf(h) + 1}` && !h.includes('Report from'))) {
+                headers = tempHeaders;
+                break;
+            }
+        }
+
+        if (headers.length === 0) {
+            headers = ['Complaint Number', 'Complaint Date and Time', 'Division', 'Sub Division', 'Sub Station', 'Status', 'Closed Status', 'Closed By', 'Closed Date', 'Closing Remarks', 'Area Type'];
+        }
+
+        const dataRows = dataTable.querySelectorAll('tbody tr').length > 0
+            ? Array.from(dataTable.querySelectorAll('tbody tr'))
+            : Array.from(dataTable.querySelectorAll('tr'));
+
+        const mapped = dataRows.map(row => {
+            const cells = Array.from(row.querySelectorAll('td')) as HTMLElement[];
+            if (cells.length === 0) return null;
+            const rowData: Record<string, string> = {};
+            const limit = Math.min(cells.length, headers.length);
+            for (let i = 0; i < limit; i++) rowData[headers[i] || `Column ${i + 1}`] = normalize(cells[i].textContent);
+            const anyValue = Object.values(rowData).some(v => v && v.length > 0);
+            return anyValue ? rowData : null;
+        }).filter(Boolean) as Record<string, string>[];
+
+        return { data: mapped, debug: { headersFound: headers.length, rowsFound: mapped.length, totalTrElements: dataRows.length } };
+    });
+
+    if (typeof result.debug === 'object' && result.debug?.reason === 'session_expired') {
+        throw new Error('FRT session expired or another login replaced this session');
+    }
+
+    return { clickedAction: '#ctrl143708', data: result.data, pageInfo: { totalPages: 1, totalRows: result.data.length } };
+}
+
+export async function createFrtScraperSession(username: string, password: string): Promise<FrtScraperSession> {
+    const isVercel = !!process.env.VERCEL_URL || !!process.env.VERCEL;
+    const isHeadfulDebug = process.env.SCRAPER_HEADFUL === '1';
+    const loginType = resolveFrtLoginType(username);
+    const slowMo = process.env.SCRAPER_DEBUG === '1' ? 50 : 0;
+    const protocolTimeout = Number.parseInt(
+        process.env.SCRAPER_PROTOCOL_TIMEOUT_MS || process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS || '600000',
+        10
+    );
+    const loadTimeout = Number.parseInt(process.env.SCRAPER_LOAD_TIMEOUT_MS || '300000', 10);
+
+    let puppeteer: PuppeteerModuleLike;
+    let launchOptions: Record<string, unknown> = {
+        headless: isHeadfulDebug ? false : true,
+        slowMo,
+        protocolTimeout: Number.isFinite(protocolTimeout) ? protocolTimeout : 600000
+    };
+
+    console.log('[SCRAPER] Starting scraper session...', { isVercel, loginType: getLoginTypeLabel(loginType) });
+
+    if (isVercel) {
+        const chromium = (await import('@sparticuz/chromium')).default;
+        puppeteer = await import('puppeteer-core') as unknown as PuppeteerModuleLike;
+
+        chromium.setHeadlessMode = true;
+        chromium.setGraphicsMode = false;
+
+        launchOptions = {
+            ...launchOptions,
+            headless: true,
+            args: [
+                ...chromium.args,
+                '--disable-gpu',
+                '--disable-dev-shm-usage',
+                '--disable-setuid-sandbox',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-extensions',
+            ],
+            executablePath: await chromium.executablePath(),
+            ignoreHTTPSErrors: true,
+        };
+    } else {
+        puppeteer = await import('puppeteer') as unknown as PuppeteerModuleLike;
+        let executablePath = resolveExistingBrowserPath(getLocalBrowserCandidates());
+
+        if (!executablePath && typeof puppeteer.executablePath === 'function') {
+            try {
+                const bundledPath = puppeteer.executablePath();
+                if (bundledPath && existsSync(bundledPath)) {
+                    executablePath = bundledPath;
+                }
+            } catch {
+                // Ignore missing bundled browser and fall back to system Chrome/Edge.
+            }
+        }
+
+        launchOptions = {
+            ...launchOptions,
+            executablePath: executablePath || undefined
+        };
+
+        if (process.env.CI) {
+            launchOptions = {
+                ...launchOptions,
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox']
+            };
+        }
+    }
+
+    let browser: FrtBrowserLike;
+
+    try {
+        browser = await puppeteer.launch(launchOptions);
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const missingBrowser = /Could not find Chrome|Could not find expected browser|Browser was not found/i.test(errorMessage);
+
+        if (!isVercel && missingBrowser) {
+            const detectedBrowser = resolveExistingBrowserPath(getLocalBrowserCandidates());
+            const suggestion = detectedBrowser
+                ? `Detected browser at "${detectedBrowser}". Set CHROME_PATH or PUPPETEER_EXECUTABLE_PATH to that path if launch still fails.`
+                : 'Install Chrome with "npm run install:chrome" or set CHROME_PATH / PUPPETEER_EXECUTABLE_PATH to your Chrome or Edge executable.';
+
+            throw new Error(`Local browser launch failed. ${suggestion}`);
+        }
+
+        throw error;
+    }
+
+    let closed = false;
+
+    const close = async () => {
+        if (closed) return;
+        closed = true;
+        try { await browser.close(); } catch { }
+    };
+
+    try {
+        const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
+
+        let lastDialogMessage = '';
+        const clearDialogMessage = () => {
+            lastDialogMessage = '';
+        };
+        const getSessionDialogError = () => {
+            if (/session|login|logged|already|active|unauthorized|unauthorised|unsuccessful|invalid|blocked|captcha|password/i.test(lastDialogMessage)) {
+                return new Error(`FRT login dialog: ${lastDialogMessage}`);
+            }
+            return null;
+        };
+
+        page.on('dialog', async (dialog: FrtDialogLike) => {
+            lastDialogMessage = dialog.message();
+            console.log('[SCRAPER] Browser dialog:', lastDialogMessage);
+            await dialog.accept();
+        });
+
+        await page.evaluateOnNewDocument('window.__name = (func) => func');
+
+        console.log('[SCRAPER] Step 1: Opening website...');
+        await page.goto('https://www.frtbarabanki.com', {
+            timeout: 45000,
+            waitUntil: 'domcontentloaded'
+        });
+
+        console.log('[SCRAPER] Step 2: Waiting for login form...');
+        await page.waitForSelector('#txtUserName', { timeout: 15000 });
+        await page.waitForFunction(
+            () => typeof (window as Window & { AuthCrypto?: { encryptPayload?: unknown } }).AuthCrypto?.encryptPayload === 'function',
+            { timeout: 15000 }
+        );
+
+        console.log('[SCRAPER] Step 3: Selecting login mode and filling credentials...');
+        await page.evaluate((credentials: { user: string; pass: string; loginType: FrtLoginType }) => {
+            const win = window as Window & {
+                fnbtncheckrd?: (type: FrtLoginType) => void;
+                fnBtnCheckChangeRadio?: (type: FrtLoginType) => void;
+            };
+            const userIdRadio = document.getElementById('rdbUserID') as HTMLInputElement | null;
+            const mobileRadio = document.getElementById('rdbMobile') as HTMLInputElement | null;
+            const userEl = document.getElementById('txtUserName') as HTMLInputElement;
+            const passEl = document.getElementById('txtPassword') as HTMLInputElement;
+
+            if (typeof win.fnbtncheckrd === 'function') {
+                win.fnbtncheckrd(credentials.loginType);
+            } else if (typeof win.fnBtnCheckChangeRadio === 'function') {
+                win.fnBtnCheckChangeRadio(credentials.loginType);
+            }
+
+            if (credentials.loginType === 'M') {
+                if (userIdRadio) userIdRadio.checked = false;
+                if (mobileRadio) {
+                    mobileRadio.checked = true;
+                    mobileRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            } else {
+                if (mobileRadio) mobileRadio.checked = false;
+                if (userIdRadio) {
+                    userIdRadio.checked = true;
+                    userIdRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+
+            const setValue = (element: HTMLInputElement | null, value: string) => {
+                if (!element) return;
+                element.disabled = false;
+                element.focus();
+                element.value = value;
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+                element.blur();
+            };
+
+            setValue(userEl, credentials.user);
+            setValue(passEl, credentials.pass);
+        }, { user: username, pass: password, loginType });
+
+        console.log('[SCRAPER] Step 4: Waiting for successful login...');
+        try {
+            const loginResponsePromise = page.waitForResponse(
+                (response: FrtResponseLike) =>
+                    response.url().includes('/UserAccounts/Login') &&
+                    response.request().method() === 'POST',
+                { timeout: 45000 }
+            ).catch(() => null);
+            const navigationPromise = page.waitForNavigation({
+                waitUntil: 'domcontentloaded',
+                timeout: 45000
+            }).catch((error: unknown) => error);
+
+            await page.click('#btnlogin');
+
+            const loginResponse = await loginResponsePromise;
+            if (loginResponse) {
+                const loginText = await loginResponse.text().catch(() => '');
+                const loginStatus = typeof loginResponse.status === 'function' ? loginResponse.status() : undefined;
+                let loginJson: Record<string, unknown> | null = null;
+
+                if (loginText.trim()) {
+                    try {
+                        const parsedLoginJson = JSON.parse(loginText) as unknown;
+                        loginJson = parsedLoginJson && typeof parsedLoginJson === 'object'
+                            ? parsedLoginJson as Record<string, unknown>
+                            : null;
+                    } catch {
+                        loginJson = null;
+                    }
+                }
+
+                if (!loginJson || String(loginJson.Status) !== '1') {
+                    throw new Error(getFrtLoginFailureMessage(loginJson, loginText, loginStatus));
+                }
+
+                const navigationResult = await navigationPromise;
+                if (navigationResult instanceof Error) {
+                    console.warn('[SCRAPER] Login succeeded but redirect wait timed out. Continuing to report form...');
+                }
+            } else {
+                const navigationResult = await navigationPromise;
+                if (navigationResult instanceof Error) {
+                    const sessionDialogError = getSessionDialogError();
+                    if (sessionDialogError) throw sessionDialogError;
+                    throw navigationResult;
+                }
+            }
+        } catch (error) {
+            const sessionDialogError = getSessionDialogError();
+            if (sessionDialogError) throw sessionDialogError;
+            throw error;
+        }
+
+        clearDialogMessage();
+
+        return {
+            scrapeRange: async (fromDate?: string, toDate?: string) => {
+                if (closed) throw new Error('FRT scraper session is closed');
+                console.log('[SCRAPER] Starting scraper...', {
+                    isVercel,
+                    fromDate,
+                    toDate,
+                    loginType: getLoginTypeLabel(loginType),
+                    session: 'reused'
+                });
+                return scrapeAuthenticatedRange(
+                    page,
+                    fromDate,
+                    toDate,
+                    { getSessionDialogError, clearDialogMessage },
+                    loadTimeout
+                );
+            },
+            close
+        };
+    } catch (error) {
+        await close();
+        throw error;
+    }
+}
 
 export async function scrapeWithPuppeteer(username: string, password: string, fromDate?: string, toDate?: string) {
     const isVercel = !!process.env.VERCEL_URL || !!process.env.VERCEL;
