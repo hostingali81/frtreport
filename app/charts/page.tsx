@@ -10,7 +10,8 @@ import { getDefaultTodayFilters, useData } from '../context/DataContext';
 
 export default function ChartsPage() {
   const {
-    data: contextData,
+    stats,
+    statsLoading,
     loading: contextLoading,
     refreshData,
     applyFilters,
@@ -18,7 +19,6 @@ export default function ChartsPage() {
     currentFilters
   } = useData();
   const router = useRouter();
-  const original = contextData;
   const [error, setError] = useState('');
 
   const defaultFilters = currentFilters ?? getDefaultTodayFilters();
@@ -48,21 +48,6 @@ export default function ChartsPage() {
     setMonthFilter(currentFilters.monthFilter);
   }, [currentFilters]);
 
-  const isClosedRow = (row: any) => {
-    const statusRaw = String(row['Status'] ?? '').trim();
-    const statusLower = statusRaw.toLowerCase();
-    const closedDate = String(row['Closed Date'] ?? '').trim();
-
-    if (statusLower === 'complaint closed') return true;
-    if (statusLower === 'pending') return false;
-
-    if (closedDate.length > 0) return true;
-    if (statusLower.includes('closed') || statusLower.includes('resolve')) return true;
-    if (statusLower.includes('attend') && statusLower.includes('confirm')) return true;
-    if (statusLower.includes('attend') && statusLower.includes('confirm')) return true;
-    return false;
-  };
-
   const closedStatusOptions = filterOptions.closedStatuses;
   const statusOptions = filterOptions.statuses;
   const divisionOptions = filterOptions.divisions;
@@ -84,9 +69,6 @@ export default function ChartsPage() {
       }
     });
   };
-
-  const data = original;
-
 
   const formatDateTimeLocal = (d: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -319,6 +301,7 @@ export default function ChartsPage() {
     setError('');
 
     try {
+      // Charts render from server-computed stats; no need to download rows.
       await applyFilters({
         search,
         division: divisionFilter,
@@ -329,7 +312,7 @@ export default function ChartsPage() {
         fromDT,
         toDT,
         monthFilter
-      });
+      }, { withRows: false });
     } catch (err: any) {
       setError(err.message || 'Failed to load chart data');
     }
@@ -427,14 +410,14 @@ export default function ChartsPage() {
                 applyCustomDateShift={applyCustomDateShift}
                 clearAllFilters={clearAllFilters}
                 onApply={applyCurrentFilters}
-                loading={contextLoading || isPending}
+                loading={statsLoading || isPending}
                 dailyCounts={{}}
                 monthFilter={monthFilter}
                 setMonthFilter={handleMonthChange}
                 monthOptions={monthOptions}
               />
             </div>
-            {contextLoading ? (
+            {statsLoading ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
                 <div className="flex items-center justify-center py-16">
                   <div className="text-center">
@@ -443,8 +426,8 @@ export default function ChartsPage() {
                   </div>
                 </div>
               </div>
-            ) : original.length > 0 ? (
-              <TrendCharts data={data} isClosedRow={isClosedRow} />
+            ) : stats && stats.total > 0 ? (
+              <TrendCharts stats={stats} />
             ) : (
               <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 px-4 py-3 rounded">
                 <p className="font-semibold">No complaints found for the current filters.</p>

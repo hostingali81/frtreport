@@ -21,6 +21,7 @@ export default function Home() {
     lastUpdated: contextLastUpdated,
     refreshData,
     applyFilters,
+    ensureRows,
     filterOptions,
     currentFilters
   } = useData();
@@ -32,6 +33,11 @@ export default function Home() {
     router.prefetch('/charts');
     router.prefetch('/deep-analysis');
   }, [router]);
+
+  // Rows can be stale if filters were changed from a stats-only chart page.
+  useEffect(() => {
+    void ensureRows().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     setOriginal(contextData);

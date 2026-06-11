@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 
 export interface ComplaintFilters {
   search: string;
@@ -36,13 +36,42 @@ interface RefreshResult {
   };
 }
 
+export interface RepeatConsumer {
+  mobile: string;
+  name: string;
+  address: string;
+  total: number;
+  pending: number;
+  closed: number;
+  complaints: Record<string, string>[];
+}
+
+// Shape of the get_complaints_stats RPC payload (served by /api/complaints/stats).
+export interface ChartStats {
+  total: number;
+  byDivision: { k: string; n: number }[];
+  bySubStation: { k: string; n: number }[];
+  byAreaType: { k: string; n: number }[];
+  beyondByDivision: { k: string; n: number }[];
+  daily: { d: string; n: number; cr: number; frt: number; resSum: number; resN: number }[];
+  months: { key: string; label: string; total: number; beyond: number; resSum: number; resN: number }[];
+  monthHeat: { m: string; dow: number; hr: number; n: number }[];
+  monthSubStation: { m: string; k: string; n: number; resSum: number; resN: number }[];
+  monthDivision: { m: string; k: string; n: number; resSum: number; resN: number }[];
+  repeatMobile: RepeatConsumer[];
+  repeatNameAddr: RepeatConsumer[];
+}
+
 interface DataContextType {
   data: any[];
   loading: boolean;
+  stats: ChartStats | null;
+  statsLoading: boolean;
   lastUpdated: string;
   currentFilters: ComplaintFilters;
   filterOptions: FilterOptions;
-  applyFilters: (filters: ComplaintFilters) => Promise<void>;
+  applyFilters: (filters: ComplaintFilters, options?: { withRows?: boolean }) => Promise<void>;
+  ensureRows: () => Promise<void>;
   refreshData: () => Promise<RefreshResult>;
 }
 
@@ -207,9 +236,9 @@ function resolveFilters(filters: ComplaintFilters) {
   return filters;
 }
 
-function buildQueryString(filters: ComplaintFilters) {
+function buildFilterParams(filters: ComplaintFilters) {
   const resolved = resolveFilters(filters);
-  const params = new URLSearchParams({ fetchAll: 'true' });
+  const params = new URLSearchParams();
 
   if (resolved.search.trim()) params.set('search', resolved.search.trim());
   if (resolved.division) params.set('division', resolved.division);
@@ -220,15 +249,29 @@ function buildQueryString(filters: ComplaintFilters) {
   if (resolved.fromDT) params.set('fromDate', resolved.fromDT);
   if (resolved.toDT) params.set('toDate', resolved.toDT);
 
+  return params;
+}
+
+function buildQueryString(filters: ComplaintFilters) {
+  const params = buildFilterParams(filters);
+  params.set('fetchAll', 'true');
   return params.toString();
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<ChartStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState('');
   const [filterOptions, setFilterOptions] = useState<FilterOptions>(emptyOptions);
   const [currentFilters, setCurrentFilters] = useState<ComplaintFilters>(getDefaultTodayFilters);
+
+  // Filters the currently loaded rows correspond to. Chart pages fetch only
+  // stats, so rows can go stale; the main page calls ensureRows() to refetch.
+  const rowsFiltersRef = useRef<ComplaintFilters | null>(null);
+  const currentFiltersRef = useRef<ComplaintFilters>(currentFilters);
+  const rowsInFlightRef = useRef<{ filters: ComplaintFilters; promise: Promise<void> } | null>(null);
 
   const fetchOptions = async () => {
     try {
@@ -245,6 +288,36 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const loadStats = async (
+    filters: ComplaintFilters,
+    options: { forceRefresh?: boolean } = {}
+  ) => {
+    setStatsLoading(true);
+
+    try {
+      const params = buildFilterParams(filters);
+      if (options.forceRefresh) params.set('refresh', '1');
+      const response = await fetch(`/api/complaints/stats?${params.toString()}`);
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to fetch stats');
+      }
+
+      setStats(result.stats || null);
+
+      if (result.lastScrapedAt) {
+        setLastUpdated(result.lastScrapedAt);
+      }
+    } catch (error) {
+      console.error('Failed to load stats:', error);
+      setStats(null);
+      throw error;
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
   const loadComplaints = async (
     filters: ComplaintFilters,
     options: { forceRefresh?: boolean; silent?: boolean } = {}
@@ -255,7 +328,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setLoading(true);
     }
 
-    try {
+    const task = (async () => {
       const queryString = buildQueryString(filters);
       const url = `/api/complaints?${queryString}${forceRefresh ? '&refresh=1' : ''}`;
       const response = await fetch(url);
@@ -266,7 +339,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }
 
       setData(result.data || []);
-      setCurrentFilters(filters);
+      rowsFiltersRef.current = filters;
 
       if (result.lastScrapedAt) {
         setLastUpdated(result.lastScrapedAt);
@@ -280,18 +353,59 @@ export function DataProvider({ children }: { children: ReactNode }) {
           lastUpdated: result.lastScrapedAt || ''
         });
       }
+    })();
+
+    const inFlightEntry = { filters, promise: task.catch(() => undefined) as Promise<void> };
+    rowsInFlightRef.current = inFlightEntry;
+
+    try {
+      await task;
     } catch (error) {
       console.error('Failed to load complaints:', error);
       setData([]);
+      rowsFiltersRef.current = null;
       throw error;
     } finally {
+      if (rowsInFlightRef.current === inFlightEntry) {
+        rowsInFlightRef.current = null;
+      }
       if (!silent) {
         setLoading(false);
       }
     }
   };
 
-  const applyFilters = async (filters: ComplaintFilters) => {
+  const applyFilters = async (
+    filters: ComplaintFilters,
+    options: { withRows?: boolean } = {}
+  ) => {
+    const { withRows = true } = options;
+
+    setCurrentFilters(filters);
+    currentFiltersRef.current = filters;
+
+    if (withRows) {
+      await Promise.all([
+        loadComplaints(filters),
+        loadStats(filters).catch(() => undefined)
+      ]);
+    } else {
+      await loadStats(filters);
+    }
+  };
+
+  // Fetch rows for the current filters if the loaded rows don't match them
+  // (e.g. filters were changed from a stats-only chart page).
+  const ensureRows = async () => {
+    const filters = currentFiltersRef.current;
+    if (rowsFiltersRef.current && areFiltersEqual(rowsFiltersRef.current, filters)) {
+      return;
+    }
+    const inFlight = rowsInFlightRef.current;
+    if (inFlight && areFiltersEqual(inFlight.filters, filters)) {
+      await inFlight.promise;
+      return;
+    }
     await loadComplaints(filters);
   };
 
@@ -313,7 +427,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
         setLastUpdated(result.lastScrapedAt);
       }
 
-      await loadComplaints(currentFilters, { forceRefresh: true, silent: true });
+      const filters = currentFiltersRef.current;
+      const rowsAreCurrent =
+        rowsFiltersRef.current && areFiltersEqual(rowsFiltersRef.current, filters);
+
+      const tasks: Promise<unknown>[] = [loadStats(filters, { forceRefresh: true }).catch(() => undefined)];
+      if (rowsAreCurrent) {
+        tasks.push(loadComplaints(filters, { forceRefresh: true, silent: true }));
+      } else {
+        // Rows are stale anyway; let the main page refetch them on demand.
+        rowsFiltersRef.current = null;
+      }
+      await Promise.all(tasks);
 
       return {
         success: true,
@@ -332,6 +457,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const initialFilters = getDefaultTodayFilters();
+    currentFiltersRef.current = initialFilters;
     const cachedOptions = readClientCache<FilterOptions>('localStorage', FILTER_OPTIONS_CACHE_KEY, FILTER_OPTIONS_CACHE_TTL);
     const cachedTodayData = readClientCache<CachedTodayData>('sessionStorage', TODAY_DATA_CACHE_KEY, TODAY_DATA_CACHE_TTL);
 
@@ -345,14 +471,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
       areFiltersEqual(cachedTodayData.filters, initialFilters)
     ) {
       setData(cachedTodayData.data || []);
+      rowsFiltersRef.current = initialFilters;
       setLastUpdated(cachedTodayData.lastUpdated || '');
       setCurrentFilters(initialFilters);
       setLoading(false);
       void loadComplaints(initialFilters, { silent: true });
     } else {
-      void loadComplaints(initialFilters);
+      void loadComplaints(initialFilters).catch(() => undefined);
     }
 
+    void loadStats(initialFilters).catch(() => undefined);
     void fetchOptions();
   }, []);
 
@@ -361,10 +489,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       value={{
         data,
         loading,
+        stats,
+        statsLoading,
         lastUpdated,
         currentFilters,
         filterOptions,
         applyFilters,
+        ensureRows,
         refreshData
       }}
     >

@@ -15,9 +15,9 @@ import {
   LineController,
   BarController,
   PieController,
-  DoughnutController,
-  ChartConfiguration
+  DoughnutController
 } from 'chart.js';
+import type { ChartStats } from '../context/DataContext';
 
 Chart.register(
   CategoryScale,
@@ -36,11 +36,16 @@ Chart.register(
 );
 
 interface TrendChartsProps {
-  data: any[];
-  isClosedRow: (row: any) => boolean;
+  stats: ChartStats;
 }
 
-export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
+// '2026-06-11' -> '11/06/2026' (the label format the charts always used)
+const formatDateLabel = (isoDate: string) => {
+  const [y, m, d] = isoDate.split('-');
+  return `${d}/${m}/${y}`;
+};
+
+export default function TrendCharts({ stats }: TrendChartsProps) {
   const comparisonChartRef = useRef<HTMLCanvasElement>(null);
   const divisionChartRef = useRef<HTMLCanvasElement>(null);
   const beyondChartRef = useRef<HTMLCanvasElement>(null);
@@ -55,91 +60,22 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
   const dailyTrendChartInstance = useRef<Chart | null>(null);
   const areaTypeChartInstance = useRef<Chart | null>(null);
 
-  // Pre-calculate data for rendering checks
-  const beyondData = useMemo(() => {
-    const beyondMap = new Map<string, number>();
-    for (const r of data) {
-      const closedStatus = String(r['Closed Status'] || '').trim();
-      if (closedStatus === 'Closed Beyond') {
-        const division = String(r['Division'] || '').trim() || 'Unknown';
-        beyondMap.set(division, (beyondMap.get(division) || 0) + 1);
-      }
-    }
-    return Array.from(beyondMap.entries()).sort((a, b) => b[1] - a[1]);
-  }, [data]);
+  const beyondData = useMemo(
+    () => stats.beyondByDivision.map(({ k, n }) => [k, n] as [string, number]),
+    [stats]
+  );
 
   useEffect(() => {
-    if (data.length === 0) return;
-    // ... rest of the effect (other charts logic remains here)
+    if (stats.total === 0) return;
 
-    // Helper to parse DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
-    // Returns YYYY-MM-DD string or 'Unknown'
-    const normalizeDateKey = (dateStr: string) => {
-      if (!dateStr) return 'Unknown';
-      // Match dd/mm/yyyy where separators can be / - .
-      const match = dateStr.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-      if (match) {
-        const day = match[1].padStart(2, '0');
-        const month = match[2].padStart(2, '0');
-        const year = match[3];
-        return `${day}/${month}/${year}`;
-      }
-      return 'Unknown';
-    };
+    const total = stats.total;
 
-    const parseDateFromKey = (dateKey: string) => {
-      const match = dateKey.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      if (match) {
-        // match[1] = day, match[2] = month, match[3] = year
-        // Create date as YYYY-MM-DD
-        return new Date(`${match[3]}-${match[2]}-${match[1]}`);
-      }
-      return new Date(0); // Fallback for unknown
-    };
+    // daily is sorted by date ascending already
+    const comparisonDays = stats.daily.filter((day) => day.cr > 0 || day.frt > 0);
+    const divisionData = stats.byDivision.map(({ k, n }) => [k, n] as [string, number]);
+    const subStationData = stats.bySubStation.slice(0, 15).map(({ k, n }) => [k, n] as [string, number]);
+    const areaTypeData = stats.byAreaType.map(({ k, n }) => [k, n] as [string, number]);
 
-    const controlRoomClosed = data.filter(r => {
-      const isClosed = isClosedRow(r);
-      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
-      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-      return isClosed && isControlRoom;
-    });
-
-    const frtClosed = data.filter(r => {
-      const isClosed = isClosedRow(r);
-      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
-      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-      return isClosed && !isControlRoom;
-    });
-
-    const controlRoomMap = new Map<string, number>();
-    for (const r of controlRoomClosed) {
-      const key = normalizeDateKey(String(r['Complaint Date and Time'] || ''));
-      if (key !== 'Unknown') {
-        controlRoomMap.set(key, (controlRoomMap.get(key) || 0) + 1);
-      }
-    }
-
-    const frtMap = new Map<string, number>();
-    for (const r of frtClosed) {
-      const key = normalizeDateKey(String(r['Complaint Date and Time'] || ''));
-      if (key !== 'Unknown') {
-        frtMap.set(key, (frtMap.get(key) || 0) + 1);
-      }
-    }
-
-    const allDates = new Set([...controlRoomMap.keys(), ...frtMap.keys()]);
-    const sortedDates = Array.from(allDates).sort((a, b) => {
-      const da = parseDateFromKey(a);
-      const db = parseDateFromKey(b);
-      return da.getTime() - db.getTime();
-    });
-
-    const divisionMap = new Map<string, number>();
-    for (const r of data) {
-      const division = String(r['Division'] || '').trim() || 'Unknown';
-      divisionMap.set(division, (divisionMap.get(division) || 0) + 1);
-    }
-    const divisionData = Array.from(divisionMap.entries()).sort((a, b) => b[1] - a[1]);
     const divisionColors = divisionData.map((_, i) => {
       // Professional Palette: Blues, Teals, Indigos, Slates
       const palette = [
@@ -166,17 +102,17 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
     if (dailyTrendChartInstance.current) dailyTrendChartInstance.current.destroy();
     if (areaTypeChartInstance.current) areaTypeChartInstance.current.destroy();
 
-    if (comparisonChartRef.current && sortedDates.length > 0) {
+    if (comparisonChartRef.current && comparisonDays.length > 0) {
       const ctx = comparisonChartRef.current.getContext('2d');
       if (ctx) {
         comparisonChartInstance.current = new Chart(ctx, {
           type: 'line',
           data: {
-            labels: sortedDates,
+            labels: comparisonDays.map((day) => formatDateLabel(day.d)),
             datasets: [
               {
                 label: 'Control Room Closed',
-                data: sortedDates.map(date => controlRoomMap.get(date) || 0),
+                data: comparisonDays.map((day) => day.cr),
                 borderColor: '#0f172a', // Navy (Slate 900)
                 backgroundColor: 'rgba(15, 23, 42, 0.1)',
                 tension: 0.3,
@@ -186,7 +122,7 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
               },
               {
                 label: 'FRT Closed',
-                data: sortedDates.map(date => frtMap.get(date) || 0),
+                data: comparisonDays.map((day) => day.frt),
                 borderColor: '#0284c7', // Sky 600
                 backgroundColor: 'rgba(2, 132, 199, 0.1)',
                 tension: 0.3,
@@ -261,7 +197,6 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
     }
 
     // Beyond Chart - Division-wise Closed Beyond
-    // Data is pre-calculated in useMemo (beyondData)
 
     if (beyondChartRef.current && beyondData.length > 0) {
       const ctx = beyondChartRef.current.getContext('2d');
@@ -289,7 +224,7 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
               legend: { position: 'bottom' },
               tooltip: {
                 callbacks: {
-                  label: (context) => `${context.label}: ${context.parsed} (${((context.parsed / data.length) * 100).toFixed(1)}%)`
+                  label: (context) => `${context.label}: ${context.parsed} (${((context.parsed / total) * 100).toFixed(1)}%)`
                 }
               }
             }
@@ -299,12 +234,6 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
     }
 
     // Sub Station Bar Chart
-    const subStationMap = new Map<string, number>();
-    for (const r of data) {
-      const subStation = String(r['Sub Station'] || '').trim() || 'Unknown';
-      subStationMap.set(subStation, (subStationMap.get(subStation) || 0) + 1);
-    }
-    const subStationData = Array.from(subStationMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 15);
     const professionalPalette = [
       'rgba(30, 58, 138, 0.8)',  // Primary 900
       'rgba(29, 78, 216, 0.8)',  // Primary 700
@@ -371,29 +300,16 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
     }
 
     // Daily Trend Area Chart
-    const dailyMap = new Map<string, number>();
-    for (const r of data) {
-      const key = normalizeDateKey(String(r['Complaint Date and Time'] || ''));
-      if (key !== 'Unknown') {
-        dailyMap.set(key, (dailyMap.get(key) || 0) + 1);
-      }
-    }
-    const dailyDates = Array.from(dailyMap.keys()).sort((a, b) => {
-      const da = parseDateFromKey(a);
-      const db = parseDateFromKey(b);
-      return da.getTime() - db.getTime();
-    });
-
-    if (dailyTrendChartRef.current && dailyDates.length > 0) {
+    if (dailyTrendChartRef.current && stats.daily.length > 0) {
       const ctx = dailyTrendChartRef.current.getContext('2d');
       if (ctx) {
         dailyTrendChartInstance.current = new Chart(ctx, {
           type: 'line',
           data: {
-            labels: dailyDates,
+            labels: stats.daily.map((day) => formatDateLabel(day.d)),
             datasets: [{
               label: 'Daily Complaints',
-              data: dailyDates.map(date => dailyMap.get(date) || 0),
+              data: stats.daily.map((day) => day.n),
               borderColor: '#64748b', // Slate 500
               backgroundColor: 'rgba(100, 116, 139, 0.2)',
               tension: 0.4,
@@ -418,13 +334,6 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
     }
 
     // Area Type Chart
-    const areaTypeMap = new Map<string, number>();
-    for (const r of data) {
-      const areaType = String(r['Area Type'] || '').trim() || 'Unknown';
-      areaTypeMap.set(areaType, (areaTypeMap.get(areaType) || 0) + 1);
-    }
-    const areaTypeData = Array.from(areaTypeMap.entries()).sort((a, b) => b[1] - a[1]);
-
     if (areaTypeChartRef.current && areaTypeData.length > 0) {
       const ctx = areaTypeChartRef.current.getContext('2d');
       if (ctx) {
@@ -461,7 +370,7 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
               legend: { position: 'bottom' },
               tooltip: {
                 callbacks: {
-                  label: (context) => `${context.label}: ${context.parsed} (${((context.parsed / data.length) * 100).toFixed(1)}%)`
+                  label: (context) => `${context.label}: ${context.parsed} (${((context.parsed / total) * 100).toFixed(1)}%)`
                 }
               }
             }
@@ -478,9 +387,9 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
       if (dailyTrendChartInstance.current) dailyTrendChartInstance.current.destroy();
       if (areaTypeChartInstance.current) areaTypeChartInstance.current.destroy();
     };
-  }, [data, isClosedRow]);
+  }, [stats, beyondData]);
 
-  if (data.length === 0) return null;
+  if (stats.total === 0) return null;
 
   return (
     <div className="space-y-8">
@@ -499,7 +408,7 @@ export default function TrendCharts({ data, isClosedRow }: TrendChartsProps) {
           </div>
           <div className="bg-white px-4 py-2 rounded-lg shadow-md border border-gray-200">
             <p className="text-xs text-gray-500">Total Records</p>
-            <p className="text-2xl font-bold text-blue-600">{data.length}</p>
+            <p className="text-2xl font-bold text-blue-600">{stats.total}</p>
           </div>
         </div>
 

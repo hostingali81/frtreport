@@ -2,14 +2,15 @@
 
 import { useMemo, useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import type { ChartStats } from '../context/DataContext';
 
 const Select = dynamic(() => import('react-select'), { ssr: false });
 
 interface MonthComparisonProps {
-    data: any[];
+    stats: ChartStats;
 }
 
-export default function MonthComparison({ data }: MonthComparisonProps) {
+export default function MonthComparison({ stats }: MonthComparisonProps) {
     const totalChartRef = useRef<HTMLCanvasElement>(null);
     const beyondChartRef = useRef<HTMLCanvasElement>(null);
     const timeChartRef = useRef<HTMLCanvasElement>(null);
@@ -21,47 +22,11 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
     const [monthA, setMonthA] = useState<string | null>(null);
     const [monthB, setMonthB] = useState<string | null>(null);
 
-    // Helper to parse date
-    const parsePossibleDate = (value: string) => {
-        const clean = value.trim();
-        if (!clean) return null;
-        const match = clean.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-        if (match) {
-            const day = match[1].padStart(2, '0');
-            const month = match[2].padStart(2, '0');
-            const year = match[3];
-            const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-            let hours = 0;
-            let minutes = 0;
-            if (timeMatch) {
-                hours = parseInt(timeMatch[1], 10);
-                minutes = parseInt(timeMatch[2], 10);
-                if (timeMatch[3]) {
-                    const ampm = timeMatch[3].toUpperCase();
-                    if (ampm === 'PM' && hours < 12) hours += 12;
-                    if (ampm === 'AM' && hours === 12) hours = 0;
-                }
-            }
-            return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hours, minutes);
-        }
-        return null;
-    };
-
-    // Get available months
-    const monthOptions = useMemo(() => {
-        const months = new Set<string>();
-        data.forEach(r => {
-            const val = String(r['Complaint Date and Time'] || r['Complaint Date'] || '');
-            const d = parsePossibleDate(val);
-            if (d) {
-                const key = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-                months.add(key);
-            }
-        });
-        return Array.from(months)
-            .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
-            .map(m => ({ value: m, label: m }));
-    }, [data]);
+    // stats.months is sorted latest-first
+    const monthOptions = useMemo(
+        () => stats.months.map((m) => ({ value: m.label, label: m.label })),
+        [stats]
+    );
 
     // Set default selection
     useEffect(() => {
@@ -80,32 +45,14 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
     const getMetrics = (monthLabel: string | null) => {
         if (!monthLabel) return { total: 0, beyond: 0, avgTime: 0 };
 
-        const rows = data.filter(r => {
-            const val = String(r['Complaint Date and Time'] || r['Complaint Date'] || '');
-            const d = parsePossibleDate(val);
-            return d && d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) === monthLabel;
-        });
+        const month = stats.months.find((m) => m.label === monthLabel);
+        if (!month) return { total: 0, beyond: 0, avgTime: 0 };
 
-        const total = rows.length;
-        const beyond = rows.filter(r => String(r['Closed Status'] || '').trim() === 'Closed Beyond').length;
-
-        let totalTimeMs = 0;
-        let countTime = 0;
-
-        rows.forEach(r => {
-            const open = parsePossibleDate(String(r['Complaint Date and Time'] || r['Complaint Date'] || ''));
-            const close = parsePossibleDate(String(r['Closed Date'] || ''));
-            if (open && close) {
-                const diff = close.getTime() - open.getTime();
-                if (diff > 0) {
-                    totalTimeMs += diff;
-                    countTime++;
-                }
-            }
-        });
-
-        const avgTime = countTime > 0 ? (totalTimeMs / countTime) / (1000 * 60 * 60) : 0;
-        return { total, beyond, avgTime };
+        return {
+            total: month.total,
+            beyond: month.beyond,
+            avgTime: month.resN > 0 ? month.resSum / month.resN / 60 : 0
+        };
     };
 
     useEffect(() => {
@@ -225,7 +172,7 @@ export default function MonthComparison({ data }: MonthComparisonProps) {
             if (beyondInstance.current) beyondInstance.current.destroy();
             if (timeInstance.current) timeInstance.current.destroy();
         };
-    }, [monthA, monthB, data]);
+    }, [monthA, monthB, stats]);
 
     return (
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 animate-in fade-in duration-500">

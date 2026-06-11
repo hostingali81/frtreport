@@ -1,108 +1,31 @@
-import React, { useMemo, useState } from 'react';
-import { FiSmartphone, FiUser, FiMapPin, FiClock, FiActivity, FiX, FiList } from 'react-icons/fi';
+import React, { useState } from 'react';
+import { FiSmartphone, FiMapPin, FiActivity, FiX, FiList } from 'react-icons/fi';
+import type { ChartStats, RepeatConsumer } from '../context/DataContext';
 
 interface ConsumerInsightsProps {
-    data: any[];
+    stats: ChartStats;
 }
 
-const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ data }) => {
+const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ stats }) => {
     const [limit, setLimit] = useState(10);
     const [selectedConsumer, setSelectedConsumer] = useState<{
         type: 'mobile' | 'address';
         key: string;
-        details: any;
-        complaints: any[];
+        details: RepeatConsumer;
+        complaints: Record<string, string>[];
     } | null>(null);
 
-    // 1. Repeaters by Mobile
-    const byMobile = useMemo(() => {
-        const map = new Map<string, { mobile: string; name: string; address: string; total: number; pending: number; closed: number; timestamps: string[]; }>();
+    // Repeat consumers come pre-computed from the stats RPC (top 50 each,
+    // complaint history embedded, sorted by total desc).
+    const byMobile = stats.repeatMobile;
+    const byNameAddress = stats.repeatNameAddr;
 
-        data.forEach(r => {
-            const mobile = r['Consumer Mobile'] ? String(r['Consumer Mobile']).trim() : null;
-            if (!mobile || mobile.length < 5) return;
-
-            const entry = map.get(mobile) || {
-                mobile,
-                name: r['Consumer Name'] || 'Unknown',
-                address: r['Consumer Address'] || 'Unknown',
-                total: 0,
-                pending: 0,
-                closed: 0,
-                timestamps: [] as string[]
-            };
-
-            entry.total += 1;
-            const status = String(r['Status'] || '').toLowerCase();
-            if (status.includes('pending')) entry.pending += 1;
-            else if (status.includes('closed')) entry.closed += 1;
-
-            if (r['Consumer Name']) entry.name = r['Consumer Name'];
-            if (r['Consumer Address']) entry.address = r['Consumer Address'];
-
-            map.set(mobile, entry);
-        });
-
-        return Array.from(map.values())
-            .filter(x => x.total > 1)
-            .sort((a, b) => b.total - a.total)
-            .slice(0, 50);
-    }, [data]);
-
-    // 2. Repeaters by Name + Address
-    const byNameAddress = useMemo(() => {
-        const map = new Map<string, { mobile: string; name: string; address: string; total: number; pending: number; closed: number; }>();
-
-        data.forEach(r => {
-            const name = r['Consumer Name'] ? String(r['Consumer Name']).trim() : '';
-            const address = r['Consumer Address'] ? String(r['Consumer Address']).trim() : '';
-            if (!name) return;
-
-            const key = `${name}|${address}`.toLowerCase();
-            const entry = map.get(key) || {
-                mobile: r['Consumer Mobile'] || 'N/A',
-                name,
-                address,
-                total: 0,
-                pending: 0,
-                closed: 0
-            };
-
-            entry.total += 1;
-            const status = String(r['Status'] || '').toLowerCase();
-            if (status.includes('pending')) entry.pending += 1;
-            else if (status.includes('closed')) entry.closed += 1;
-
-            if (r['Consumer Mobile']) entry.mobile = r['Consumer Mobile'];
-
-            map.set(key, entry);
-        });
-
-        return Array.from(map.values())
-            .filter(x => x.total > 1)
-            .sort((a, b) => b.total - a.total)
-            .slice(0, 50);
-    }, [data]);
-
-    const handleRowClick = (type: 'mobile' | 'address', item: any) => {
-        let complaints = [];
-        if (type === 'mobile') {
-            complaints = data.filter(r => (r['Consumer Mobile'] ? String(r['Consumer Mobile']).trim() : '') === item.mobile)
-                .sort((a, b) => new Date(b['Complaint Date and Time']).getTime() - new Date(a['Complaint Date and Time']).getTime());
-        } else {
-            const key = `${item.name}|${item.address}`.toLowerCase();
-            complaints = data.filter(r => {
-                const n = r['Consumer Name'] ? String(r['Consumer Name']).trim() : '';
-                const a = r['Consumer Address'] ? String(r['Consumer Address']).trim() : '';
-                return `${n}|${a}`.toLowerCase() === key;
-            }).sort((a, b) => new Date(b['Complaint Date and Time']).getTime() - new Date(a['Complaint Date and Time']).getTime());
-        }
-
+    const handleRowClick = (type: 'mobile' | 'address', item: RepeatConsumer) => {
         setSelectedConsumer({
             type,
             key: type === 'mobile' ? item.mobile : `${item.name}|${item.address}`,
             details: item,
-            complaints
+            complaints: item.complaints || []
         });
     };
 
@@ -121,7 +44,7 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ data }) => {
         return 'bg-blue-100 text-blue-800 border-blue-200';
     };
 
-    if (!data || data.length === 0) return null;
+    if (stats.total === 0) return null;
 
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative">

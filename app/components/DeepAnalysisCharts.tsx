@@ -2,15 +2,42 @@
 
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import dynamic from 'next/dynamic';
+import type { ChartStats } from '../context/DataContext';
 
 // Dynamic imports
 const Select = dynamic(() => import('react-select'), { ssr: false });
 
 interface DeepAnalysisChartsProps {
-    data: any[];
+    stats: ChartStats;
 }
 
-function DeepAnalysisCharts({ data }: DeepAnalysisChartsProps) {
+// Aggregate {m, k, resSum, resN} groups into per-key averages, optionally
+// restricted to one month key. Only keys with at least one closed pair show up
+// (same as the old row-based calculation).
+function averageByKey(
+    groups: { m: string; k: string; n: number; resSum: number; resN: number }[],
+    monthKey: string | null
+) {
+    const map = new Map<string, { resSum: number; resN: number; count: number }>();
+    for (const g of groups) {
+        if (monthKey && g.m !== monthKey) continue;
+        const curr = map.get(g.k) || { resSum: 0, resN: 0, count: 0 };
+        curr.resSum += g.resSum;
+        curr.resN += g.resN;
+        curr.count += g.n;
+        map.set(g.k, curr);
+    }
+    return Array.from(map.entries())
+        .filter(([, v]) => v.resN > 0)
+        .map(([k, v]) => ({
+            key: k,
+            avgMins: Math.round(v.resSum / v.resN),
+            count: v.resN
+        }))
+        .sort((a, b) => b.avgMins - a.avgMins);
+}
+
+function DeepAnalysisCharts({ stats }: DeepAnalysisChartsProps) {
     // Chart Refs
     const resolutionChartRef = useRef<HTMLCanvasElement>(null);
     const hourlyChartRef = useRef<HTMLCanvasElement>(null);
@@ -26,149 +53,38 @@ function DeepAnalysisCharts({ data }: DeepAnalysisChartsProps) {
         return new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
     });
 
-    // Helpers
-    const parseDate = (val: string) => {
-        if (!val) return null;
-        const clean = val.trim();
-
-        // Try DD/MM/YYYY or DD-MM-YYYY
-        let day, month, year;
-        const dmy = clean.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-        if (dmy) {
-            day = parseInt(dmy[1]);
-            month = parseInt(dmy[2]);
-            year = parseInt(dmy[3]);
-        } else {
-            // Try YYYY-MM-DD
-            const ymd = clean.match(/(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
-            if (ymd) {
-                year = parseInt(ymd[1]);
-                month = parseInt(ymd[2]);
-                day = parseInt(ymd[3]);
-            } else {
-                return null;
-            }
-        }
-
-        let h = 0, m = 0;
-        const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-        if (timeMatch) {
-            h = parseInt(timeMatch[1]);
-            m = parseInt(timeMatch[2]);
-            if (timeMatch[3]?.toLowerCase() === 'pm' && h < 12) h += 12;
-            if (timeMatch[3]?.toLowerCase() === 'am' && h === 12) h = 0;
-        }
-        return new Date(year, month - 1, day, h, m);
-    };
-
-    // Extract available months from data
     const monthOptions = useMemo(() => {
-        const months = new Set<string>();
-        data.forEach(r => {
-            const d = parseDate(String(r['Complaint Date and Time'] || ''));
-            if (d) {
-                // Use consistent formatting
-                const key = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-                months.add(key);
-            }
-        });
-        const options = Array.from(months)
-            .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
-            .map(m => ({ value: m, label: m }));
+        const options = stats.months.map((m) => ({ value: m.label, label: m.label }));
         return [{ value: 'All', label: 'All Months' }, ...options];
-    }, [data]);
+    }, [stats]);
 
-    // Derived Data for Resolution Chart
-    const resolutionData = useMemo(() => {
-        // Filter by month first
-        let filteredData = data;
-        if (selectedMonth !== 'All') {
-            filteredData = data.filter(r => {
-                const d = parseDate(String(r['Complaint Date and Time'] || ''));
-                if (!d) return false;
-                return d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) === selectedMonth;
-            });
-        }
+    // 'June 2026' -> '2026-06' (null = All)
+    const selectedMonthKey = useMemo(() => {
+        if (selectedMonth === 'All') return null;
+        return stats.months.find((m) => m.label === selectedMonth)?.key ?? null;
+    }, [stats, selectedMonth]);
 
-        const subMap = new Map<string, { totalMs: number; count: number }>();
-        filteredData.forEach(r => {
-            const sub = String(r['Sub Station'] || '').trim() || 'Unknown';
-            const open = parseDate(String(r['Complaint Date and Time'] || ''));
-            // Try 'Closed Date' first, fall back to checking if row is closed some other way?
-            // User reports calculation error. Assume strictly filtered closed rows.
-            const closedRaw = String(r['Closed Date'] || '');
-            const close = parseDate(closedRaw);
+    const monthIsKnown = selectedMonth === 'All' || selectedMonthKey !== null;
 
-            if (sub && open && close && close.getTime() > open.getTime()) {
-                const diff = close.getTime() - open.getTime();
-                const curr = subMap.get(sub) || { totalMs: 0, count: 0 };
-                subMap.set(sub, { totalMs: curr.totalMs + diff, count: curr.count + 1 });
-            }
-        });
+    const resolutionData = useMemo(
+        () => (monthIsKnown ? averageByKey(stats.monthSubStation, selectedMonthKey) : []),
+        [stats, selectedMonthKey, monthIsKnown]
+    );
 
-        // Calculate Average
-        const result = Array.from(subMap.entries()).map(([sub, val]) => ({
-            sub,
-            avgMins: Math.round((val.totalMs / val.count) / 60000), // minutes
-            count: val.count
-        }));
-
-        // Sort by avg time
-        return result.sort((a, b) => b.avgMins - a.avgMins); // Show All
-    }, [data, selectedMonth]);
-
-    // Hourly Distribution (Global or filtered by month? Let's obey filteredMonth for consistency)
     const hourlyData = useMemo(() => {
-        let filteredData = data;
-        if (selectedMonth !== 'All') {
-            filteredData = data.filter(r => {
-                const d = parseDate(String(r['Complaint Date and Time'] || ''));
-                if (!d) return false;
-                return d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) === selectedMonth;
-            });
-        }
         const hours = new Array(24).fill(0);
-        filteredData.forEach(r => {
-            const d = parseDate(String(r['Complaint Date and Time'] || ''));
-            if (d) {
-                hours[d.getHours()]++;
-            }
-        });
-        return hours;
-    }, [data, selectedMonth]);
-
-    // Division Efficiency (Global or filtered? consistency -> filtered)
-    const divisionEfficiency = useMemo(() => {
-        let filteredData = data;
-        if (selectedMonth !== 'All') {
-            filteredData = data.filter(r => {
-                const d = parseDate(String(r['Complaint Date and Time'] || ''));
-                if (!d) return false;
-                return d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) === selectedMonth;
-            });
+        if (!monthIsKnown) return hours;
+        for (const cell of stats.monthHeat) {
+            if (selectedMonthKey && cell.m !== selectedMonthKey) continue;
+            hours[cell.hr] += cell.n;
         }
-        const divMap = new Map<string, { totalMs: number; count: number }>();
-        filteredData.forEach(r => {
-            const div = String(r['Division'] || '').trim() || 'Unknown';
-            const open = parseDate(String(r['Complaint Date and Time'] || ''));
-            // Try 'Closed Date' first, fall back to 'Closed Date and Time' if needed? 
-            // Using existing logic for consistency
-            const closedRaw = String(r['Closed Date'] || '');
-            const close = parseDate(closedRaw);
+        return hours;
+    }, [stats, selectedMonthKey, monthIsKnown]);
 
-            if (div && open && close && close.getTime() > open.getTime()) {
-                const diff = close.getTime() - open.getTime();
-                const curr = divMap.get(div) || { totalMs: 0, count: 0 };
-                divMap.set(div, { totalMs: curr.totalMs + diff, count: curr.count + 1 });
-            }
-        });
-        return Array.from(divMap.entries()).map(([div, val]) => ({
-            div,
-            avgMins: Math.round((val.totalMs / val.count) / 60000), // Change to minutes for consistent int math
-            count: val.count
-        })).sort((a, b) => b.avgMins - a.avgMins);
-    }, [data, selectedMonth]);
-
+    const divisionEfficiency = useMemo(
+        () => (monthIsKnown ? averageByKey(stats.monthDivision, selectedMonthKey) : []),
+        [stats, selectedMonthKey, monthIsKnown]
+    );
 
     // Effect to render charts
     useEffect(() => {
@@ -190,7 +106,7 @@ function DeepAnalysisCharts({ data }: DeepAnalysisChartsProps) {
                 resolutionChartInstance.current = new Chart(resolutionChartRef.current, {
                     type: 'bar',
                     data: {
-                        labels: resolutionData.map(d => d.sub),
+                        labels: resolutionData.map(d => d.key),
                         datasets: [{
                             label: 'Avg Resolution Time (Minutes)',
                             data: resolutionData.map(d => d.avgMins),
@@ -320,7 +236,7 @@ function DeepAnalysisCharts({ data }: DeepAnalysisChartsProps) {
                 divisionEfficiencyChartInstance.current = new Chart(divisionEfficiencyChartRef.current, {
                     type: 'bar',
                     data: {
-                        labels: divisionEfficiency.map(d => d.div),
+                        labels: divisionEfficiency.map(d => d.key),
                         datasets: [{
                             label: 'Avg Resolution Time (Minutes)',
                             data: divisionEfficiency.map(d => d.avgMins),
@@ -396,7 +312,7 @@ function DeepAnalysisCharts({ data }: DeepAnalysisChartsProps) {
 
     }, [resolutionData, hourlyData, divisionEfficiency, selectedMonth]);
 
-    if (data.length === 0) return null;
+    if (stats.total === 0) return null;
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500">

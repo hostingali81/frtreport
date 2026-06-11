@@ -33,15 +33,14 @@ import { getDefaultTodayFilters, useData } from '../context/DataContext';
 
 export default function DeepAnalysisPage() {
     const {
-        data: contextData,
-        loading: contextLoading,
+        stats,
+        statsLoading,
         refreshData,
         applyFilters,
         filterOptions,
         currentFilters
     } = useData();
     const router = useRouter();
-    const original = contextData;
     const [error, setError] = useState('');
     const [isReady, setIsReady] = useState(false);
 
@@ -312,6 +311,7 @@ export default function DeepAnalysisPage() {
         setError('');
 
         try {
+            // Deep analysis renders from server-computed stats; no need to download rows.
             await applyFilters({
                 search,
                 division: divisionFilter,
@@ -322,7 +322,7 @@ export default function DeepAnalysisPage() {
                 fromDT,
                 toDT,
                 monthFilter: 'All'
-            });
+            }, { withRows: false });
         } catch (err: any) {
             setError(err.message || 'Failed to load deep analysis data');
         }
@@ -356,10 +356,10 @@ export default function DeepAnalysisPage() {
                                     setError(result.error || 'Refresh failed');
                                 }
                             }}
-                            disabled={contextLoading}
+                            disabled={statsLoading}
                             className="inline-flex items-center gap-2 bg-sky-700 hover:bg-sky-800 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-sm"
                         >
-                            <FiRefreshCw className={contextLoading ? 'animate-spin' : ''} /> Refresh
+                            <FiRefreshCw className={statsLoading ? 'animate-spin' : ''} /> Refresh
                         </button>
                     </div>
                 </header>
@@ -413,18 +413,18 @@ export default function DeepAnalysisPage() {
                             applyCustomDateShift={applyCustomDateShift}
                             clearAllFilters={clearAllFilters}
                             onApply={applyCurrentFilters}
-                            loading={contextLoading}
+                            loading={statsLoading}
                         />
                     </div>
                 )}
 
-                {!contextLoading && !error && original.length === 0 && (
+                {!statsLoading && !error && (!stats || stats.total === 0) && (
                     <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 px-4 py-3 rounded">
                         <p className="font-semibold">⚠️ No data available</p>
                     </div>
                 )}
 
-                {contextLoading && !error && (
+                {statsLoading && !error && (
                     <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
                         <div className="flex items-center justify-center py-16">
                             <div className="text-center">
@@ -435,11 +435,11 @@ export default function DeepAnalysisPage() {
                     </div>
                 )}
 
-                {!contextLoading && !error && original.length > 0 && (
+                {!statsLoading && !error && stats && stats.total > 0 && (
                     <>
                         <div className="mb-8">
                             {isReady ? (
-                                <MonthComparison data={original} />
+                                <MonthComparison stats={stats} />
                             ) : (
                                 <div className="h-96 bg-gray-100 rounded-2xl animate-pulse flex items-center justify-center text-gray-400">Loading Charts...</div>
                             )}
@@ -447,20 +447,20 @@ export default function DeepAnalysisPage() {
 
                         <div className="mb-8">
                             {isReady ? (
-                                <ConsumerInsights data={original} />
+                                <ConsumerInsights stats={stats} />
                             ) : (
                                 <div className="h-96 bg-gray-100 rounded-2xl animate-pulse"></div>
                             )}
                         </div>
 
                         {isReady ? (
-                            <DeepAnalysisCharts data={original} />
+                            <DeepAnalysisCharts stats={stats} />
                         ) : (
                             <div className="h-96 bg-gray-100 rounded-2xl animate-pulse"></div>
                         )}
 
                         {isReady ? (
-                            <AdvancedInsights data={original} />
+                            <AdvancedInsights stats={stats} />
                         ) : (
                             <div className="h-96 bg-gray-100 rounded-2xl animate-pulse"></div>
                         )}
