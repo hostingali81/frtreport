@@ -4,7 +4,9 @@ import {
   getLastSuccessfulScrape,
   loadFromNewDb,
   loadFromOldDb,
+  scrapeFrtFast,
   scrapeWithPuppeteer,
+  isFatalFrtLoginError,
   saveToNewDb,
   saveToOldDb,
   getCurrentISTTime,
@@ -118,8 +120,17 @@ export async function GET(request: Request) {
       // But useful if running locally
     }
 
-    // Scrape with loader tracking - no retries needed!
-    const payload = await scrapeWithPuppeteer(username, password, fromDate, toDate);
+    // Fast path: replay the captured report API session (no browser unless the
+    // session needs refreshing). Falls back to the DOM scraper on failure.
+    let payload;
+    try {
+      payload = await scrapeFrtFast(username, password, fromDate, toDate);
+    } catch (fastError: any) {
+      const message = fastError?.message || String(fastError);
+      if (isFatalFrtLoginError(message)) throw fastError;
+      console.warn('[SCRAPE] Fast API scrape failed, falling back to browser scraper:', message);
+      payload = await scrapeWithPuppeteer(username, password, fromDate, toDate);
+    }
     const scrapeDuration = Math.round((Date.now() - startTime) / 1000);
     const scrapedAt = new Date().toLocaleString('en-IN', { 
       timeZone: 'Asia/Kolkata',

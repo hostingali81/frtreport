@@ -1,5 +1,12 @@
 import { NextResponse } from 'next/server';
-import { scrapeWithPuppeteer, saveToNewDb, checkNewTablesExist, getLastSuccessfulScrape } from '../../lib/shared-scraper';
+import {
+  scrapeFrtFast,
+  scrapeWithPuppeteer,
+  isFatalFrtLoginError,
+  saveToNewDb,
+  checkNewTablesExist,
+  getLastSuccessfulScrape
+} from '../../lib/shared-scraper';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Extend to max allowed on Hobby (was 10, but cron might allow up to 60)
@@ -61,8 +68,17 @@ export async function GET(request: Request) {
 
     console.log('[CRON] Starting Direct Scrape...', { fromDate, toDate });
 
-    // Direct call - no fetch overhead
-    const payload = await scrapeWithPuppeteer(username, password, fromDate, toDate);
+    // Fast path: replay the captured report API session (no browser unless the
+    // session needs refreshing). Falls back to the DOM scraper on failure.
+    let payload;
+    try {
+      payload = await scrapeFrtFast(username, password, fromDate, toDate);
+    } catch (fastError: any) {
+      const message = fastError?.message || String(fastError);
+      if (isFatalFrtLoginError(message)) throw fastError;
+      console.warn('[CRON] Fast API scrape failed, falling back to browser scraper:', message);
+      payload = await scrapeWithPuppeteer(username, password, fromDate, toDate);
+    }
     const scrapeDuration = Math.round((Date.now() - startTime) / 1000);
 
     if (useNewSystem && payload.data && payload.data.length > 0) {

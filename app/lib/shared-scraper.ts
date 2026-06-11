@@ -513,9 +513,18 @@ type FrtResponseLike = {
     status?: () => number;
 };
 
+type FrtRequestLike = {
+    url: () => string;
+    method: () => string;
+    headers: () => Record<string, string>;
+    postData: () => string | undefined;
+};
+
 type FrtPageLike = {
     setUserAgent: (userAgent: string) => Promise<void>;
-    on: (event: 'dialog', handler: (dialog: FrtDialogLike) => Promise<void>) => void;
+    on: ((event: 'dialog', handler: (dialog: FrtDialogLike) => Promise<void>) => void)
+        & ((event: 'request', handler: (request: FrtRequestLike) => void) => void);
+    cookies: () => Promise<Array<{ name: string; value: string }>>;
     evaluateOnNewDocument: (source: string) => Promise<void>;
     goto: (url: string, options?: Record<string, unknown>) => Promise<unknown>;
     waitForSelector: (selector: string, options?: Record<string, unknown>) => Promise<unknown>;
@@ -559,8 +568,32 @@ type FrtSessionDialogControls = {
 
 export type FrtScraperSession = {
     scrapeRange: (fromDate?: string, toDate?: string) => Promise<FrtScrapePayload>;
+    captureApiSession?: () => Promise<FrtApiSession>;
     close: () => Promise<void>;
 };
+
+// Captured authenticated request "recipe" for the report API. With this we can
+// pull reports via plain HTTP fetch - no browser needed - until the FRT
+// session/token expires.
+export type FrtApiSession = {
+    savedAt: string;
+    baseUrl: string;
+    endpoint: string;
+    referer: string;
+    cookieHeader: string;
+    headers: Record<string, string>;
+    inputxmlTemplate: string;
+    bodyTemplate: Record<string, unknown>;
+};
+
+const FRT_BASE_URL = 'https://www.frtbarabanki.com';
+const FRT_FORM_URL = `${FRT_BASE_URL}/UI/Form?FormId=13345`;
+const FRT_REPORT_ENDPOINT = '/api/AppsavyServices/GetRelationalDataA';
+const FRT_FROM_CONTROL_ID = '143709';
+const FRT_TO_CONTROL_ID = '143707';
+const FRT_API_SESSION_KEY = 'frt_api_session';
+const FRT_DEFAULT_START_DATE = '2025-11-01';
+const FRT_MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 async function scrapeAuthenticatedRange(
     page: FrtPageLike,
@@ -1076,13 +1109,28 @@ export async function createFrtScraperSession(username: string, password: string
                     }
                 }
 
-                if (!loginJson || String(loginJson.Status) !== '1') {
+                if (loginJson && String(loginJson.Status) !== '1') {
                     throw new Error(getFrtLoginFailureMessage(loginJson, loginText, loginStatus));
                 }
 
-                const navigationResult = await navigationPromise;
-                if (navigationResult instanceof Error) {
-                    console.warn('[SCRAPER] Login succeeded but redirect wait timed out. Continuing to report form...');
+                if (!loginJson) {
+                    // The login response body often becomes unreadable when the
+                    // post-login navigation starts before CDP can fetch it, so an
+                    // empty body is not proof of failure. Confirm via page state.
+                    await navigationPromise;
+                    const sessionDialogError = getSessionDialogError();
+                    if (sessionDialogError) throw sessionDialogError;
+                    const stillOnLoginPage = await page.evaluate(
+                        () => !!document.querySelector('#txtPassword')
+                    );
+                    if (stillOnLoginPage) {
+                        throw new Error(getFrtLoginFailureMessage(null, loginText, loginStatus));
+                    }
+                } else {
+                    const navigationResult = await navigationPromise;
+                    if (navigationResult instanceof Error) {
+                        console.warn('[SCRAPER] Login succeeded but redirect wait timed out. Continuing to report form...');
+                    }
                 }
             } else {
                 const navigationResult = await navigationPromise;
@@ -1099,6 +1147,99 @@ export async function createFrtScraperSession(username: string, password: string
         }
 
         clearDialogMessage();
+
+        const captureApiSession = async (): Promise<FrtApiSession> => {
+            if (closed) throw new Error('FRT scraper session is closed');
+            clearDialogMessage();
+
+            console.log('[SCRAPER] Capturing report API session...');
+            await page.goto(FRT_FORM_URL, {
+                timeout: 60000,
+                waitUntil: 'domcontentloaded'
+            });
+
+            try {
+                await page.waitForSelector('#ctrl143708', { timeout: 10000, visible: true });
+            } catch (error) {
+                const sessionDialogError = getSessionDialogError();
+                if (sessionDialogError) throw sessionDialogError;
+                throw error;
+            }
+
+            // Same-day range keeps the triggered report tiny; we only need the
+            // outgoing request (headers + inputxml), not the report itself.
+            const today = new Date();
+            const todayDisplay = `${String(today.getDate()).padStart(2, '0')}-${FRT_MONTH_NAMES[today.getMonth()]}-${today.getFullYear()}`;
+
+            const requestPromise = new Promise<{ headers: Record<string, string>; postData: string }>((resolve, reject) => {
+                const timer = setTimeout(
+                    () => reject(new Error('Timed out waiting for the report API request during capture')),
+                    30000
+                );
+                page.on('request', (request: FrtRequestLike) => {
+                    if (!request.url().includes(FRT_REPORT_ENDPOINT) || request.method() !== 'POST') return;
+                    const postData = request.postData() || '';
+                    try {
+                        const parsed = JSON.parse(postData) as { inputxml?: string };
+                        const xml = Buffer.from(String(parsed.inputxml || ''), 'base64').toString('utf8');
+                        if (!xml.includes(`Control_Id="${FRT_FROM_CONTROL_ID}"`)) return;
+                    } catch {
+                        return;
+                    }
+                    clearTimeout(timer);
+                    resolve({ headers: request.headers(), postData });
+                });
+            });
+
+            await page.evaluate(function ({ fromStr, toStr }: { fromStr: string; toStr: string }) {
+                const fromEl = document.getElementById('ctrl143709') as HTMLInputElement;
+                const toEl = document.getElementById('ctrl143707') as HTMLInputElement;
+
+                if (fromEl) {
+                    fromEl.value = fromStr;
+                    fromEl.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                if (toEl) {
+                    toEl.value = toStr;
+                    toEl.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }, { fromStr: todayDisplay, toStr: todayDisplay });
+
+            await page.click('#ctrl143708');
+            const captured = await requestPromise;
+
+            const parsedBody = JSON.parse(captured.postData) as Record<string, unknown>;
+            const inputxmlTemplate = Buffer.from(String(parsedBody.inputxml || ''), 'base64').toString('utf8');
+            if (!inputxmlTemplate.includes(`Control_Id="${FRT_FROM_CONTROL_ID}"`) ||
+                !inputxmlTemplate.includes(`Control_Id="${FRT_TO_CONTROL_ID}"`)) {
+                throw new Error('Captured inputxml template is missing the date controls');
+            }
+
+            const bodyTemplate: Record<string, unknown> = { ...parsedBody };
+            delete bodyTemplate.inputxml;
+
+            const headers: Record<string, string> = {};
+            for (const [key, value] of Object.entries(captured.headers)) {
+                const lower = key.toLowerCase();
+                if (lower.startsWith(':') || lower === 'cookie' || lower === 'content-length' || lower === 'host') continue;
+                headers[lower] = value;
+            }
+
+            const cookies = await page.cookies();
+            const cookieHeader = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+
+            console.log('[SCRAPER] Report API session captured.');
+            return {
+                savedAt: new Date().toISOString(),
+                baseUrl: FRT_BASE_URL,
+                endpoint: FRT_REPORT_ENDPOINT,
+                referer: FRT_FORM_URL,
+                cookieHeader,
+                headers,
+                inputxmlTemplate,
+                bodyTemplate
+            };
+        };
 
         return {
             scrapeRange: async (fromDate?: string, toDate?: string) => {
@@ -1118,11 +1259,335 @@ export async function createFrtScraperSession(username: string, password: string
                     loadTimeout
                 );
             },
+            captureApiSession,
             close
         };
     } catch (error) {
         await close();
         throw error;
+    }
+}
+
+// --- Fast API-replay scraper (no browser per report pull) ---
+
+export class FrtApiAuthError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'FrtApiAuthError';
+    }
+}
+
+export function isFatalFrtLoginError(message: string) {
+    return /unsuccessful attempt|maximum retry attempts|temporarily blocked|blocked till|five invalid attempts|invalid credentials|invalid user|invalid password|invalid captcha|enter captcha/i.test(message);
+}
+
+function decodeHtmlEntities(value: string) {
+    return value
+        .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
+        .replace(/&#x([0-9a-fA-F]+);/g, (_, code: string) => String.fromCharCode(parseInt(code, 16)))
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&');
+}
+
+// The report API answers with XML wrapping an HTML-escaped pair of tables:
+// table 1 = title row + header row, table 2 = data rows.
+export function parseFrtReportResponse(responseText: string): Array<Record<string, string>> {
+    const htmlMatch = responseText.match(/<HTML>([\s\S]*?)<\/HTML>/);
+    if (!htmlMatch) throw new Error('FRT report response did not contain an <HTML> block');
+
+    const html = decodeHtmlEntities(htmlMatch[1]);
+    const cellText = (cellHtml: string) =>
+        decodeHtmlEntities(cellHtml.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+
+    const rowRegex = /<tr[\s\S]*?<\/tr>/gi;
+    const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+
+    let headers: string[] | null = null;
+    const rows: Array<Record<string, string>> = [];
+    let rowMatch: RegExpExecArray | null;
+
+    while ((rowMatch = rowRegex.exec(html)) !== null) {
+        const cells: string[] = [];
+        cellRegex.lastIndex = 0;
+        let cellMatch: RegExpExecArray | null;
+        while ((cellMatch = cellRegex.exec(rowMatch[0])) !== null) {
+            cells.push(cellText(cellMatch[1]));
+        }
+
+        if (cells.length === 0) continue;
+        if (cells.length === 1 && /report from/i.test(cells[0])) continue;
+
+        const isHeaderRow = cells.some(cell => /^complaint number$/i.test(cell));
+        if (!headers) {
+            if (isHeaderRow) headers = cells;
+            continue;
+        }
+        if (isHeaderRow) continue;
+
+        const rowData: Record<string, string> = {};
+        const limit = Math.min(cells.length, headers.length);
+        for (let i = 0; i < limit; i++) {
+            rowData[headers[i] || `Column ${i + 1}`] = cells[i];
+        }
+        if (Object.values(rowData).some(value => value && value.length > 0)) {
+            rows.push(rowData);
+        }
+    }
+
+    if (!headers && rows.length === 0) return [];
+    if (!headers) throw new Error('FRT report response had data rows but no recognizable header row');
+    return rows;
+}
+
+function setFrtControlDate(xml: string, controlId: string, dateDisplay: string) {
+    const controlRegex = new RegExp(`<Parent Control_Id="${controlId}"[^>]*/>`);
+    const match = xml.match(controlRegex);
+    if (!match) throw new Error(`Control ${controlId} not found in captured inputxml template`);
+
+    const updated = match[0]
+        .replace(/Value="[^"]*"/, `Value="${dateDisplay}"`)
+        .replace(/XValue="[^"]*"/, `XValue="${dateDisplay}"`);
+    return xml.replace(match[0], updated);
+}
+
+async function fetchFrtReportRange(
+    session: FrtApiSession,
+    fromDisplay: string,
+    toDisplay: string
+): Promise<Array<Record<string, string>>> {
+    let xml = setFrtControlDate(session.inputxmlTemplate, FRT_FROM_CONTROL_ID, fromDisplay);
+    xml = setFrtControlDate(xml, FRT_TO_CONTROL_ID, toDisplay);
+
+    const body = JSON.stringify({
+        ...session.bodyTemplate,
+        inputxml: Buffer.from(xml, 'utf8').toString('base64')
+    });
+
+    const response = await fetch(session.baseUrl + session.endpoint, {
+        method: 'POST',
+        headers: { ...session.headers, cookie: session.cookieHeader },
+        body,
+        redirect: 'manual'
+    });
+
+    if ([301, 302, 303, 307, 308, 401, 403].includes(response.status)) {
+        throw new FrtApiAuthError(`FRT API session rejected (HTTP ${response.status})`);
+    }
+
+    const text = await response.text();
+
+    if (!response.ok) {
+        throw new Error(`FRT report API failed (HTTP ${response.status}): ${text.replace(/\s+/g, ' ').slice(0, 200)}`);
+    }
+
+    if (!text.includes('<RESULT')) {
+        const sample = text.replace(/\s+/g, ' ').trim().slice(0, 300);
+        if (!sample || sample === 'null' || /login|session|expired|unauthor|token|denied/i.test(sample)) {
+            throw new FrtApiAuthError(`FRT API session expired: ${sample || 'empty response'}`);
+        }
+        throw new Error(`Unexpected FRT report response: ${sample}`);
+    }
+
+    return parseFrtReportResponse(text);
+}
+
+async function loadCachedFrtApiSession(): Promise<FrtApiSession | null> {
+    if (!supabase) return null;
+    try {
+        const { data, error } = await supabase
+            .from('reports')
+            .select('payload')
+            .eq('key', FRT_API_SESSION_KEY)
+            .maybeSingle();
+
+        if (error || !data?.payload) return null;
+        const session = data.payload as FrtApiSession;
+        if (!session.inputxmlTemplate || !session.headers || !session.cookieHeader || !session.endpoint) return null;
+        return session;
+    } catch {
+        return null;
+    }
+}
+
+async function saveCachedFrtApiSession(session: FrtApiSession) {
+    if (!supabase) return;
+    try {
+        await supabase
+            .from('reports')
+            .upsert({ key: FRT_API_SESSION_KEY, payload: session }, { onConflict: 'key' });
+    } catch (error) {
+        console.warn('[SCRAPER] Failed to cache FRT API session:', describeError(error));
+    }
+}
+
+function getTodayDateOnlyIST() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).formatToParts(new Date());
+
+    const partMap = Object.fromEntries(
+        parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value])
+    );
+
+    return `${partMap.year}-${partMap.month}-${partMap.day}`;
+}
+
+function parseFrtDateOnly(value: string): Date {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+        return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    }
+    const fallback = new Date(value);
+    if (Number.isNaN(fallback.getTime())) throw new Error(`Invalid date "${value}". Expected YYYY-MM-DD.`);
+    return new Date(Date.UTC(fallback.getFullYear(), fallback.getMonth(), fallback.getDate()));
+}
+
+function formatFrtDisplayDate(date: Date) {
+    return `${String(date.getUTCDate()).padStart(2, '0')}-${FRT_MONTH_NAMES[date.getUTCMonth()]}-${date.getUTCFullYear()}`;
+}
+
+// Smaller windows keep individual responses light (a week of complaints is
+// roughly 15-20 MB of report HTML) and let us fetch them concurrently.
+function buildFrtChunks(fromDate?: string, toDate?: string): Array<{ from: string; to: string }> {
+    const from = parseFrtDateOnly(fromDate || FRT_DEFAULT_START_DATE);
+    const to = parseFrtDateOnly(toDate || getTodayDateOnlyIST());
+    if (from > to) throw new Error(`From date ${fromDate} is after to date ${toDate}`);
+
+    const chunkDays = parsePositiveInteger(process.env.FRT_API_CHUNK_DAYS, 7, 62);
+    const chunks: Array<{ from: string; to: string }> = [];
+    let cursor = from;
+
+    while (cursor <= to) {
+        const windowEnd = new Date(Date.UTC(
+            cursor.getUTCFullYear(),
+            cursor.getUTCMonth(),
+            cursor.getUTCDate() + chunkDays - 1
+        ));
+        const chunkEnd = windowEnd < to ? windowEnd : to;
+        chunks.push({ from: formatFrtDisplayDate(cursor), to: formatFrtDisplayDate(chunkEnd) });
+        cursor = new Date(Date.UTC(
+            chunkEnd.getUTCFullYear(),
+            chunkEnd.getUTCMonth(),
+            chunkEnd.getUTCDate() + 1
+        ));
+    }
+
+    return chunks;
+}
+
+// Drop-in replacement for createFrtScraperSession: same scrapeRange/close
+// interface, but report pulls go over plain fetch. The browser is only used
+// once to capture/refresh the API session, then closed immediately.
+export async function createFrtApiScraperSession(username: string, password: string): Promise<FrtScraperSession> {
+    let apiSession = await loadCachedFrtApiSession();
+    if (apiSession) {
+        console.log(`[SCRAPER] Reusing cached FRT API session from ${apiSession.savedAt}`);
+    }
+
+    let closed = false;
+    let generation = 0;
+    let capturePromise: Promise<FrtApiSession> | null = null;
+
+    const captureFreshSession = () => {
+        if (!capturePromise) {
+            capturePromise = (async () => {
+                console.log('[SCRAPER] Capturing fresh FRT API session via browser login...');
+                const browserSession = await createFrtScraperSession(username, password);
+                try {
+                    const fresh = await browserSession.captureApiSession!();
+                    apiSession = fresh;
+                    generation += 1;
+                    await saveCachedFrtApiSession(fresh);
+                    return fresh;
+                } finally {
+                    await browserSession.close();
+                }
+            })().finally(() => {
+                capturePromise = null;
+            });
+        }
+        return capturePromise;
+    };
+
+    const scrapeRange = async (fromDate?: string, toDate?: string): Promise<FrtScrapePayload> => {
+        if (closed) throw new Error('FRT scraper session is closed');
+
+        const chunks = buildFrtChunks(fromDate, toDate);
+        const concurrency = parsePositiveInteger(process.env.FRT_API_CONCURRENCY, 2, 6);
+        console.log(
+            `[SCRAPER] API scrape ${chunks[0].from} -> ${chunks[chunks.length - 1].to} in ${chunks.length} chunk(s), concurrency ${concurrency}`
+        );
+
+        if (!apiSession) await captureFreshSession();
+
+        let recaptures = 0;
+        const chunkRows: Array<Array<Record<string, string>>> = new Array(chunks.length);
+
+        await runWithConcurrency(chunks, concurrency, async (chunk, index) => {
+            let attempt = 0;
+
+            while (true) {
+                attempt += 1;
+                const generationAtFetch = generation;
+
+                try {
+                    const chunkStart = Date.now();
+                    const rows = await fetchFrtReportRange(apiSession!, chunk.from, chunk.to);
+                    console.log(
+                        `[SCRAPER] Chunk ${chunk.from}..${chunk.to}: ${rows.length} rows in ${((Date.now() - chunkStart) / 1000).toFixed(1)}s`
+                    );
+                    chunkRows[index] = rows;
+                    return;
+                } catch (error) {
+                    if (attempt >= 4) throw error;
+
+                    if (error instanceof FrtApiAuthError) {
+                        // Another worker may have refreshed the session already.
+                        if (generation === generationAtFetch) {
+                            if (recaptures >= 2) throw error;
+                            recaptures += 1;
+                            await captureFreshSession();
+                        }
+                        continue;
+                    }
+
+                    console.warn(
+                        `[SCRAPER] Chunk ${chunk.from}..${chunk.to} attempt ${attempt} failed: ${describeError(error)}. Retrying...`
+                    );
+                    await sleep(1500 * attempt);
+                }
+            }
+        });
+
+        const data = chunkRows.flat();
+        return {
+            clickedAction: 'api:GetRelationalDataA',
+            data,
+            pageInfo: { totalPages: chunks.length, totalRows: data.length }
+        };
+    };
+
+    return {
+        scrapeRange,
+        close: async () => {
+            closed = true;
+        }
+    };
+}
+
+// One-shot convenience wrapper used by the API routes.
+export async function scrapeFrtFast(username: string, password: string, fromDate?: string, toDate?: string) {
+    const session = await createFrtApiScraperSession(username, password);
+    try {
+        return await session.scrapeRange(fromDate, toDate);
+    } finally {
+        await session.close();
     }
 }
 
@@ -1318,13 +1783,27 @@ export async function scrapeWithPuppeteer(username: string, password: string, fr
             const loginResponse = await loginResponsePromise;
             if (loginResponse) {
                 const loginJson = await loginResponse.json().catch(() => null);
-                if (!loginJson || String(loginJson.Status) !== '1') {
+                if (loginJson && String(loginJson.Status) !== '1') {
                     throw new Error(getFrtLoginFailureMessage(loginJson));
                 }
 
-                const navigationResult = await navigationPromise;
-                if (navigationResult instanceof Error) {
-                    console.warn('[SCRAPER] Login succeeded but redirect wait timed out. Continuing to report form...');
+                if (!loginJson) {
+                    // Empty/unreadable body usually means the post-login navigation
+                    // started before CDP could fetch it. Confirm via page state.
+                    await navigationPromise;
+                    const sessionDialogError = getSessionDialogError();
+                    if (sessionDialogError) throw sessionDialogError;
+                    const stillOnLoginPage = await page.evaluate(
+                        () => !!document.querySelector('#txtPassword')
+                    );
+                    if (stillOnLoginPage) {
+                        throw new Error(getFrtLoginFailureMessage(null));
+                    }
+                } else {
+                    const navigationResult = await navigationPromise;
+                    if (navigationResult instanceof Error) {
+                        console.warn('[SCRAPER] Login succeeded but redirect wait timed out. Continuing to report form...');
+                    }
                 }
             } else {
                 const navigationResult = await navigationPromise;

@@ -11,18 +11,6 @@ const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE
 const OPTIONS_CACHE_TTL = 15 * 60 * 1000;
 let optionsCache: { timestamp: number; payload: any } | null = null;
 
-function formatMonthLabel(value: string | null) {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-
-  return date.toLocaleString('en-US', {
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'Asia/Kolkata'
-  });
-}
-
 export async function GET() {
   if (!supabase) {
     return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
@@ -37,33 +25,26 @@ export async function GET() {
       });
     }
 
-    const { data, error } = await supabase
-      .from('complaints')
-      .select('division, sub_division, sub_station, status, closed_status, complaint_date');
+    // Distinct values are computed in the database (get_filter_options RPC).
+    // Selecting whole columns through PostgREST silently capped at 1000 rows,
+    // so the old dropdowns were built from an incomplete sample.
+    const { data, error } = await supabase.rpc('get_filter_options');
 
     if (error) throw error;
 
-    const divisions = [...new Set(data?.map((row) => row.division).filter(Boolean))].sort();
-    const subDivisions = [...new Set(data?.map((row) => row.sub_division).filter(Boolean))].sort();
-    const subStations = [...new Set(data?.map((row) => row.sub_station).filter(Boolean))].sort();
-    const statuses = [...new Set(data?.map((row) => row.status).filter(Boolean))].sort();
-    const closedStatuses = [...new Set(data?.map((row) => row.closed_status).filter(Boolean))].sort();
-    const months = [...new Set(
-      data
-        ?.map((row) => formatMonthLabel(row.complaint_date))
-        .filter(Boolean)
-    )]
-      .sort((a, b) => new Date(b!).getTime() - new Date(a!).getTime())
-      .map((month) => ({ value: month!, label: month! }));
+    const months = ((data?.months || []) as string[]).map((month) => ({
+      value: month,
+      label: month
+    }));
 
     const payload = {
       success: true,
       options: {
-        divisions,
-        subDivisions,
-        subStations,
-        statuses,
-        closedStatuses,
+        divisions: data?.divisions || [],
+        subDivisions: data?.subDivisions || [],
+        subStations: data?.subStations || [],
+        statuses: data?.statuses || [],
+        closedStatuses: data?.closedStatuses || [],
         months: [{ value: 'All', label: 'All Months' }, ...months]
       }
     };

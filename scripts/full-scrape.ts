@@ -1,11 +1,18 @@
 import {
     checkNewTablesExist,
+    createFrtApiScraperSession,
     createFrtScraperSession,
     saveToNewDb,
     saveToOldDb,
     logScrapeError,
     logScrapeSuccess
 } from '../app/lib/shared-scraper';
+
+// Fast path: pull reports over the captured API session (no browser per pull).
+// Set FRT_USE_BROWSER=1 to fall back to the old DOM-based scraper.
+const createScraperSession = process.env.FRT_USE_BROWSER === '1'
+    ? createFrtScraperSession
+    : createFrtApiScraperSession;
 
 type MonthRange = {
     label: string;
@@ -163,7 +170,7 @@ async function createScraperSessionWithRetries(
 
         try {
             console.log(`[SCRIPT] Opening FRT session - attempt ${formatAttempt(attempt, maxRetries)}`);
-            return await createFrtScraperSession(username, password);
+            return await createScraperSession(username, password);
         } catch (error: unknown) {
             lastError = error;
             const message = getErrorMessage(error);

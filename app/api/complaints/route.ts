@@ -9,22 +9,8 @@ const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE)
   : null;
 
-const SEARCH_COLUMNS = [
-  'complaint_number',
-  'division',
-  'sub_division',
-  'sub_station',
-  'consumer_name',
-  'consumer_mobile',
-  'consumer_address',
-  'complaint_type',
-  'complaint_sub_type',
-  'status',
-  'closed_status',
-  'closed_by',
-  'closing_remarks',
-  'area_type'
-];
+// Server-side search runs against the generated search_text column
+// (all searchable columns concatenated, with a trigram index).
 
 function getISTDateParts(date: Date) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -86,13 +72,7 @@ function getFetchAllMaxRecords() {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-function applyCommonFilters(query: any, searchParams: URLSearchParams) {
-  const search = searchParams.get('search') || '';
-  const division = searchParams.get('division') || '';
-  const subDivision = searchParams.get('subDivision') || '';
-  const subStation = searchParams.get('subStation') || '';
-  const status = searchParams.get('status') || '';
-  const closedStatus = searchParams.get('closedStatus') || '';
+function extractFilters(searchParams: URLSearchParams) {
   let fromDate = searchParams.get('fromDate') || '';
   let toDate = searchParams.get('toDate') || '';
   const todayOnly = searchParams.get('today') === '1';
@@ -103,25 +83,49 @@ function applyCommonFilters(query: any, searchParams: URLSearchParams) {
     toDate = todayRange.to;
   }
 
-  if (division) query = query.eq('division', division);
-  if (subDivision) query = query.eq('sub_division', subDivision);
-  if (subStation) query = query.eq('sub_station', subStation);
-  if (status) query = query.eq('status', status);
-  if (closedStatus) query = query.eq('closed_status', closedStatus);
+  return {
+    search: (searchParams.get('search') || '').trim(),
+    division: searchParams.get('division') || '',
+    subDivision: searchParams.get('subDivision') || '',
+    subStation: searchParams.get('subStation') || '',
+    status: searchParams.get('status') || '',
+    closedStatus: searchParams.get('closedStatus') || '',
+    fromDate: toISTTimestamp(fromDate, 'start'),
+    toDate: toISTTimestamp(toDate, 'end')
+  };
+}
 
-  const normalizedFromDate = toISTTimestamp(fromDate, 'start');
-  const normalizedToDate = toISTTimestamp(toDate, 'end');
+function applyCommonFilters(query: any, searchParams: URLSearchParams) {
+  const filters = extractFilters(searchParams);
 
-  if (normalizedFromDate) query = query.gte('complaint_date', normalizedFromDate);
-  if (normalizedToDate) query = query.lte('complaint_date', normalizedToDate);
+  if (filters.division) query = query.eq('division', filters.division);
+  if (filters.subDivision) query = query.eq('sub_division', filters.subDivision);
+  if (filters.subStation) query = query.eq('sub_station', filters.subStation);
+  if (filters.status) query = query.eq('status', filters.status);
+  if (filters.closedStatus) query = query.eq('closed_status', filters.closedStatus);
+  if (filters.fromDate) query = query.gte('complaint_date', filters.fromDate);
+  if (filters.toDate) query = query.lte('complaint_date', filters.toDate);
 
-  if (search) {
-    const safeSearch = search.replace(/,/g, ' ');
-    const searchQuery = SEARCH_COLUMNS.map((column) => `${column}.ilike.%${safeSearch}%`).join(',');
-    query = query.or(searchQuery);
+  if (filters.search) {
+    query = query.ilike('search_text', `%${filters.search.replace(/,/g, ' ')}%`);
   }
 
   return query;
+}
+
+function buildRpcFilterParams(searchParams: URLSearchParams) {
+  const filters = extractFilters(searchParams);
+
+  return {
+    p_division: filters.division || null,
+    p_sub_division: filters.subDivision || null,
+    p_sub_station: filters.subStation || null,
+    p_status: filters.status || null,
+    p_closed_status: filters.closedStatus || null,
+    p_from: filters.fromDate,
+    p_to: filters.toDate,
+    p_search: filters.search ? filters.search.replace(/,/g, ' ') : null
+  };
 }
 
 async function getLastScrapedAt() {
@@ -178,39 +182,38 @@ export async function GET(request: Request) {
     }
 
     try {
-      let allData: any[] = [];
-      let from = 0;
-      const batchSize = 1000;
+      // Keyset pagination through the get_complaints_page RPC: 10k rows per
+      // round trip as one jsonb value (vs the old 1000-row OFFSET batches that
+      // re-scanned everything before each batch).
+      const dataArray: any[] = [];
       const maxRecords = getFetchAllMaxRecords();
+      const rpcFilters = buildRpcFilterParams(searchParams);
+      const pageSize = 10000;
+      let cursor: { p_after_date?: string; p_after_id?: number } = {};
 
-      while (maxRecords === null || from < maxRecords) {
-        const to = maxRecords === null
-          ? from + batchSize - 1
-          : Math.min(from + batchSize - 1, maxRecords - 1);
-        let batchQuery = supabase
-          .from('complaints')
-          .select('raw_data')
-          .order('complaint_date', { ascending: false });
+      while (maxRecords === null || dataArray.length < maxRecords) {
+        const limit = maxRecords === null
+          ? pageSize
+          : Math.min(pageSize, maxRecords - dataArray.length);
 
-        batchQuery = applyCommonFilters(batchQuery, searchParams);
-        batchQuery = batchQuery.range(from, to);
-
-        const { data, error } = await batchQuery;
+        const { data: page, error } = await supabase.rpc('get_complaints_page', {
+          ...rpcFilters,
+          ...cursor,
+          p_limit: limit
+        });
 
         if (error) {
           throw error;
         }
 
-        if (!data || data.length === 0) break;
+        const rows = page?.rows || [];
+        dataArray.push(...rows);
 
-        allData = allData.concat(data);
-
-        if (data.length < batchSize) break;
-        from += batchSize;
+        if (rows.length < limit || !page?.next_date) break;
+        cursor = { p_after_date: page.next_date, p_after_id: page.next_id };
       }
 
       const lastScrapedAt = await getLastScrapedAt();
-      const dataArray = allData.map((row) => row.raw_data);
 
       setCachedData(cacheKey, dataArray, lastScrapedAt);
 
