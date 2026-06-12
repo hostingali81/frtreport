@@ -1,4 +1,4 @@
-﻿-- Add byClosedStatus [{k, n}] to get_complaints_stats so the homepage
+-- Add byClosedStatus [{k, n}] to get_complaints_stats so the homepage
 -- dashboard cards (Closed Within / Closed Beyond) can come from stats instead
 -- of downloading every row. One more grouping set (closed_status_t); its rows
 -- are identified by closed_status_t IS NOT NULL since the column is coalesced
