@@ -371,9 +371,13 @@ export async function saveToNewDb(
         console.log(`[DB] Skipping ${skippedCount} unchanged row(s); writing ${upsertData.length}.`);
     }
 
+    // Each written row pays GIN trigram + covering index maintenance
+    // (~30ms/row on this instance), so keep batches well inside the 8s
+    // statement timeout.
+    const upsertBatchSize = parsePositiveInteger(process.env.SUPABASE_UPSERT_BATCH_SIZE, 250, 1000);
     const batches: Array<typeof upsertData> = [];
-    for (let i = 0; i < upsertData.length; i += 250) {
-        batches.push(upsertData.slice(i, i + 250));
+    for (let i = 0; i < upsertData.length; i += upsertBatchSize) {
+        batches.push(upsertData.slice(i, i + upsertBatchSize));
     }
 
     const upsertConcurrency = parsePositiveInteger(

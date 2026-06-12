@@ -61,10 +61,14 @@ jobs:
           FULL_SCRAPE_RETRY_DELAY_MS: '30000'
           FULL_SCRAPE_SESSION_RETRY_DELAY_MS: '120000'
           # 3 months in parallel x 2 requests per month = 6 in-flight report
-          # calls against the FRT server; upserts run 6 batches at a time.
+          # calls against the FRT server. Writes: 100-row batches, 3 at a
+          # time - each written row pays trigram-index maintenance, so bigger
+          # batches hit the 8s statement timeout.
           FULL_SCRAPE_MONTH_CONCURRENCY: '3'
           FRT_API_CONCURRENCY: '2'
-          SUPABASE_SAVE_CONCURRENCY: '6'
+          SUPABASE_LOOKUP_CONCURRENCY: '6'
+          SUPABASE_UPSERT_CONCURRENCY: '3'
+          SUPABASE_UPSERT_BATCH_SIZE: '100'
           SCRAPER_PROTOCOL_TIMEOUT_MS: '600000'
           SCRAPER_LOAD_TIMEOUT_MS: '300000'
         run: npx tsx scripts/full-scrape.ts
