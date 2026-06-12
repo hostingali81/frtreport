@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Cold full-table aggregation can take ~10s; Vercel Hobby defaults to 10s.
+export const maxDuration = 60;
 
 const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE)

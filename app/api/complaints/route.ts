@@ -4,6 +4,9 @@ import { clearCache, getCachedData, setCachedData } from '@/app/lib/cache';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// The fetchAll export path walks the whole table (~20s for All Months);
+// Vercel Hobby defaults to a 10s function timeout.
+export const maxDuration = 60;
 
 const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE)
