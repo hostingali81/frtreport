@@ -12,6 +12,28 @@ const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE
 // Server-side search runs against the generated search_text column
 // (all searchable columns concatenated, with a trigram index).
 
+// Table header labels -> sortable DB columns for the paged path.
+// 'Resolution Time' is computed client-side, so it sorts by closed_date.
+const SORT_COLUMNS: Record<string, string> = {
+  'Complaint Number': 'complaint_number',
+  'Consumer Name': 'consumer_name',
+  'Consumer Mobile': 'consumer_mobile',
+  'Consumer Address': 'consumer_address',
+  'Complaint Type': 'complaint_type',
+  'Complaint Sub Type': 'complaint_sub_type',
+  'Status': 'status',
+  'Closed Status': 'closed_status',
+  'Complaint Date and Time': 'complaint_date',
+  'Closed Date': 'closed_date',
+  'Resolution Time': 'closed_date',
+  'Area Type': 'area_type',
+  'Division': 'division',
+  'Sub Division': 'sub_division',
+  'Sub Station': 'sub_station',
+  'Closed By': 'closed_by',
+  'Closing Remarks': 'closing_remarks'
+};
+
 function getISTDateParts(date: Date) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata',
@@ -241,10 +263,14 @@ export async function GET(request: Request) {
   const pageLimit = parseInt(searchParams.get('limit') || '100', 10);
   const offset = (page - 1) * pageLimit;
 
+  const sortColumn = SORT_COLUMNS[searchParams.get('sortBy') || ''] || 'complaint_date';
+  const sortAscending = searchParams.get('sortDir') === 'asc';
+
   let query = supabase
     .from('complaints')
     .select('raw_data', { count: 'exact' })
-    .order('complaint_date', { ascending: false });
+    .order(sortColumn, { ascending: sortAscending })
+    .order('id', { ascending: false });
 
   query = applyCommonFilters(query, searchParams);
   query = query.range(offset, offset + pageLimit - 1);

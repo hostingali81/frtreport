@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { FiDownload, FiRefreshCw, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers, FiInfo, FiActivity } from 'react-icons/fi';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { getDefaultTodayFilters, useData } from './context/DataContext';
+import { buildFilterParams, getDefaultTodayFilters, useData } from './context/DataContext';
 import { loadExcelJS } from './utils/lazyImports';
 
 // Dynamic imports for heavy components
@@ -16,35 +16,33 @@ import autoTable from 'jspdf-autotable';
 
 export default function Home() {
   const {
-    data: contextData,
-    loading: contextLoading,
+    stats,
+    statsLoading,
     lastUpdated: contextLastUpdated,
     refreshData,
     applyFilters,
-    ensureRows,
     filterOptions,
     currentFilters
   } = useData();
 
   const router = useRouter();
-  const [original, setOriginal] = useState<any[]>([]);
+
+  // Server-paginated table state: only the visible page (100 rows) is
+  // downloaded; counts and dashboard cards come from the stats RPC.
+  const [tableRows, setTableRows] = useState<any[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [tableLoading, setTableLoading] = useState(true);
+  const [exportLoading, setExportLoading] = useState(false);
+  const allRowsCacheRef = useRef<{ key: string; rows: any[] } | null>(null);
+  const exportNeedsRefreshRef = useRef(false);
 
   useEffect(() => {
     router.prefetch('/charts');
     router.prefetch('/deep-analysis');
   }, [router]);
 
-  // Rows can be stale if filters were changed from a stats-only chart page.
-  useEffect(() => {
-    void ensureRows().catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    setOriginal(contextData);
-  }, [contextData]);
-
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const loading = contextLoading || isRefreshing;
+  const loading = statsLoading || tableLoading || isRefreshing;
 
   const [error, setError] = useState('');
   const defaultFilters = currentFilters ?? getDefaultTodayFilters();
@@ -133,6 +131,7 @@ export default function Home() {
     setError('');
 
     try {
+      // Stats only; the table fetches its own page when currentFilters change.
       await applyFilters({
         search,
         division: divisionFilter,
@@ -143,7 +142,7 @@ export default function Home() {
         fromDT,
         toDT,
         monthFilter
-      });
+      }, { withRows: false });
     } catch (err: any) {
       setError(err.message || 'Failed to load filtered complaints');
     }
@@ -282,66 +281,93 @@ export default function Home() {
     });
   };
 
-  const filtered = useMemo(() => {
-    let rows = [...original];
-    if (sortColumn) {
-      rows = rows.sort((a, b) => {
-        let aVal: any, bVal: any;
+  // Fetch one table page from the server (sorted there too).
+  const loadTablePage = async (page: number, options: { refresh?: boolean } = {}) => {
+    setTableLoading(true);
 
-        if (sortColumn === 'Resolution Time') {
-          const aTime = computeResolutionTime(a);
-          const bTime = computeResolutionTime(b);
-          const aMs = aTime ? (parseInt(aTime) || 0) * (aTime.includes('d') ? 1440 : aTime.includes('h') ? 60 : 1) : 0;
-          const bMs = bTime ? (parseInt(bTime) || 0) * (bTime.includes('d') ? 1440 : bTime.includes('h') ? 60 : 1) : 0;
-          return sortDirection === 'asc' ? aMs - bMs : bMs - aMs;
-        }
+    try {
+      const params = buildFilterParams(currentFilters);
+      params.set('page', String(page));
+      params.set('limit', String(rowsPerPage));
+      if (sortColumn) {
+        params.set('sortBy', sortColumn);
+        params.set('sortDir', sortDirection);
+      }
+      if (options.refresh) params.set('refresh', '1');
 
-        aVal = String(a[sortColumn] ?? '');
-        bVal = String(b[sortColumn] ?? '');
+      const response = await fetch(`/api/complaints?${params.toString()}`);
+      const result = await response.json();
 
-        const aNum = parseFloat(aVal);
-        const bNum = parseFloat(bVal);
-        if (!isNaN(aNum) && !isNaN(bNum)) {
-          return sortDirection === 'asc' ? aNum - bNum : bNum - aNum;
-        }
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to fetch complaints');
+      }
 
-        const aDate = parsePossibleDate(aVal);
-        const bDate = parsePossibleDate(bVal);
-        if (aDate && bDate) {
-          return sortDirection === 'asc' ? aDate.getTime() - bDate.getTime() : bDate.getTime() - aDate.getTime();
-        }
-
-        return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-      });
+      setTableRows(result.data || []);
+      setTotalCount(result.total || 0);
+    } catch (err: any) {
+      setTableRows([]);
+      setTotalCount(0);
+      setError(err.message || 'Failed to fetch complaints');
+    } finally {
+      setTableLoading(false);
     }
-    return rows;
-  }, [original, sortColumn, sortDirection]);
-
-  const paginatedData = useMemo(() => {
-    const start = (currentPage - 1) * rowsPerPage;
-    return filtered.slice(start, start + rowsPerPage);
-  }, [filtered, currentPage]);
-
-  const totalPages = Math.ceil(filtered.length / rowsPerPage);
+  };
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [original]);
+    void loadTablePage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentFilters, sortColumn, sortDirection]);
 
-  // Calculate daily counts for calendar
+  const goToPage = (page: number) => {
+    setCurrentPage(page);
+    void loadTablePage(page);
+  };
+
+  const totalPages = Math.ceil(totalCount / rowsPerPage);
+
+  // Exports and detailed reports still need every matching row; fetch them
+  // only when the user actually asks, and reuse across exports of the same
+  // filter set.
+  const ensureAllRows = async (): Promise<any[]> => {
+    const params = buildFilterParams(currentFilters);
+    params.set('fetchAll', 'true');
+    const key = params.toString();
+
+    if (!exportNeedsRefreshRef.current && allRowsCacheRef.current?.key === key) {
+      return allRowsCacheRef.current.rows;
+    }
+
+    setExportLoading(true);
+    try {
+      const url = `/api/complaints?${key}${exportNeedsRefreshRef.current ? '&refresh=1' : ''}`;
+      const response = await fetch(url);
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to fetch rows for export');
+      }
+
+      const rows = result.data || [];
+      allRowsCacheRef.current = { key, rows };
+      exportNeedsRefreshRef.current = false;
+      return rows;
+    } catch (err: any) {
+      alert(`Export data fetch failed: ${err.message || 'unknown error'}`);
+      throw err;
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  // Calendar baubles come from the stats RPC (per-IST-date totals).
   const dailyCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const row of original) {
-      const val = String(row['Complaint Date and Time'] || row['Complaint Date'] || '');
-      const dt = parsePossibleDate(val);
-      if (dt) {
-        // Use local date string YYYY-MM-DD
-        const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-        counts[key] = (counts[key] || 0) + 1;
-      }
+    for (const day of stats?.daily ?? []) {
+      counts[day.d] = day.n;
     }
     return counts;
-  }, [original]);
+  }, [stats]);
 
   const formatDateTimeLocal = (d: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -574,8 +600,8 @@ export default function Home() {
     <div className={`animate-pulse bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 rounded ${className}`} style={{ backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite' }} />
   );
 
-  const exportDivisionSummary = () => {
-    const rows = filtered;
+  const exportDivisionSummary = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -642,8 +668,8 @@ export default function Home() {
     doc.save('division-summary.pdf');
   };
 
-  const exportSubStationCount = () => {
-    const rows = filtered;
+  const exportSubStationCount = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -716,8 +742,8 @@ export default function Home() {
     doc.save('substation-count.pdf');
   };
 
-  const exportDetailedClosedBreakdown = () => {
-    const rows = filtered;
+  const exportDetailedClosedBreakdown = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -832,8 +858,8 @@ export default function Home() {
     doc.save('detailed-closed-breakdown.pdf');
   };
 
-  const exportDivisionCount = () => {
-    const rows = filtered;
+  const exportDivisionCount = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -906,8 +932,8 @@ export default function Home() {
     doc.save('division-count.pdf');
   };
 
-  const exportSubDivisionCount = () => {
-    const rows = filtered;
+  const exportSubDivisionCount = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -987,8 +1013,8 @@ export default function Home() {
     doc.save('subdivision-count.pdf');
   };
 
-  const exportDatewiseTotalCount = () => {
-    const rows = filtered;
+  const exportDatewiseTotalCount = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -1111,8 +1137,8 @@ export default function Home() {
     doc.save('datewise-total-count.pdf');
   };
 
-  const exportSubDivisionSummary = () => {
-    const rows = filtered;
+  const exportSubDivisionSummary = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -1204,8 +1230,8 @@ export default function Home() {
     doc.save('subdivision-summary.pdf');
   };
 
-  const exportSubStationSummary = () => {
-    const rows = filtered;
+  const exportSubStationSummary = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -1298,8 +1324,8 @@ export default function Home() {
     doc.save('substation-summary.pdf');
   };
 
-  const exportClosedStatusDivision = () => {
-    const rows = filtered;
+  const exportClosedStatusDivision = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -1385,8 +1411,8 @@ export default function Home() {
     doc.save('closed-status-division.pdf');
   };
 
-  const exportClosedStatusSubDivision = () => {
-    const rows = filtered;
+  const exportClosedStatusSubDivision = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -1477,8 +1503,8 @@ export default function Home() {
     doc.save('closed-status-subdivision.pdf');
   };
 
-  const exportClosedStatusSubStation = () => {
-    const rows = filtered;
+  const exportClosedStatusSubStation = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -1570,8 +1596,8 @@ export default function Home() {
     doc.save('closed-status-substation.pdf');
   };
 
-  const exportAreaTypeBreakdown = () => {
-    const rows = filtered;
+  const exportAreaTypeBreakdown = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -1674,8 +1700,8 @@ export default function Home() {
     doc.save('area-type-breakdown.pdf');
   };
 
-  const exportStatusBreakdown = () => {
-    const rows = filtered;
+  const exportStatusBreakdown = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -1747,8 +1773,8 @@ export default function Home() {
     doc.save('status-breakdown.pdf');
   };
 
-  const exportSubDivisionClosedBreakdown = () => {
-    const rows = filtered;
+  const exportSubDivisionClosedBreakdown = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -1854,8 +1880,8 @@ export default function Home() {
     doc.save('subdivision-closed-breakdown.pdf');
   };
 
-  const exportDatewiseClosedBreakdown = () => {
-    const rows = filtered;
+  const exportDatewiseClosedBreakdown = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -1964,8 +1990,8 @@ export default function Home() {
     doc.save('datewise-closed-breakdown.pdf');
   };
 
-  const exportDivisionClosedBreakdown = () => {
-    const rows = filtered;
+  const exportDivisionClosedBreakdown = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -2066,8 +2092,8 @@ export default function Home() {
     doc.save('division-closed-breakdown.pdf');
   };
 
-  const exportDetailedReportPDF = () => {
-    const rows = filtered;
+  const exportDetailedReportPDF = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -2508,8 +2534,8 @@ export default function Home() {
     return { rows: rowsOut, grand: { total: grand.total, closed: grand.closed, pending: grandPending } };
   };
 
-  const exportSummaryPDF = () => {
-    const rows = filtered;
+  const exportSummaryPDF = async () => {
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const now = new Date();
@@ -2577,7 +2603,7 @@ export default function Home() {
   };
 
   const exportTrendChartsPDF = async () => {
-    const rows = filtered;
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
 
     // Separate Control Room and FRT closed complaints
@@ -2936,7 +2962,7 @@ export default function Home() {
 
 
   const exportExcel = async () => {
-    const rows = filtered;
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
 
     // Warning for large exports
@@ -4209,7 +4235,7 @@ export default function Home() {
       const time = fallback.getTime();
       return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time;
     };
-    const rows = [...filtered].sort((a, b) => getReviewDateTime(a) - getReviewDateTime(b));
+    const rows = [...(await ensureAllRows())].sort((a, b) => getReviewDateTime(a) - getReviewDateTime(b));
     if (rows.length === 0) return;
 
     if (rows.length > 5000) {
@@ -4323,7 +4349,7 @@ export default function Home() {
   };
 
   const exportRepeatedCompliantsByMobile = async () => {
-    const rows = filtered;
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const { ExcelJS, saveAs } = await loadExcelJS();
     const wb = new ExcelJS.Workbook();
@@ -4388,7 +4414,7 @@ export default function Home() {
   };
 
   const exportRepeatedCompliantsByNameAddress = async () => {
-    const rows = filtered;
+    const rows = await ensureAllRows();
     if (rows.length === 0) return;
     const { ExcelJS, saveAs } = await loadExcelJS();
     const wb = new ExcelJS.Workbook();
@@ -4454,20 +4480,13 @@ export default function Home() {
   };
 
   const dashboardStats = useMemo(() => {
-    const total = filtered.length;
-    let closed = 0;
-    let within = 0;
-    let beyond = 0;
-
-    for (const row of filtered) {
-      if (isClosedRow(row)) {
-        closed += 1;
-      }
-
-      const closedStatus = String(row['Closed Status'] || '').trim();
-      if (closedStatus === 'Closed Within') within += 1;
-      if (closedStatus === 'Closed Beyond') beyond += 1;
-    }
+    // All card numbers come from the stats RPC: closed = per-day closed
+    // counts summed (control room + FRT), within/beyond from byClosedStatus.
+    const total = stats?.total ?? 0;
+    const closed = (stats?.daily ?? []).reduce((acc, day) => acc + day.cr + day.frt, 0);
+    const byClosedStatus = stats?.byClosedStatus ?? [];
+    const within = byClosedStatus.find((entry) => entry.k === 'Closed Within')?.n ?? 0;
+    const beyond = byClosedStatus.find((entry) => entry.k === 'Closed Beyond')?.n ?? 0;
 
     const pending = Math.max(0, total - closed);
     const currentScope = selectedShift || (monthFilter !== 'All' ? monthFilter : 'Current filters');
@@ -4506,7 +4525,7 @@ export default function Home() {
         iconClass: 'bg-rose-600 text-white'
       }
     ];
-  }, [filtered, monthFilter, selectedShift]);
+  }, [stats, monthFilter, selectedShift]);
 
   const ResultsSkeleton = () => (
     <div className="space-y-6">
@@ -4548,6 +4567,14 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-100 via-white to-slate-50 p-4 md:p-8">
+      {exportLoading && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-slate-900 px-5 py-3 text-white shadow-lg">
+          <span className="inline-flex items-center gap-2 font-semibold">
+            <span className="h-4 w-4 animate-spin rounded-full border-b-2 border-white"></span>
+            Preparing export... fetching all matching complaints
+          </span>
+        </div>
+      )}
       <div className="max-w-7xl mx-auto space-y-6">
         <header className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-blue-50/80 p-5 shadow-sm md:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -4582,6 +4609,13 @@ export default function Home() {
                   if (!result.success) {
                     throw new Error(result.error || 'Refresh failed');
                   }
+
+                  // Fresh data scraped: reload the visible page and make the
+                  // next export bypass the server-side fetchAll cache.
+                  exportNeedsRefreshRef.current = true;
+                  allRowsCacheRef.current = null;
+                  setCurrentPage(1);
+                  void loadTablePage(1);
 
                   const newRows = result.stats?.new || 0;
                   const updatedRows = result.stats?.updated || 0;
@@ -4816,12 +4850,12 @@ export default function Home() {
 
             {loading ? (
               <ResultsSkeleton />
-            ) : filtered.length > 0 ? (
+            ) : totalCount > 0 ? (
               <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-sm">
                     <FiBarChart2 className="text-sky-600 text-lg" />
-                    <span className="font-semibold text-gray-700">Showing {((currentPage - 1) * rowsPerPage) + 1}-{Math.min(currentPage * rowsPerPage, filtered.length)} of {filtered.length} complaints</span>
+                    <span className="font-semibold text-gray-700">Showing {((currentPage - 1) * rowsPerPage) + 1}-{Math.min(currentPage * rowsPerPage, totalCount)} of {totalCount} complaints</span>
                   </div>
                   <div className="flex flex-wrap gap-3">
                     <button
@@ -4906,7 +4940,7 @@ export default function Home() {
           </div>
         )}
 
-        {!loading && filtered.length > 0 && (
+        {!loading && totalCount > 0 && (
           <>
             <div className="bg-white rounded-xl shadow-md border border-gray-100">
               <div className="overflow-x-auto max-h-[70vh] relative">
@@ -4933,7 +4967,7 @@ export default function Home() {
                           'Closed By',
                           'Closing Remarks'
                         ];
-                        const firstRowKeys = Object.keys(filtered[0] || {});
+                        const firstRowKeys = Object.keys(tableRows[0] || {});
                         const otherKeys = firstRowKeys.filter(k => !preferredOrder.includes(k) && k !== 'Resolution Time');
                         const finalHeaders = [...preferredOrder, ...otherKeys];
 
@@ -4975,11 +5009,11 @@ export default function Home() {
                         'Closed By',
                         'Closing Remarks'
                       ];
-                      const firstRowKeys = Object.keys(filtered[0] || {});
+                      const firstRowKeys = Object.keys(tableRows[0] || {});
                       const otherKeys = firstRowKeys.filter(k => !preferredOrder.includes(k) && k !== 'Resolution Time');
                       const finalHeaders = [...preferredOrder, ...otherKeys];
 
-                      return paginatedData.map((row, index) => (
+                      return tableRows.map((row, index) => (
                         <tr key={index} className="hover:bg-gray-50">
                           {finalHeaders.map((h, i) => {
                             let display: any = (row as any)[h];
@@ -5036,11 +5070,11 @@ export default function Home() {
 
             {totalPages > 1 && (
               <div className="flex items-center justify-center gap-2 mt-4 pb-4">
-                <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">First</button>
-                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Prev</button>
+                <button onClick={() => goToPage(1)} disabled={currentPage === 1 || tableLoading} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">First</button>
+                <button onClick={() => goToPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1 || tableLoading} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Prev</button>
                 <span className="px-4 py-1 bg-gray-100 rounded">Page {currentPage} of {totalPages}</span>
-                <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Next</button>
-                <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Last</button>
+                <button onClick={() => goToPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages || tableLoading} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Next</button>
+                <button onClick={() => goToPage(totalPages)} disabled={currentPage === totalPages || tableLoading} className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300">Last</button>
               </div>
             )}
           </>

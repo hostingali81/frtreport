@@ -132,10 +132,17 @@ export async function GET(request: Request) {
   }
 
   try {
-    const [{ data, error }, lastScrapedAt] = await Promise.all([
-      supabase.rpc('get_complaints_stats', buildRpcFilterParams(searchParams)),
+    const rpcParams = buildRpcFilterParams(searchParams);
+    let [{ data, error }, lastScrapedAt] = await Promise.all([
+      supabase.rpc('get_complaints_stats', rpcParams),
       getLastScrapedAt()
     ]);
+
+    // A cold full-table aggregation can hit the statement timeout (57014);
+    // the retry runs against warmed buffers and comfortably fits.
+    if (error && (error as any).code === '57014') {
+      ({ data, error } = await supabase.rpc('get_complaints_stats', rpcParams));
+    }
 
     if (error) throw error;
 

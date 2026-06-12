@@ -52,6 +52,7 @@ export interface ChartStats {
   byDivision: { k: string; n: number }[];
   bySubStation: { k: string; n: number }[];
   byAreaType: { k: string; n: number }[];
+  byClosedStatus: { k: string; n: number }[];
   beyondByDivision: { k: string; n: number }[];
   daily: { d: string; n: number; cr: number; frt: number; resSum: number; resN: number }[];
   months: { key: string; label: string; total: number; beyond: number; resSum: number; resN: number }[];
@@ -236,7 +237,7 @@ function resolveFilters(filters: ComplaintFilters) {
   return filters;
 }
 
-function buildFilterParams(filters: ComplaintFilters) {
+export function buildFilterParams(filters: ComplaintFilters) {
   const resolved = resolveFilters(filters);
   const params = new URLSearchParams();
 
@@ -260,7 +261,9 @@ function buildQueryString(filters: ComplaintFilters) {
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  // No page loads rows automatically anymore (the homepage table is
+  // server-paginated), so rows start "not loading".
+  const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<ChartStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState('');
@@ -459,25 +462,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const initialFilters = getDefaultTodayFilters();
     currentFiltersRef.current = initialFilters;
     const cachedOptions = readClientCache<FilterOptions>('localStorage', FILTER_OPTIONS_CACHE_KEY, FILTER_OPTIONS_CACHE_TTL);
-    const cachedTodayData = readClientCache<CachedTodayData>('sessionStorage', TODAY_DATA_CACHE_KEY, TODAY_DATA_CACHE_TTL);
 
     if (cachedOptions) {
       setFilterOptions(normalizeFilterOptions(cachedOptions));
-    }
-
-    if (
-      cachedTodayData &&
-      cachedTodayData.dayKey === getISTDayKey(new Date()) &&
-      areFiltersEqual(cachedTodayData.filters, initialFilters)
-    ) {
-      setData(cachedTodayData.data || []);
-      rowsFiltersRef.current = initialFilters;
-      setLastUpdated(cachedTodayData.lastUpdated || '');
-      setCurrentFilters(initialFilters);
-      setLoading(false);
-      void loadComplaints(initialFilters, { silent: true });
-    } else {
-      void loadComplaints(initialFilters).catch(() => undefined);
     }
 
     void loadStats(initialFilters).catch(() => undefined);
