@@ -38,6 +38,9 @@ const DEFAULT_START_DATE = '2025-11-01';
 const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_RETRY_DELAY_MS = 30000;
 const DEFAULT_SESSION_RETRY_DELAY_MS = 120000;
+// Months scraped in parallel. Total in-flight FRT requests is
+// FULL_SCRAPE_MONTH_CONCURRENCY x FRT_API_CONCURRENCY.
+const DEFAULT_MONTH_CONCURRENCY = 1;
 
 function sleep(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -306,14 +309,19 @@ async function main() {
             DEFAULT_SESSION_RETRY_DELAY_MS
         );
         const ranges = buildMonthlyRanges(fromDate, toDate);
+        const monthConcurrency = Math.max(
+            1,
+            parseIntegerEnv(process.env.FULL_SCRAPE_MONTH_CONCURRENCY, DEFAULT_MONTH_CONCURRENCY)
+        );
 
         console.log(`[SCRIPT] Date Range: ${fromDate} to ${toDate}`);
         console.log(
             `[SCRIPT] Monthly chunks: ${ranges.map(range => `${range.label}(${range.from}..${range.to})`).join(', ')}`
         );
         console.log(`[SCRIPT] Retry policy: ${maxRetries === 0 ? 'unlimited attempts' : `${maxRetries} attempts`} per month`);
+        console.log(`[SCRIPT] Month concurrency: ${monthConcurrency}`);
 
-        const results: MonthResult[] = [];
+        const results: MonthResult[] = new Array(ranges.length);
         const legacyRows: ScrapedRow[] = [];
         const scraperSession = await createScraperSessionWithRetries(
             process.env.FRT_USERNAME,
@@ -324,19 +332,33 @@ async function main() {
         );
 
         try {
-            for (const range of ranges) {
-                const result = await scrapeAndSaveMonth(
-                    range,
-                    scraperSession,
-                    useNewSystem,
-                    maxRetries,
-                    retryDelayMs,
-                    sessionRetryDelayMs
-                );
+            // The API session is shared and recapture is de-duplicated inside
+            // createFrtApiScraperSession, so months can run in parallel.
+            let nextIndex = 0;
+            const workers = Array.from(
+                { length: Math.min(monthConcurrency, ranges.length) },
+                async () => {
+                    while (true) {
+                        const index = nextIndex;
+                        nextIndex += 1;
+                        if (index >= ranges.length) return;
 
-                results.push(result);
+                        results[index] = await scrapeAndSaveMonth(
+                            ranges[index],
+                            scraperSession,
+                            useNewSystem,
+                            maxRetries,
+                            retryDelayMs,
+                            sessionRetryDelayMs
+                        );
+                    }
+                }
+            );
 
-                if (!useNewSystem) {
+            await Promise.all(workers);
+
+            if (!useNewSystem) {
+                for (const result of results) {
                     legacyRows.push(...result.rows);
                 }
             }

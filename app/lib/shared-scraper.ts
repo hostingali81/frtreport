@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { createHash } from 'crypto';
 import { existsSync } from 'fs';
 
 // --- Types ---
@@ -307,12 +308,13 @@ export async function saveToNewDb(
         4,
         8
     );
-    const existingRecordBatches: Array<Array<{ complaint_number: string }>> = new Array(complaintNumberBatches.length);
+    const existingRecordBatches: Array<Array<{ complaint_number: string; content_hash: string | null }>> =
+        new Array(complaintNumberBatches.length);
 
     await runWithConcurrency(complaintNumberBatches, lookupConcurrency, async (batch, batchIndex) => {
         const { data, error } = await supabase
             .from('complaints')
-            .select('complaint_number')
+            .select('complaint_number, content_hash')
             .in('complaint_number', batch);
 
         if (error) {
@@ -323,16 +325,15 @@ export async function saveToNewDb(
         existingRecordBatches[batchIndex] = data || [];
     });
 
-    const existingRecords = existingRecordBatches.flat();
-    const existingSet = new Set(existingRecords.map(r => r.complaint_number));
-    const newRowsCount = validRows.filter(r => !existingSet.has(r['Complaint Number'])).length;
-    const updatedRowsCount = validRows.length - newRowsCount;
+    const existingHashes = new Map(
+        existingRecordBatches.flat().map(r => [r.complaint_number, r.content_hash])
+    );
 
-    const upsertData = validRows.map(row => {
+    const allRecords = validRows.map(row => {
         const complaintDate = parseDate(row['Complaint Date and Time'] || '');
         const closedDate = parseDate(row['Closed Date'] || '');
 
-        return {
+        const record = {
             complaint_number: row['Complaint Number'],
             complaint_date: toISTISOString(complaintDate),
             division: row['Division'],
@@ -351,7 +352,24 @@ export async function saveToNewDb(
             area_type: row['Area Type'],
             raw_data: row
         };
+
+        return { ...record, content_hash: createHash('md5').update(JSON.stringify(record)).digest('hex') };
     });
+
+    // Rewriting a row pays for the generated search_text column plus every
+    // index, so skip rows whose content is identical to what is stored.
+    const newRecords = allRecords.filter(r => !existingHashes.has(r.complaint_number));
+    const changedRecords = allRecords.filter(r =>
+        existingHashes.has(r.complaint_number) && existingHashes.get(r.complaint_number) !== r.content_hash
+    );
+    const upsertData = [...newRecords, ...changedRecords];
+    const newRowsCount = newRecords.length;
+    const updatedRowsCount = changedRecords.length;
+    const skippedCount = allRecords.length - upsertData.length;
+
+    if (skippedCount > 0) {
+        console.log(`[DB] Skipping ${skippedCount} unchanged row(s); writing ${upsertData.length}.`);
+    }
 
     const batches: Array<typeof upsertData> = [];
     for (let i = 0; i < upsertData.length; i += 250) {

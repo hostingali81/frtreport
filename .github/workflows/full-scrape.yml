@@ -27,7 +27,7 @@ concurrency:
 jobs:
   full-scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # 6 Hours max
+    timeout-minutes: 90
 
     steps:
       - name: Checkout Code
@@ -40,6 +40,12 @@ jobs:
           cache: 'npm'
 
       - name: Install Dependencies
+        env:
+          # The API-replay scraper needs no browser; if a session recapture is
+          # required it uses the runner's preinstalled Google Chrome instead of
+          # downloading Chromium (~170MB) on every run.
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+          PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: 'true'
         run: npm ci
 
       - name: Run Full Scraper
@@ -54,6 +60,11 @@ jobs:
           FULL_SCRAPE_MAX_RETRIES: ${{ github.event.inputs.max_retries || '5' }}
           FULL_SCRAPE_RETRY_DELAY_MS: '30000'
           FULL_SCRAPE_SESSION_RETRY_DELAY_MS: '120000'
+          # 3 months in parallel x 2 requests per month = 6 in-flight report
+          # calls against the FRT server; upserts run 6 batches at a time.
+          FULL_SCRAPE_MONTH_CONCURRENCY: '3'
+          FRT_API_CONCURRENCY: '2'
+          SUPABASE_SAVE_CONCURRENCY: '6'
           SCRAPER_PROTOCOL_TIMEOUT_MS: '600000'
           SCRAPER_LOAD_TIMEOUT_MS: '300000'
         run: npx tsx scripts/full-scrape.ts
