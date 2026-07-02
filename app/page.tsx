@@ -4561,8 +4561,8 @@ export default function Home() {
       // Define standard styling borders & colors
       const theme = {
         border: { style: 'thin' as const, color: { argb: 'FFCBD5E1' } }, // slate-300 / light grey
-        headerFill: 'FFF3F4F6', // Slate-100/F2F4F8 matching clean Excel look
-        headerFontColor: 'FF111827', // gray-900
+        headerFill: 'FF1F2937', // Slate-800 / Dark Grey for clear understanding
+        headerFontColor: 'FFFFFFFF', // White for clear text readability
       };
 
       // Distinct very light pastel colors (Tailwind 50 weights) for divisions
@@ -4588,6 +4588,7 @@ export default function Home() {
       // Helper to style any sheet (headers & rows)
       const styleSheet = (ws: any, hasDivisionColumn: boolean, getRowColor?: (r: number) => string | null) => {
         const endRowNumber = ws.lastRow.number;
+        const totalColNum = ws.columnCount;
 
         // Header style (Row 1)
         const headerRow = ws.getRow(1);
@@ -4632,7 +4633,14 @@ export default function Home() {
               right: theme.border
             };
 
-            if (rowColor) {
+            if (colNum === totalColNum) {
+              cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFE5E7EB' } // Slate-200 matching bottom total row
+              };
+              cell.font = { bold: true, size: 11, color: { argb: 'FF111827' } }; // Bold totals
+            } else if (rowColor) {
               cell.fill = {
                 type: 'pattern',
                 pattern: 'solid',
@@ -4664,7 +4672,7 @@ export default function Home() {
             bottom: { style: 'double', color: { argb: 'FFCBD5E1' } },
             right: theme.border
           };
-          cell.font = { bold: true, size: 11, color: { argb: theme.headerFontColor } };
+          cell.font = { bold: true, size: 11, color: { argb: 'FF111827' } };
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } }; // slate-200
 
           let alignment = 'center';
