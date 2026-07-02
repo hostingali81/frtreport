@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { FiDownload, FiRefreshCw, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers, FiInfo, FiActivity } from 'react-icons/fi';
+import { FiDownload, FiRefreshCw, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers, FiInfo, FiActivity, FiCalendar } from 'react-icons/fi';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
@@ -4479,6 +4479,184 @@ export default function Home() {
     saveAs(new Blob([buf]), `repeat_complaints_consumer_${now.getTime()}.xlsx`);
   };
 
+  const exportSubstationMonthwiseExcel = async () => {
+    setExportLoading(true);
+    try {
+      // 1. Fetch all data ignoring active filters
+      const response = await fetch('/api/complaints?fetchAll=true');
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to fetch rows for export');
+      }
+      const rows = result.data || [];
+      if (rows.length === 0) {
+        alert('No complaints data found to export.');
+        return;
+      }
+
+      // 2. Parse dates, group by substation and division, and collect month keys
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+      
+      const monthMap = new Map<string, number>(); // monthKey -> sortVal (y * 12 + m)
+      const substationMap = new Map<string, { division: string; subStation: string; monthCounts: Record<string, number> }>();
+
+      rows.forEach((r: any) => {
+        const division = String(r['Division'] || '').trim() || 'Unknown';
+        const subStation = String(r['Sub Station'] || r['Substation'] || '').trim();
+
+        const dateStr = String(r['Complaint Date and Time'] || r['Complaint Date'] || '');
+        const parsedDate = parsePossibleDate(dateStr);
+        if (!parsedDate) return;
+
+        const m = parsedDate.getMonth();
+        const y = parsedDate.getFullYear();
+        const monthKey = `${monthNames[m]}-${y}`;
+        const sortVal = y * 12 + m;
+
+        monthMap.set(monthKey, sortVal);
+
+        const rowKey = `${division}|${subStation}`;
+        if (!substationMap.has(rowKey)) {
+          substationMap.set(rowKey, {
+            division,
+            subStation,
+            monthCounts: {}
+          });
+        }
+
+        const entry = substationMap.get(rowKey)!;
+        entry.monthCounts[monthKey] = (entry.monthCounts[monthKey] || 0) + 1;
+      });
+
+      // 3. Sort months chronologically: oldest first, latest last
+      const sortedMonthKeys = Array.from(monthMap.entries())
+        .sort((a, b) => a[1] - b[1])
+        .map(entry => entry[0]);
+
+      // 4. Sort rows by division (ascending), then substation (ascending)
+      const sortedRows = Array.from(substationMap.values())
+        .sort((a, b) => {
+          const divCompare = a.division.localeCompare(b.division);
+          if (divCompare !== 0) return divCompare;
+          return a.subStation.localeCompare(b.subStation);
+        });
+
+      // 5. Load ExcelJS and build workbook
+      const { ExcelJS, saveAs } = await loadExcelJS();
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'FRT Report Dashboard';
+      wb.created = new Date();
+      wb.modified = new Date();
+      wb.properties = {
+        title: 'Month-wise Substation Complaints Count',
+        subject: 'Complaints Count by Substation and Month',
+        category: 'Report',
+        description: 'Complete data showing monthly complaints count per substation sorted by division',
+        lastModifiedBy: 'FRT Report Dashboard',
+      };
+
+      const ws = wb.addWorksheet('Month-wise Substation', {
+        views: [{ state: 'frozen', xSplit: 0, ySplit: 1, showGridLines: true }]
+      });
+
+      // Headers: Sr No, Sub Stations, and then Month columns
+      const headers = ['Sr No', 'Sub Stations', ...sortedMonthKeys];
+      const headerRow = ws.addRow(headers);
+      headerRow.height = 26;
+
+      // Define standard styling borders & colors
+      const theme = {
+        border: { style: 'thin' as const, color: { argb: 'FFCBD5E1' } }, // slate-300 / light grey
+        headerFill: 'FFF3F4F6', // Slate-100/F2F4F8 matching clean Excel look
+        headerFontColor: 'FF111827', // gray-900
+      };
+
+      // Style header row
+      headerRow.eachCell((cell: any, colNum: number) => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.headerFill } };
+        cell.font = { bold: true, size: 11, color: { argb: theme.headerFontColor } };
+        cell.border = {
+          top: theme.border,
+          left: theme.border,
+          bottom: theme.border,
+          right: theme.border
+        };
+        // Alignment: Sr No and Months are centered. Sub Stations is left-aligned.
+        cell.alignment = {
+          vertical: 'middle',
+          horizontal: colNum === 2 ? 'left' : 'center',
+          wrapText: true
+        };
+      });
+
+      // Add Data Rows
+      sortedRows.forEach((row, index) => {
+        const rowValues: any[] = [
+          index + 1, // Sr No
+          row.subStation // Sub Stations
+        ];
+
+        // Month columns count (blank if 0 count)
+        sortedMonthKeys.forEach(monthKey => {
+          const count = row.monthCounts[monthKey] || 0;
+          rowValues.push(count > 0 ? count : null);
+        });
+
+        ws.addRow(rowValues);
+      });
+
+      // Style Data Rows
+      const endRowNumber = ws.lastRow.number;
+      for (let r = 2; r <= endRowNumber; r++) {
+        const row = ws.getRow(r);
+        row.height = 20;
+        row.eachCell({ includeEmpty: true }, (cell: any, colNum: number) => {
+          cell.border = {
+            top: theme.border,
+            left: theme.border,
+            bottom: theme.border,
+            right: theme.border
+          };
+          // Sr No (col 1) and counts (col 3+) are centered. Sub Stations (col 2) is left-aligned.
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: colNum === 2 ? 'left' : 'center'
+          };
+        });
+      }
+
+      // Column widths
+      ws.getColumn(1).width = 8;   // Sr No
+      ws.getColumn(2).width = 35;  // Sub Stations
+      sortedMonthKeys.forEach((_, colIndex) => {
+        ws.getColumn(colIndex + 3).width = 16; // Months
+      });
+
+      // Save Workbook
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mi = String(now.getMinutes()).padStart(2, '0');
+      
+      const fileName = `substation-monthwise-complaints-${yyyy}${mm}${dd}-${hh}${mi}.xlsx`;
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      saveAs(blob, fileName);
+
+    } catch (err: any) {
+      alert(`Export failed: ${err.message || 'unknown error'}`);
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   const dashboardStats = useMemo(() => {
     // All card numbers come from the stats RPC: closed = per-day closed
     // counts summed (control room + FRT), within/beyond from byClosedStatus.
@@ -4918,6 +5096,16 @@ export default function Home() {
                             role="menuitem"
                           >
                             <FiFileText className="text-base" /> <span>Excel For Review</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setShowExcelMenu(false);
+                              exportSubstationMonthwiseExcel();
+                            }}
+                            className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-800"
+                            role="menuitem"
+                          >
+                            <FiCalendar className="text-base" /> <span>Month-wise Substation</span>
                           </button>
                         </div>
                       )}
