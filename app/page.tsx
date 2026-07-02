@@ -4558,15 +4558,6 @@ export default function Home() {
         lastModifiedBy: 'FRT Report Dashboard',
       };
 
-      const ws = wb.addWorksheet('Month-wise Substation', {
-        views: [{ state: 'frozen', xSplit: 0, ySplit: 1, showGridLines: true }]
-      });
-
-      // Headers: Sr No, Sub Stations, and then Month columns
-      const headers = ['Sr No', 'Sub Stations', ...sortedMonthKeys];
-      const headerRow = ws.addRow(headers);
-      headerRow.height = 26;
-
       // Define standard styling borders & colors
       const theme = {
         border: { style: 'thin' as const, color: { argb: 'FFCBD5E1' } }, // slate-300 / light grey
@@ -4574,68 +4565,147 @@ export default function Home() {
         headerFontColor: 'FF111827', // gray-900
       };
 
-      // Style header row
-      headerRow.eachCell((cell: any, colNum: number) => {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.headerFill } };
-        cell.font = { bold: true, size: 11, color: { argb: theme.headerFontColor } };
-        cell.border = {
-          top: theme.border,
-          left: theme.border,
-          bottom: theme.border,
-          right: theme.border
-        };
-        // Alignment: Sr No and Months are centered. Sub Stations is left-aligned.
-        cell.alignment = {
-          vertical: 'middle',
-          horizontal: colNum === 2 ? 'left' : 'center',
-          wrapText: true
-        };
-      });
+      // Helper to style any sheet (headers & rows)
+      const styleSheet = (ws: any, hasDivisionColumn: boolean) => {
+        const endRowNumber = ws.lastRow.number;
 
-      // Add Data Rows
-      sortedRows.forEach((row, index) => {
-        const rowValues: any[] = [
-          index + 1, // Sr No
-          row.subStation // Sub Stations
-        ];
-
-        // Month columns count (blank if 0 count)
-        sortedMonthKeys.forEach(monthKey => {
-          const count = row.monthCounts[monthKey] || 0;
-          rowValues.push(count > 0 ? count : null);
-        });
-
-        ws.addRow(rowValues);
-      });
-
-      // Style Data Rows
-      const endRowNumber = ws.lastRow.number;
-      for (let r = 2; r <= endRowNumber; r++) {
-        const row = ws.getRow(r);
-        row.height = 20;
-        row.eachCell({ includeEmpty: true }, (cell: any, colNum: number) => {
+        // Header style (Row 1)
+        const headerRow = ws.getRow(1);
+        headerRow.height = 26;
+        headerRow.eachCell((cell: any, colNum: number) => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.headerFill } };
+          cell.font = { bold: true, size: 11, color: { argb: theme.headerFontColor } };
           cell.border = {
             top: theme.border,
             left: theme.border,
             bottom: theme.border,
             right: theme.border
           };
-          // Sr No (col 1) and counts (col 3+) are centered. Sub Stations (col 2) is left-aligned.
+
+          // Alignment logic
+          let alignment = 'center';
+          if (hasDivisionColumn) {
+            if (colNum === 2 || colNum === 3) alignment = 'left';
+          } else {
+            if (colNum === 2) alignment = 'left';
+          }
+
           cell.alignment = {
             vertical: 'middle',
-            horizontal: colNum === 2 ? 'left' : 'center'
+            horizontal: alignment,
+            wrapText: true
           };
         });
-      }
 
-      // Column widths
-      ws.getColumn(1).width = 8;   // Sr No
-      ws.getColumn(2).width = 35;  // Sub Stations
-      sortedMonthKeys.forEach((_, colIndex) => {
-        ws.getColumn(colIndex + 3).width = 16; // Months
+        // Data rows style (Row 2+)
+        for (let r = 2; r <= endRowNumber; r++) {
+          const row = ws.getRow(r);
+          row.height = 20;
+          row.eachCell({ includeEmpty: true }, (cell: any, colNum: number) => {
+            cell.border = {
+              top: theme.border,
+              left: theme.border,
+              bottom: theme.border,
+              right: theme.border
+            };
+
+            let alignment = 'center';
+            if (hasDivisionColumn) {
+              if (colNum === 2 || colNum === 3) alignment = 'left';
+            } else {
+              if (colNum === 2) alignment = 'left';
+            }
+
+            cell.alignment = {
+              vertical: 'middle',
+              horizontal: alignment
+            };
+          });
+        }
+      };
+
+      // 6. Create Sheet 1: "All Division"
+      const wsAll = wb.addWorksheet('All Division', {
+        views: [{ state: 'frozen', xSplit: 0, ySplit: 1, showGridLines: true }]
       });
 
-      // Save Workbook
+      // Headers: Sr No, Division, Sub Stations, and then Month columns
+      const headersAll = ['Sr No', 'Division', 'Sub Stations', ...sortedMonthKeys];
+      wsAll.addRow(headersAll);
+
+      // Add Data Rows for "All Division"
+      sortedRows.forEach((row, index) => {
+        const rowValues: any[] = [
+          index + 1, // Sr No
+          row.division, // Division
+          row.subStation // Sub Stations
+        ];
+
+        sortedMonthKeys.forEach(monthKey => {
+          const count = row.monthCounts[monthKey] || 0;
+          rowValues.push(count > 0 ? count : null);
+        });
+
+        wsAll.addRow(rowValues);
+      });
+
+      // Set column widths for "All Division"
+      wsAll.getColumn(1).width = 8;   // Sr No
+      wsAll.getColumn(2).width = 24;  // Division
+      wsAll.getColumn(3).width = 35;  // Sub Stations
+      sortedMonthKeys.forEach((_, colIndex) => {
+        wsAll.getColumn(colIndex + 4).width = 16; // Months
+      });
+
+      // Apply styling to "All Division"
+      styleSheet(wsAll, true);
+
+      // 7. Create division-specific sheets
+      const uniqueDivisions = Array.from(new Set(sortedRows.map(r => r.division))).sort();
+
+      uniqueDivisions.forEach(divisionName => {
+        // Sanitize sheet name: limit to 31 chars and remove invalid chars: \ / ? * [ ] :
+        const sanitizedSheetName = divisionName
+          .replace(/[*?:\[\]\/\\+]/g, '')
+          .substring(0, 31)
+          .trim() || 'Division';
+
+        const wsDiv = wb.addWorksheet(sanitizedSheetName, {
+          views: [{ state: 'frozen', xSplit: 0, ySplit: 1, showGridLines: true }]
+        });
+
+        // Headers: Sr No, Sub Stations, and then Month columns (Division column omitted)
+        const headersDiv = ['Sr No', 'Sub Stations', ...sortedMonthKeys];
+        wsDiv.addRow(headersDiv);
+
+        // Filter and add data for this division
+        const divisionRows = sortedRows.filter(r => r.division === divisionName);
+        divisionRows.forEach((row, index) => {
+          const rowValues: any[] = [
+            index + 1, // Sr No
+            row.subStation // Sub Stations
+          ];
+
+          sortedMonthKeys.forEach(monthKey => {
+            const count = row.monthCounts[monthKey] || 0;
+            rowValues.push(count > 0 ? count : null);
+          });
+
+          wsDiv.addRow(rowValues);
+        });
+
+        // Set column widths for division sheet
+        wsDiv.getColumn(1).width = 8;   // Sr No
+        wsDiv.getColumn(2).width = 35;  // Sub Stations
+        sortedMonthKeys.forEach((_, colIndex) => {
+          wsDiv.getColumn(colIndex + 3).width = 16; // Months
+        });
+
+        // Apply styling to division sheet
+        styleSheet(wsDiv, false);
+      });
+
+      // 8. Save Workbook
       const now = new Date();
       const yyyy = now.getFullYear();
       const mm = String(now.getMonth() + 1).padStart(2, '0');
