@@ -88,7 +88,30 @@ function toISTTimestamp(value: string, boundary: 'start' | 'end') {
 function buildCacheKey(searchParams: URLSearchParams) {
   const params = new URLSearchParams(searchParams);
   params.delete('refresh');
+  // Field projection happens after cache retrieval, so full and projected
+  // requests share one cached dataset.
+  params.delete('fields');
   return `complaints:v2:${params.toString() || 'default'}`;
+}
+
+// Optional fetchAll payload trim: ?fields=A,B,C returns only those raw_data
+// keys per row (exports that need 3-4 columns skip the multi-MB download).
+function parseFieldsParam(searchParams: URLSearchParams) {
+  const raw = (searchParams.get('fields') || '').trim();
+  if (!raw) return null;
+  const fields = raw.split(',').map((f) => f.trim()).filter(Boolean);
+  return fields.length ? fields : null;
+}
+
+function projectRows(rows: any[], fields: string[] | null) {
+  if (!fields) return rows;
+  return rows.map((row) => {
+    const out: Record<string, unknown> = {};
+    for (const f of fields) {
+      if (row && row[f] !== undefined) out[f] = row[f];
+    }
+    return out;
+  });
 }
 
 function getFetchAllMaxRecords() {
@@ -186,12 +209,13 @@ export async function GET(request: Request) {
   const cacheKey = buildCacheKey(searchParams);
 
   if (fetchAll) {
+    const fields = parseFieldsParam(searchParams);
     if (!forceRefresh) {
       const cached = getCachedData(cacheKey);
       if (cached) {
         return NextResponse.json({
           success: true,
-          data: cached.data,
+          data: projectRows(cached.data, fields),
           total: cached.data.length,
           fetched: cached.data.length,
           lastScrapedAt: cached.lastScrapedAt,
@@ -244,7 +268,7 @@ export async function GET(request: Request) {
 
       return NextResponse.json({
         success: true,
-        data: dataArray,
+        data: projectRows(dataArray, fields),
         total: dataArray.length,
         fetched: dataArray.length,
         lastScrapedAt,

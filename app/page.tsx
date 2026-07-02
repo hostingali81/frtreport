@@ -35,6 +35,10 @@ export default function Home() {
   const [exportLoading, setExportLoading] = useState(false);
   const allRowsCacheRef = useRef<{ key: string; rows: any[] } | null>(null);
   const exportNeedsRefreshRef = useRef(false);
+  // Unfiltered slim dataset for the month-wise substation export; reused
+  // across clicks until the next data refresh.
+  const monthwiseRowsCacheRef = useRef<any[] | null>(null);
+  const monthwiseNeedsRefreshRef = useRef(false);
 
   useEffect(() => {
     router.prefetch('/charts');
@@ -3166,68 +3170,35 @@ export default function Home() {
 
     const bodyStart = headerRowIndex + 1;
     const statusColIndex = headers.indexOf('Status') + 1; // 1-based
+
+    // Make time bold in date columns
+    const toRichDateTime = (val: string) => {
+      const timeMatch = val.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+      if (!timeMatch) return val;
+      const datepart = val.substring(0, val.indexOf(timeMatch[1]));
+      return {
+        richText: [
+          { text: datepart },
+          { font: { bold: true, size: 11 }, text: timeMatch[1] }
+        ]
+      };
+    };
+
+    // Status cell colors are applied in the single styling pass below
+    const statusClasses: Array<'closed' | 'pending' | 'other'> = [];
     for (const r of rows) {
+      const minutes = computeResolutionTimeMinutes(r);
       const rowVals = headers.map(h => {
-        if (h === 'Resolution Time') return computeResolutionTime(r);
-        if (h === 'Resolution Time (Minutes)') return computeResolutionTimeMinutes(r);
-        if (h === 'Complaint Date and Time') return formatDateTime(String((r as any)[h] ?? ''));
-        if (h === 'Closed Date') return formatDateTime(String((r as any)[h] ?? ''));
+        if (h === 'Resolution Time') return minutes === null ? '' : formatDuration(minutes * 60000);
+        if (h === 'Resolution Time (Minutes)') return minutes;
+        if (h === 'Complaint Date and Time') return toRichDateTime(formatDateTime(String((r as any)[h] ?? '')));
+        if (h === 'Closed Date') return toRichDateTime(formatDateTime(String((r as any)[h] ?? '')));
         return String((r as any)[h] ?? '');
       });
-      const excelRow = wsData.addRow(rowVals);
+      wsData.addRow(rowVals);
 
-      // Make time bold in date columns
-      const dateTimeColIndex = headers.indexOf('Complaint Date and Time') + 1;
-      const closedDateColIndex = headers.indexOf('Closed Date') + 1;
-
-      if (dateTimeColIndex > 0) {
-        const cell = excelRow.getCell(dateTimeColIndex);
-        const val = String(cell.value || '');
-        const timeMatch = val.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
-        if (timeMatch) {
-          const datepart = val.substring(0, val.indexOf(timeMatch[1]));
-          const timepart = timeMatch[1];
-          cell.value = {
-            richText: [
-              { text: datepart },
-              { font: { bold: true, size: 11 }, text: timepart }
-            ]
-          };
-        }
-      }
-
-      if (closedDateColIndex > 0) {
-        const cell = excelRow.getCell(closedDateColIndex);
-        const val = String(cell.value || '');
-        const timeMatch = val.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
-        if (timeMatch) {
-          const datepart = val.substring(0, val.indexOf(timeMatch[1]));
-          const timepart = timeMatch[1];
-          cell.value = {
-            richText: [
-              { text: datepart },
-              { font: { bold: true, size: 11 }, text: timepart }
-            ]
-          };
-        }
-      }
-
-      // Color-code Status cell
-      if (statusColIndex > 0) {
-        const statusCell = excelRow.getCell(statusColIndex);
-        const statusStr = String((r as any)['Status'] ?? '').trim().toLowerCase();
-        const isClosed = isClosedRow(r);
-        if (isClosed) {
-          statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }; // light green
-          statusCell.font = { bold: true, color: { argb: 'FF065F46' } }; // dark green text
-        } else if (statusStr.includes('pending')) {
-          statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFECACA' } }; // light red
-          statusCell.font = { bold: true, color: { argb: 'FF991B1B' } }; // dark red text
-        } else {
-          statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } }; // light amber
-          statusCell.font = { bold: true, color: { argb: 'FF92400E' } }; // dark amber text
-        }
-      }
+      const statusStr = String((r as any)['Status'] ?? '').trim().toLowerCase();
+      statusClasses.push(isClosedRow(r) ? 'closed' : statusStr.includes('pending') ? 'pending' : 'other');
     }
 
     // Column widths and formatting
@@ -3256,21 +3227,54 @@ export default function Home() {
         column.alignment = { vertical: 'middle', horizontal: 'center' };
       }
     });
-    // borders + alt rows
+    // borders + alt rows + status colors in one pass. Shared style objects
+    // instead of per-cell property assignment: ExcelJS allocates a style per
+    // cell otherwise, and dedupes shared references at write time.
     const bodyEnd = wsData.lastRow.number;
-    for (let r = headerRowIndex; r <= bodyEnd; r++) {
-      wsData.getRow(r).eachCell((cell: any) => {
-        cell.border = {
-          top: theme.border,
-          left: theme.border,
-          bottom: theme.border,
-          right: theme.border,
-        };
-        if (r === headerRowIndex) return;
-        cell.alignment = cell.alignment || { vertical: 'middle' };
+    const fullBorder = {
+      top: theme.border,
+      left: theme.border,
+      bottom: theme.border,
+      right: theme.border,
+    };
+    const altRowFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.altFill } };
+    // [0] = normal row, [1] = alternating row (alt fill wins over any base fill)
+    const stylePair = (style: Record<string, unknown>): Record<string, unknown>[] => [
+      { border: fullBorder, ...style },
+      { border: fullBorder, ...style, fill: altRowFill },
+    ];
+    const defaultCellStyles = stylePair({ alignment: { vertical: 'middle' } });
+    const remarksCellStyles = stylePair({ alignment: { wrapText: true, vertical: 'top' } });
+    const minutesCellStyles = stylePair({ alignment: { vertical: 'middle', horizontal: 'center' }, numFmt: '0' });
+    const statusCellStyles: Record<'closed' | 'pending' | 'other', Record<string, unknown>[]> = {
+      closed: stylePair({
+        alignment: { vertical: 'middle' },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }, // light green
+        font: { bold: true, color: { argb: 'FF065F46' } }, // dark green text
+      }),
+      pending: stylePair({
+        alignment: { vertical: 'middle' },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFECACA' } }, // light red
+        font: { bold: true, color: { argb: 'FF991B1B' } }, // dark red text
+      }),
+      other: stylePair({
+        alignment: { vertical: 'middle' },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } }, // light amber
+        font: { bold: true, color: { argb: 'FF92400E' } }, // dark amber text
+      }),
+    };
+    const remarksColNumber = headers.indexOf('Closing Remarks') + 1;
+    const minutesColNumber = headers.indexOf('Resolution Time (Minutes)') + 1;
+    for (let r = bodyStart; r <= bodyEnd; r++) {
+      const alt = (r - bodyStart) % 2;
+      const statusStyleForRow = statusCellStyles[statusClasses[r - bodyStart]];
+      wsData.getRow(r).eachCell((cell: any, colNumber: number) => {
+        if (colNumber === statusColIndex) cell.style = statusStyleForRow[alt];
+        else if (colNumber === remarksColNumber) cell.style = remarksCellStyles[alt];
+        else if (colNumber === minutesColNumber) cell.style = minutesCellStyles[alt];
+        else cell.style = defaultCellStyles[alt];
       });
     }
-    setAlternatingRows(wsData, bodyStart, bodyEnd);
     wsData.autoFilter = {
       from: { row: headerRowIndex, column: 1 },
       to: { row: headerRowIndex, column: headers.length },
@@ -4218,7 +4222,8 @@ export default function Home() {
     const safeShift = selectedShift ? selectedShift.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') : '';
     const fileName = `frt-report-${yyyy}${mm}${dd}-${hh}${mi}${safeShift ? '-' + safeShift : ''}.xlsx`;
 
-    const buf = await wb.xlsx.writeBuffer();
+    // Fast deflate: noticeably quicker to generate for a slightly larger file
+    const buf = await wb.xlsx.writeBuffer({ zip: { compressionOptions: { level: 1 } } });
     const blob = new Blob([buf], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
@@ -4320,15 +4325,23 @@ export default function Home() {
     ws.getColumn(4).numFmt = '@';
     ws.getColumn(6).numFmt = '0';
 
+    // Shared style objects (one per column format) instead of per-cell
+    // property assignment; numFmt repeated here because assigning cell.style
+    // replaces the column-applied format on existing cells.
+    const reviewBodyStyle = {
+      alignment: { vertical: 'middle', horizontal: 'left', wrapText: true },
+      border: {
+        top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+      },
+    };
+    const reviewComplaintNoStyle = { ...reviewBodyStyle, numFmt: '@' };
+    const reviewMobileStyle = { ...reviewBodyStyle, numFmt: '0' };
     for (let r = 2; r <= ws.lastRow.number; r++) {
-      ws.getRow(r).eachCell((cell: ExcelCell) => {
-        cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-          right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-        };
+      ws.getRow(r).eachCell((cell: { style?: unknown }, colNumber: number) => {
+        cell.style = colNumber === 4 ? reviewComplaintNoStyle : colNumber === 6 ? reviewMobileStyle : reviewBodyStyle;
       });
     }
 
@@ -4341,7 +4354,8 @@ export default function Home() {
     const safeShift = selectedShift ? selectedShift.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') : '';
     const fileName = `excel-for-review-${yyyy}${mm}${dd}-${hh}${mi}${safeShift ? '-' + safeShift : ''}.xlsx`;
 
-    const buf = await wb.xlsx.writeBuffer();
+    // Fast deflate: noticeably quicker to generate for a slightly larger file
+    const buf = await wb.xlsx.writeBuffer({ zip: { compressionOptions: { level: 1 } } });
     const blob = new Blob([buf], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
@@ -4482,13 +4496,26 @@ export default function Home() {
   const exportSubstationMonthwiseExcel = async () => {
     setExportLoading(true);
     try {
-      // 1. Fetch all data ignoring active filters
-      const response = await fetch('/api/complaints?fetchAll=true');
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to fetch rows for export');
+      // Start loading ExcelJS while the data downloads
+      const excelLibPromise = loadExcelJS();
+      excelLibPromise.catch(() => { /* surfaced at the await below */ });
+
+      // 1. Fetch all data ignoring active filters. Only the fields this
+      // report reads are requested (much smaller download), and the result
+      // is reused across clicks until the next data refresh.
+      let rows = monthwiseNeedsRefreshRef.current ? null : monthwiseRowsCacheRef.current;
+      if (!rows) {
+        const fields = encodeURIComponent('Division,Sub Station,Substation,Complaint Date and Time,Complaint Date');
+        const refresh = monthwiseNeedsRefreshRef.current ? '&refresh=1' : '';
+        const response = await fetch(`/api/complaints?fetchAll=true&fields=${fields}${refresh}`);
+        const result = await response.json();
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to fetch rows for export');
+        }
+        rows = (result.data || []) as unknown[];
+        monthwiseRowsCacheRef.current = rows;
+        monthwiseNeedsRefreshRef.current = false;
       }
-      const rows = result.data || [];
       if (rows.length === 0) {
         alert('No complaints data found to export.');
         return;
@@ -4544,8 +4571,8 @@ export default function Home() {
           return a.subStation.localeCompare(b.subStation);
         });
 
-      // 5. Load ExcelJS and build workbook
-      const { ExcelJS, saveAs } = await loadExcelJS();
+      // 5. Build workbook (ExcelJS was loading in parallel with the fetch)
+      const { ExcelJS, saveAs } = await excelLibPromise;
       const wb = new ExcelJS.Workbook();
       wb.creator = 'FRT Report Dashboard';
       wb.created = new Date();
@@ -4618,74 +4645,70 @@ export default function Home() {
           };
         });
 
+        // Shared style objects for the bulk rows: per-cell property
+        // assignment allocates a style per cell (the slow path in ExcelJS),
+        // and shared references also serialize faster at write time.
+        const bodyBorder = {
+          top: theme.border,
+          left: theme.border,
+          bottom: theme.border,
+          right: theme.border
+        };
+        const totalColStyle = {
+          border: bodyBorder,
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } }, // Slate-200 matching bottom total row
+          font: { bold: true, size: 11, color: { argb: 'FF111827' } }, // Bold totals
+          alignment: { vertical: 'middle', horizontal: 'center' },
+        };
+        const bodyStyleCache = new Map<string, Record<string, unknown>>();
+        const bodyStyleFor = (horizontal: string, rowColor: string | null) => {
+          const key = `${horizontal}|${rowColor || ''}`;
+          let style = bodyStyleCache.get(key);
+          if (!style) {
+            style = {
+              border: bodyBorder,
+              alignment: { vertical: 'middle', horizontal },
+              ...(rowColor ? { fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: rowColor } } } : {}),
+            };
+            bodyStyleCache.set(key, style);
+          }
+          return style;
+        };
+
         // Data rows style (Row 2 to endRowNumber - 1)
         for (let r = 2; r < endRowNumber; r++) {
           const row = ws.getRow(r);
           row.height = 20;
-          
+
           const rowColor = getRowColor ? getRowColor(r) : null;
 
           row.eachCell({ includeEmpty: true }, (cell: any, colNum: number) => {
-            cell.border = {
-              top: theme.border,
-              left: theme.border,
-              bottom: theme.border,
-              right: theme.border
-            };
-
             if (colNum === totalColNum) {
-              cell.fill = {
-                type: 'pattern',
-                pattern: 'solid',
-                fgColor: { argb: 'FFE5E7EB' } // Slate-200 matching bottom total row
-              };
-              cell.font = { bold: true, size: 11, color: { argb: 'FF111827' } }; // Bold totals
-            } else if (rowColor) {
-              cell.fill = {
-                type: 'pattern',
-                pattern: 'solid',
-                fgColor: { argb: rowColor }
-              };
+              cell.style = totalColStyle;
+              return;
             }
-
-            let alignment = 'center';
-            if (hasDivisionColumn) {
-              if (colNum === 2 || colNum === 3) alignment = 'left';
-            } else {
-              if (colNum === 2) alignment = 'left';
-            }
-
-            cell.alignment = {
-              vertical: 'middle',
-              horizontal: alignment
-            };
+            const isLeft = hasDivisionColumn ? (colNum === 2 || colNum === 3) : colNum === 2;
+            cell.style = bodyStyleFor(isLeft ? 'left' : 'center', rowColor);
           });
         }
 
         // Grand Total row style (Row endRowNumber)
-        const totalRow = ws.getRow(endRowNumber);
-        totalRow.height = 22;
-        totalRow.eachCell({ includeEmpty: true }, (cell: any, colNum: number) => {
-          cell.border = {
+        const totalRowStyleCenter = {
+          border: {
             top: theme.border,
             left: theme.border,
             bottom: { style: 'double', color: { argb: 'FFCBD5E1' } },
             right: theme.border
-          };
-          cell.font = { bold: true, size: 11, color: { argb: 'FF111827' } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } }; // slate-200
-
-          let alignment = 'center';
-          if (hasDivisionColumn) {
-            if (colNum === 2) alignment = 'left';
-          } else {
-            if (colNum === 2) alignment = 'left';
-          }
-
-          cell.alignment = {
-            vertical: 'middle',
-            horizontal: alignment
-          };
+          },
+          font: { bold: true, size: 11, color: { argb: 'FF111827' } },
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } }, // slate-200
+          alignment: { vertical: 'middle', horizontal: 'center' },
+        };
+        const totalRowStyleLeft = { ...totalRowStyleCenter, alignment: { vertical: 'middle', horizontal: 'left' } };
+        const totalRow = ws.getRow(endRowNumber);
+        totalRow.height = 22;
+        totalRow.eachCell({ includeEmpty: true }, (cell: any, colNum: number) => {
+          cell.style = colNum === 2 ? totalRowStyleLeft : totalRowStyleCenter;
         });
       };
 
@@ -4821,7 +4844,8 @@ export default function Home() {
       const mi = String(now.getMinutes()).padStart(2, '0');
       
       const fileName = `substation-monthwise-complaints-${yyyy}${mm}${dd}-${hh}${mi}.xlsx`;
-      const buf = await wb.xlsx.writeBuffer();
+      // Fast deflate: noticeably quicker to generate for a slightly larger file
+      const buf = await wb.xlsx.writeBuffer({ zip: { compressionOptions: { level: 1 } } });
       const blob = new Blob([buf], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       });
@@ -4969,6 +4993,8 @@ export default function Home() {
                   // next export bypass the server-side fetchAll cache.
                   exportNeedsRefreshRef.current = true;
                   allRowsCacheRef.current = null;
+                  monthwiseNeedsRefreshRef.current = true;
+                  monthwiseRowsCacheRef.current = null;
                   setCurrentPage(1);
                   void loadTablePage(1);
 
