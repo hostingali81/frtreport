@@ -4565,8 +4565,28 @@ export default function Home() {
         headerFontColor: 'FF111827', // gray-900
       };
 
+      // Distinct very light pastel colors (Tailwind 50 weights) for divisions
+      const pastelColors = [
+        'FFFEF2F2', // Rose-50 / Light Red
+        'FFF0FDF4', // Emerald-50 / Light Green
+        'FFF0F9FF', // Sky-50 / Light Blue
+        'FFF5F3FF', // Purple-50 / Light Purple
+        'FFFDF2F8', // Pink-50 / Light Pink
+        'FFFDFBE7', // Amber-50 / Light Yellow
+        'FFF0FDFA', // Teal-50 / Light Teal
+        'FFFDF4FF', // Fuchsia-50 / Light Fuchsia
+      ];
+
+      // Get unique divisions to map colors
+      const uniqueDivisions = Array.from(new Set(sortedRows.map(r => r.division))).sort();
+      const divisionColorMap = new Map<string, string>();
+      uniqueDivisions.forEach((divisionName, index) => {
+        const color = pastelColors[index % pastelColors.length];
+        divisionColorMap.set(divisionName, color);
+      });
+
       // Helper to style any sheet (headers & rows)
-      const styleSheet = (ws: any, hasDivisionColumn: boolean) => {
+      const styleSheet = (ws: any, hasDivisionColumn: boolean, getRowColor?: (r: number) => string | null) => {
         const endRowNumber = ws.lastRow.number;
 
         // Header style (Row 1)
@@ -4601,6 +4621,9 @@ export default function Home() {
         for (let r = 2; r <= endRowNumber; r++) {
           const row = ws.getRow(r);
           row.height = 20;
+          
+          const rowColor = getRowColor ? getRowColor(r) : null;
+
           row.eachCell({ includeEmpty: true }, (cell: any, colNum: number) => {
             cell.border = {
               top: theme.border,
@@ -4608,6 +4631,14 @@ export default function Home() {
               bottom: theme.border,
               right: theme.border
             };
+
+            if (rowColor) {
+              cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: rowColor }
+              };
+            }
 
             let alignment = 'center';
             if (hasDivisionColumn) {
@@ -4657,12 +4688,15 @@ export default function Home() {
         wsAll.getColumn(colIndex + 4).width = 16; // Months
       });
 
-      // Apply styling to "All Division"
-      styleSheet(wsAll, true);
+      // Apply styling to "All Division" with dynamic row colors based on division
+      const getAllDivisionRowColor = (r: number) => {
+        const rowData = sortedRows[r - 2];
+        if (!rowData) return null;
+        return divisionColorMap.get(rowData.division) || null;
+      };
+      styleSheet(wsAll, true, getAllDivisionRowColor);
 
       // 7. Create division-specific sheets
-      const uniqueDivisions = Array.from(new Set(sortedRows.map(r => r.division))).sort();
-
       uniqueDivisions.forEach(divisionName => {
         // Sanitize sheet name: limit to 31 chars and remove invalid chars: \ / ? * [ ] :
         const sanitizedSheetName = divisionName
