@@ -4617,8 +4617,8 @@ export default function Home() {
           };
         });
 
-        // Data rows style (Row 2+)
-        for (let r = 2; r <= endRowNumber; r++) {
+        // Data rows style (Row 2 to endRowNumber - 1)
+        for (let r = 2; r < endRowNumber; r++) {
           const row = ws.getRow(r);
           row.height = 20;
           
@@ -4653,6 +4653,32 @@ export default function Home() {
             };
           });
         }
+
+        // Grand Total row style (Row endRowNumber)
+        const totalRow = ws.getRow(endRowNumber);
+        totalRow.height = 22;
+        totalRow.eachCell({ includeEmpty: true }, (cell: any, colNum: number) => {
+          cell.border = {
+            top: theme.border,
+            left: theme.border,
+            bottom: { style: 'double', color: { argb: 'FFCBD5E1' } },
+            right: theme.border
+          };
+          cell.font = { bold: true, size: 11, color: { argb: theme.headerFontColor } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } }; // slate-200
+
+          let alignment = 'center';
+          if (hasDivisionColumn) {
+            if (colNum === 2) alignment = 'left';
+          } else {
+            if (colNum === 2) alignment = 'left';
+          }
+
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: alignment
+          };
+        });
       };
 
       // 6. Create Sheet 1: "All Division"
@@ -4660,11 +4686,14 @@ export default function Home() {
         views: [{ state: 'frozen', xSplit: 0, ySplit: 1, showGridLines: true }]
       });
 
-      // Headers: Sr No, Division, Sub Stations, and then Month columns
-      const headersAll = ['Sr No', 'Division', 'Sub Stations', ...sortedMonthKeys];
+      // Headers: Sr No, Division, Sub Stations, and then Month columns + Total
+      const headersAll = ['Sr No', 'Division', 'Sub Stations', ...sortedMonthKeys, 'Total'];
       wsAll.addRow(headersAll);
 
-      // Add Data Rows for "All Division"
+      // Add Data Rows for "All Division" and accumulate totals
+      const colTotalsAll = Array(sortedMonthKeys.length).fill(0);
+      let grandTotalAll = 0;
+
       sortedRows.forEach((row, index) => {
         const rowValues: any[] = [
           index + 1, // Sr No
@@ -4672,13 +4701,29 @@ export default function Home() {
           row.subStation // Sub Stations
         ];
 
-        sortedMonthKeys.forEach(monthKey => {
+        let rowTotal = 0;
+        sortedMonthKeys.forEach((monthKey, colIdx) => {
           const count = row.monthCounts[monthKey] || 0;
           rowValues.push(count > 0 ? count : null);
+          rowTotal += count;
+          colTotalsAll[colIdx] += count;
         });
+
+        rowValues.push(rowTotal > 0 ? rowTotal : null); // row total
+        grandTotalAll += rowTotal;
 
         wsAll.addRow(rowValues);
       });
+
+      // Add Grand Total row for "All Division"
+      const totalRowValuesAll = [
+        '', // Sr No
+        'Total', // Division label
+        '', // Sub Stations
+        ...colTotalsAll.map(t => t > 0 ? t : null),
+        grandTotalAll > 0 ? grandTotalAll : null
+      ];
+      wsAll.addRow(totalRowValuesAll);
 
       // Set column widths for "All Division"
       wsAll.getColumn(1).width = 8;   // Sr No
@@ -4687,6 +4732,7 @@ export default function Home() {
       sortedMonthKeys.forEach((_, colIndex) => {
         wsAll.getColumn(colIndex + 4).width = 16; // Months
       });
+      wsAll.getColumn(sortedMonthKeys.length + 4).width = 18; // Total
 
       // Apply styling to "All Division" with dynamic row colors based on division
       const getAllDivisionRowColor = (r: number) => {
@@ -4708,11 +4754,14 @@ export default function Home() {
           views: [{ state: 'frozen', xSplit: 0, ySplit: 1, showGridLines: true }]
         });
 
-        // Headers: Sr No, Sub Stations, and then Month columns (Division column omitted)
-        const headersDiv = ['Sr No', 'Sub Stations', ...sortedMonthKeys];
+        // Headers: Sr No, Sub Stations, and then Month columns + Total
+        const headersDiv = ['Sr No', 'Sub Stations', ...sortedMonthKeys, 'Total'];
         wsDiv.addRow(headersDiv);
 
-        // Filter and add data for this division
+        // Filter, add data, and accumulate totals for this division
+        const colTotalsDiv = Array(sortedMonthKeys.length).fill(0);
+        let grandTotalDiv = 0;
+
         const divisionRows = sortedRows.filter(r => r.division === divisionName);
         divisionRows.forEach((row, index) => {
           const rowValues: any[] = [
@@ -4720,13 +4769,28 @@ export default function Home() {
             row.subStation // Sub Stations
           ];
 
-          sortedMonthKeys.forEach(monthKey => {
+          let rowTotal = 0;
+          sortedMonthKeys.forEach((monthKey, colIdx) => {
             const count = row.monthCounts[monthKey] || 0;
             rowValues.push(count > 0 ? count : null);
+            rowTotal += count;
+            colTotalsDiv[colIdx] += count;
           });
+
+          rowValues.push(rowTotal > 0 ? rowTotal : null); // row total
+          grandTotalDiv += rowTotal;
 
           wsDiv.addRow(rowValues);
         });
+
+        // Add Grand Total row for division sheet
+        const totalRowValuesDiv = [
+          '', // Sr No
+          'Total', // Sub Stations label
+          ...colTotalsDiv.map(t => t > 0 ? t : null),
+          grandTotalDiv > 0 ? grandTotalDiv : null
+        ];
+        wsDiv.addRow(totalRowValuesDiv);
 
         // Set column widths for division sheet
         wsDiv.getColumn(1).width = 8;   // Sr No
@@ -4734,6 +4798,7 @@ export default function Home() {
         sortedMonthKeys.forEach((_, colIndex) => {
           wsDiv.getColumn(colIndex + 3).width = 16; // Months
         });
+        wsDiv.getColumn(sortedMonthKeys.length + 3).width = 18; // Total
 
         // Apply styling to division sheet
         styleSheet(wsDiv, false);
