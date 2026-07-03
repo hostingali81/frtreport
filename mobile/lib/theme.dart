@@ -58,6 +58,11 @@ ThemeData buildTheme() {
       centerTitle: false,
       titleTextStyle: TextStyle(color: AppColors.ink, fontSize: 20, fontWeight: FontWeight.w800),
       iconTheme: IconThemeData(color: AppColors.ink),
+      systemOverlayStyle: SystemUiOverlayStyle(
+        statusBarColor: AppColors.bg,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+      ),
     ),
     cardTheme: CardThemeData(
       color: AppColors.surface,

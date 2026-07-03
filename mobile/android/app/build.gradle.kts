@@ -25,7 +25,10 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        // Pinned to 34: Android 15 (SDK 35) force-enables edge-to-edge, which some
+        // OEMs don't report insets for correctly (AppBar drew under the status bar).
+        // 34 keeps the classic behavior where content sits below the system bars.
+        targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

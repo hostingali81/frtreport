@@ -9,12 +9,14 @@ import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Proper edge-to-edge so the system correctly reports the status/navigation
-  // bar insets (otherwise on some OEMs content draws under the status bar).
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  // NOT edge-to-edge: the status/navigation bars take their own space and content
+  // sits below them. Reliable across OEMs (some, e.g. ColorOS, don't report the
+  // edge-to-edge insets, which made the AppBar draw under the status bar).
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
+    statusBarColor: Color(0xFFF6F7FB),
     statusBarIconBrightness: Brightness.dark,
+    statusBarBrightness: Brightness.light,
     systemNavigationBarColor: Colors.white,
     systemNavigationBarIconBrightness: Brightness.dark,
   ));
