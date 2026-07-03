@@ -11,7 +11,10 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // NOT edge-to-edge: the status/navigation bars take their own space and content
   // sits below them. Reliable across OEMs (some, e.g. ColorOS, don't report the
-  // edge-to-edge insets, which made the AppBar draw under the status bar).
+  // edge-to-edge insets, which made the AppBar draw under the status bar). This is
+  // also enforced natively in MainActivity via setDecorFitsSystemWindows(true),
+  // because Flutter 3.41 draws edge-to-edge by default and this manual-mode call
+  // alone isn't honoured on every OEM.
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Color(0xFFF6F7FB),
