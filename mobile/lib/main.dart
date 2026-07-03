@@ -9,9 +9,14 @@ import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Proper edge-to-edge so the system correctly reports the status/navigation
+  // bar insets (otherwise on some OEMs content draws under the status bar).
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
+    systemNavigationBarColor: Colors.white,
+    systemNavigationBarIconBrightness: Brightness.dark,
   ));
   await Supabase.initialize(url: Config.supabaseUrl, anonKey: Config.supabaseAnonKey);
   runApp(const FrtApp());
