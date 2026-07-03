@@ -23,7 +23,7 @@ Future<void> main() async {
     systemNavigationBarColor: Colors.white,
     systemNavigationBarIconBrightness: Brightness.dark,
   ));
-  await Supabase.initialize(url: Config.supabaseUrl, anonKey: Config.supabaseAnonKey);
+  await Supabase.initialize(url: Config.supabaseUrl, publishableKey: Config.supabaseAnonKey);
   runApp(const FrtApp());
 }
 

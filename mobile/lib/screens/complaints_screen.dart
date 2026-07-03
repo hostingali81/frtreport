@@ -91,12 +91,20 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   List<Complaint> get _filtered {
     final q = _search.trim().toLowerCase();
     final list = _all.where((c) {
-      if (_statusFilter != null && c.actionStatus != _statusFilter) return false;
-      if (_areaFilter != null && c.area != _areaFilter) return false;
-      if (_hideCalled && c.callCount > 0) return false;
+      if (_statusFilter != null && c.actionStatus != _statusFilter) {
+        return false;
+      }
+      if (_areaFilter != null && c.area != _areaFilter) {
+        return false;
+      }
+      if (_hideCalled && c.callCount > 0) {
+        return false;
+      }
       if (q.isNotEmpty) {
         final hay = '${c.complaintNumber} ${c.area} ${c.district} ${c.complaintSubType} ${c.feeder}'.toLowerCase();
-        if (!hay.contains(q)) return false;
+        if (!hay.contains(q)) {
+          return false;
+        }
       }
       return true;
     }).toList();
@@ -108,6 +116,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   Widget build(BuildContext context) {
     final filtered = _filtered;
     final pending = _all.where((c) => c.callCount == 0).length;
+    final viewPadding = MediaQuery.viewPaddingOf(context);
     final overdue = _all.where((c) {
       final d = complaintDeadline(c);
       return d != null && d.isBefore(_now);
@@ -115,17 +124,23 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        titleSpacing: 16,
-        title: const Text('Live Complaints'),
+        primary: true,
+        toolbarHeight: 64,
+        titleSpacing: 16 + viewPadding.left,
+        title: const Text('Live Complaints', maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: FilledButton.tonalIcon(
+            padding: EdgeInsets.only(right: 16 + viewPadding.right),
+            child: IconButton.filledTonal(
+              tooltip: _syncing ? 'Syncing complaints' : 'Refresh complaints',
               onPressed: _syncing ? null : _fetchLatest,
-              icon: _syncing
-                  ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.refresh, size: 18),
-              label: Text(_syncing ? 'Syncing' : 'Latest'),
+              icon: _syncing ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.2)) : const Icon(Icons.refresh_rounded, size: 22),
+              style: IconButton.styleFrom(
+                fixedSize: const Size.square(44),
+                foregroundColor: AppColors.brand,
+                backgroundColor: AppColors.brand.withValues(alpha: 0.12),
+                disabledBackgroundColor: AppColors.brand.withValues(alpha: 0.10),
+              ),
             ),
           ),
         ],
