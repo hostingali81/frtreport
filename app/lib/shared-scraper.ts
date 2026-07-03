@@ -542,7 +542,7 @@ type FrtRequestLike = {
     postData: () => string | undefined;
 };
 
-type FrtPageLike = {
+export type FrtPageLike = {
     setUserAgent: (userAgent: string) => Promise<void>;
     on: ((event: 'dialog', handler: (dialog: FrtDialogLike) => Promise<void>) => void)
         & ((event: 'request', handler: (request: FrtRequestLike) => void) => void);
@@ -591,7 +591,12 @@ type FrtSessionDialogControls = {
 export type FrtScraperSession = {
     scrapeRange: (fromDate?: string, toDate?: string) => Promise<FrtScrapePayload>;
     captureApiSession?: () => Promise<FrtApiSession>;
+    captureCallingSession?: () => Promise<FrtCallingApiSession>;
     close: () => Promise<void>;
+    // Debug/diagnostic hook: exposes the logged-in Puppeteer page so one-off
+    // scripts (e.g. Phase 0 form verification) can drive arbitrary forms
+    // without re-implementing the login flow. Not used by the scrape paths.
+    getPage?: () => FrtPageLike;
 };
 
 // Captured authenticated request "recipe" for the report API. With this we can
@@ -608,9 +613,28 @@ export type FrtApiSession = {
     bodyTemplate: Record<string, unknown>;
 };
 
+// Captured authenticated recipe for the calling app. Holds the full per-form
+// request headers (each already carries the right `formid` + shared token) plus
+// the session-wide cookie, so list (13339) and detail (13340) can be fetched over
+// plain HTTP. Refreshed via browser login when the session expires.
+export type FrtCallingApiSession = {
+    savedAt: string;
+    baseUrl: string;
+    endpoint: string;
+    cookieHeader: string;
+    listHeaders: Record<string, string>;
+    detailHeaders: Record<string, string>;
+};
+
 const FRT_BASE_URL = 'https://www.frtbarabanki.com';
 const FRT_FORM_URL = `${FRT_BASE_URL}/UI/Form?FormId=13345`;
 const FRT_REPORT_ENDPOINT = '/api/AppsavyServices/GetRelationalDataA';
+// Calling app forms: 13339 = live complaints grid (list), 13340 = complaint
+// detail (consumer name/mobile). Verified Phase 0: each form's `formid` header is
+// a stable per-form constant; token/roleid/sourcetype/appsavylogin + cookies are
+// session-wide. See PROJECT-PLAN.md.
+const FRT_CALLING_LIST_FORM_ID = 13339;
+const FRT_CALLING_DETAIL_FORM_ID = 13340;
 const FRT_FROM_CONTROL_ID = '143709';
 const FRT_TO_CONTROL_ID = '143707';
 const FRT_API_SESSION_KEY = 'frt_api_session';
@@ -1263,6 +1287,59 @@ export async function createFrtScraperSession(username: string, password: string
             };
         };
 
+        // Capture the calling-app session: navigate to each form so the browser
+        // fires its GetRelationalDataA request, and record that request's headers
+        // (which carry the form's `formid` + the shared session token). Cookies
+        // are session-wide. No inputxml is needed here — the app builds its own.
+        const captureCallingSession = async (): Promise<FrtCallingApiSession> => {
+            if (closed) throw new Error('FRT scraper session is closed');
+            clearDialogMessage();
+            console.log('[SCRAPER] Capturing calling-app session (13339 + 13340)...');
+
+            const captureFormHeaders = async (formId: number): Promise<Record<string, string>> => {
+                const requestPromise = new Promise<Record<string, string>>((resolve, reject) => {
+                    const timer = setTimeout(
+                        () => reject(new Error(`Timed out waiting for FormId ${formId} request during capture`)),
+                        30000
+                    );
+                    page.on('request', (request: FrtRequestLike) => {
+                        if (!request.url().includes(FRT_REPORT_ENDPOINT) || request.method() !== 'POST') return;
+                        const headers: Record<string, string> = {};
+                        for (const [key, value] of Object.entries(request.headers())) {
+                            const lower = key.toLowerCase();
+                            if (lower.startsWith(':') || lower === 'cookie' || lower === 'content-length' || lower === 'host') continue;
+                            headers[lower] = value;
+                        }
+                        // Ignore any straggler requests from a previously captured form.
+                        if (!headers.formid) return;
+                        clearTimeout(timer);
+                        resolve(headers);
+                    });
+                });
+
+                await page.goto(`${FRT_BASE_URL}/UI/Form?FormId=${formId}`, {
+                    timeout: 60000,
+                    waitUntil: 'domcontentloaded'
+                });
+                return requestPromise;
+            };
+
+            const listHeaders = await captureFormHeaders(FRT_CALLING_LIST_FORM_ID);
+            const detailHeaders = await captureFormHeaders(FRT_CALLING_DETAIL_FORM_ID);
+            const cookies = await page.cookies();
+            const cookieHeader = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+
+            console.log('[SCRAPER] Calling-app session captured.');
+            return {
+                savedAt: new Date().toISOString(),
+                baseUrl: FRT_BASE_URL,
+                endpoint: FRT_REPORT_ENDPOINT,
+                cookieHeader,
+                listHeaders,
+                detailHeaders
+            };
+        };
+
         return {
             scrapeRange: async (fromDate?: string, toDate?: string) => {
                 if (closed) throw new Error('FRT scraper session is closed');
@@ -1282,6 +1359,8 @@ export async function createFrtScraperSession(username: string, password: string
                 );
             },
             captureApiSession,
+            captureCallingSession,
+            getPage: () => page,
             close
         };
     } catch (error) {
