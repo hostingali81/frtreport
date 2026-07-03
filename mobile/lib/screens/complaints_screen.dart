@@ -131,23 +131,58 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
         actions: [
           Padding(
             padding: EdgeInsets.only(right: 16 + viewPadding.right),
-            child: IconButton.filledTonal(
-              tooltip: _syncing ? 'Syncing complaints' : 'Refresh complaints',
-              onPressed: _syncing ? null : _fetchLatest,
-              icon: _syncing ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.2)) : const Icon(Icons.refresh_rounded, size: 22),
-              style: IconButton.styleFrom(
-                fixedSize: const Size.square(44),
-                foregroundColor: AppColors.brand,
-                backgroundColor: AppColors.brand.withValues(alpha: 0.12),
-                disabledBackgroundColor: AppColors.brand.withValues(alpha: 0.10),
-              ),
-            ),
+            child: _syncing
+                ? Container(
+                    height: 38,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.brand.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(100),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 1.8, color: AppColors.brand),
+                        ),
+                        SizedBox(width: 6),
+                        Text(
+                          'Syncing...',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.brand,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : FilledButton.tonalIcon(
+                    onPressed: _fetchLatest,
+                    icon: const Icon(Icons.refresh_rounded, size: 16),
+                    label: const Text('Refresh'),
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      foregroundColor: AppColors.brand,
+                      backgroundColor: AppColors.brand.withValues(alpha: 0.12),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(100),
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(146),
+          preferredSize: const Size.fromHeight(180),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            padding: EdgeInsets.fromLTRB(16 + viewPadding.left, 0, 16 + viewPadding.right, 12),
             child: Column(
               children: [
                 Row(
@@ -159,13 +194,16 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                     const Spacer(),
                   ],
                 ),
-                Gap.sm,
+                const SizedBox(height: 12),
                 TextField(
                   onChanged: (v) => setState(() => _search = v),
                   textInputAction: TextInputAction.search,
-                  decoration: const InputDecoration(hintText: 'Search complaint no, area, feeder…', prefixIcon: Icon(Icons.search, size: 20, color: AppColors.muted)),
+                  decoration: const InputDecoration(
+                    hintText: 'Search complaint no, area, feeder…',
+                    prefixIcon: Icon(Icons.search, size: 20, color: AppColors.muted),
+                  ),
                 ),
-                Gap.sm,
+                const SizedBox(height: 10),
                 Row(
                   children: [
                     Expanded(child: _dropdown('Status', _statusFilter, _statuses, (v) => setState(() => _statusFilter = v))),
@@ -173,7 +211,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                     Expanded(child: _dropdown('Area', _areaFilter, _areas, (v) => setState(() => _areaFilter = v))),
                   ],
                 ),
-                Gap.sm,
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     InkWell(

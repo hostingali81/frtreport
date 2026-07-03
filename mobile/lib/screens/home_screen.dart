@@ -77,7 +77,9 @@ class _HomeShellState extends State<_HomeShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _index, children: _tabs.map((t) => t.widget).toList()),
+      body: SafeTop(
+        child: IndexedStack(index: _index, children: _tabs.map((t) => t.widget).toList()),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) {

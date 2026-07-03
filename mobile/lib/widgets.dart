@@ -202,3 +202,25 @@ void showSnack(BuildContext context, String message, {bool error = false}) {
       backgroundColor: error ? AppColors.danger : AppColors.ink,
     ));
 }
+
+class SafeTop extends StatelessWidget {
+  final Widget child;
+  const SafeTop({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final topPadding = mediaQuery.viewPadding.top > 0 ? mediaQuery.viewPadding.top : 36.0;
+
+    return MediaQuery(
+      data: mediaQuery.copyWith(
+        padding: mediaQuery.padding.copyWith(top: 0),
+        viewPadding: mediaQuery.viewPadding.copyWith(top: 0),
+      ),
+      child: Padding(
+        padding: EdgeInsets.only(top: topPadding),
+        child: child,
+      ),
+    );
+  }
+}
