@@ -140,6 +140,8 @@ class _DetailSheetState extends State<DetailSheet> {
     final c = widget.complaint;
     final sla = slaFor(c, _now);
     final limitH = (c.areaType ?? '').toLowerCase().contains('urban') ? 1 : 2;
+    // Clear the system navigation bar so the Save/Call buttons aren't hidden.
+    final bottomSafe = MediaQuery.of(context).viewPadding.bottom;
 
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -150,7 +152,7 @@ class _DetailSheetState extends State<DetailSheet> {
         expand: false,
         builder: (_, controller) => ListView(
           controller: controller,
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 20 + bottomSafe),
           children: [
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -201,7 +203,7 @@ class _DetailSheetState extends State<DetailSheet> {
             AppCard(
               background: const Color(0xFFFBFCFE),
               child: _loadingContact
-                  ? const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: Text('Fetching consumer contact…', style: TextStyle(color: AppColors.muted))))
+                  ? _contactSkeleton()
                   : _contactError != null
                       ? Row(children: [const Icon(Icons.error_outline, color: AppColors.danger, size: 18), Gap.sm, Expanded(child: Text(_contactError!, style: const TextStyle(color: AppColors.danger)))])
                       : _contactCard(_contact!),
@@ -289,6 +291,32 @@ class _DetailSheetState extends State<DetailSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _contactSkeleton() {
+    Widget bar(double w, double h) => Container(
+          width: w,
+          height: h,
+          decoration: BoxDecoration(color: const Color(0xFFE9EDF3), borderRadius: BorderRadius.circular(6)),
+        );
+    return Shimmer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          bar(150, 16),
+          const SizedBox(height: 10),
+          bar(220, 12),
+          const SizedBox(height: 8),
+          bar(120, 12),
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            height: 48,
+            decoration: BoxDecoration(color: const Color(0xFFE9EDF3), borderRadius: BorderRadius.circular(kRadiusSm)),
+          ),
+        ],
       ),
     );
   }

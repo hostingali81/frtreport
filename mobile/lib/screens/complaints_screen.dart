@@ -261,6 +261,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
+      useSafeArea: true,
       backgroundColor: AppColors.surface,
       builder: (_) => DetailSheet(complaint: c, onLogged: _load),
     );
