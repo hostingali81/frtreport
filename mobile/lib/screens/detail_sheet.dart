@@ -559,15 +559,10 @@ class _DetailSheetState extends State<DetailSheet> {
                             child: Text('Could not load call history', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
                           )
                         : Column(children: [
-                            for (var i = 0; i < _history!.length && i < 5; i++) ...[
+                            for (var i = 0; i < _history!.length; i++) ...[
                               if (i > 0) const Divider(height: 1),
                               _historyTile(_history![i], _history!.length - i),
                             ],
-                            if (_history!.length > 5)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: Text('+ ${_history!.length - 5} more', style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                              ),
                           ]),
               ),
               Gap.lg,
@@ -678,52 +673,74 @@ class _DetailSheetState extends State<DetailSheet> {
     );
   }
 
-  // One earlier attempt: "#2 · No Answer · 2:13 · time", then remark + operator.
+  // One earlier attempt, full details: status + exact time, talk duration and
+  // problem chips, the complete remark (never truncated), and who called.
   Widget _historyTile(Map<String, dynamic> l, int attemptNo) {
     final connected = l['connected'] == true || l['call_status'] == 'Connected';
     final color = connected ? AppColors.success : AppColors.inkSoft;
     final secs = (l['duration_seconds'] as num?)?.toInt();
-    final dur = secs != null && secs > 0 ? '${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}' : null;
-    // Notes carry a "Call m:ss" prefix from older saves — the chip replaces it.
-    final notes = ('${l['notes'] ?? ''}').replaceFirst(RegExp(r'^Call \d+:\d{2}\s*(·\s*)?'), '').trim();
+    final notesRaw = '${l['notes'] ?? ''}';
+    // Older saves only carried the duration inside the "Call m:ss" notes
+    // prefix — use it as a fallback, and strip it since the chip shows it.
+    final prefix = RegExp(r'^Call (\d+:\d{2})\s*(·\s*)?').firstMatch(notesRaw);
+    final dur = secs != null && secs > 0
+        ? '${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}'
+        : prefix?.group(1);
+    final notes = notesRaw.replaceFirst(RegExp(r'^Call \d+:\d{2}\s*(·\s*)?'), '').trim();
     final category = l['problem_category'] as String?;
     final operator = l['operator'] as String?;
+
+    Widget chip(IconData icon, String text, Color fg, Color bg) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 12, color: fg),
+            const SizedBox(width: 4),
+            Text(text, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: fg)),
+          ]),
+        );
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            Text('#$attemptNo', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.muted)),
-            const SizedBox(width: 6),
-            Icon(connected ? Icons.call_made : Icons.call_missed, size: 13, color: color),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                '${l['call_status'] ?? '—'}${category != null ? ' · $category' : ''}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: color),
-              ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(color: const Color(0xFFEFF2F7), borderRadius: BorderRadius.circular(5)),
+              child: Text('#$attemptNo', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.inkSoft)),
             ),
-            const Spacer(),
-            if (dur != null) ...[
-              const Icon(Icons.timer_outlined, size: 11, color: AppColors.brand),
-              const SizedBox(width: 2),
-              Text(dur, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.brand)),
-              const SizedBox(width: 6),
-            ],
+            const SizedBox(width: 7),
+            Icon(connected ? Icons.call_made : Icons.call_missed, size: 14, color: color),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text('${l['call_status'] ?? '—'}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: color)),
+            ),
             Text(fmtDateTime(l['call_time']), style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
           ]),
-          if (notes.isNotEmpty || operator != null)
+          const SizedBox(height: 6),
+          Wrap(spacing: 6, runSpacing: 5, children: [
+            if (dur != null)
+              chip(Icons.timer_outlined, 'Talked $dur min', AppColors.brand, AppColors.brand.withValues(alpha: 0.10))
+            else if (!connected)
+              chip(Icons.phone_missed, 'No talk', AppColors.muted, const Color(0xFFEFF2F7)),
+            if (category != null) chip(Icons.build_circle_outlined, category, AppColors.warning, AppColors.warningBg),
+          ]),
+          if (notes.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(top: 3, left: 20),
-              child: Text(
-                [if (notes.isNotEmpty) '"$notes"', if (operator != null) '— $operator'].join(' '),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11.5, fontStyle: FontStyle.italic, color: AppColors.muted),
+              padding: const EdgeInsets.only(top: 6),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+                decoration: BoxDecoration(color: const Color(0xFFF6F7FB), borderRadius: BorderRadius.circular(7)),
+                child: Text('"$notes"', style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: AppColors.inkSoft)),
               ),
+            ),
+          if (operator != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('by $operator', style: const TextStyle(fontSize: 11, color: AppColors.muted)),
             ),
         ],
       ),
