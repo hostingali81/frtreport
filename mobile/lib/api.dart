@@ -29,7 +29,9 @@ class Api {
   static Map<String, dynamic> _decode(http.Response r) {
     dynamic body;
     try {
-      body = jsonDecode(r.body);
+      // Decode as UTF-8 explicitly: the API omits the charset header, and the
+      // http package then defaults to latin1 — garbling Hindi notes and '·'.
+      body = jsonDecode(utf8.decode(r.bodyBytes));
     } catch (_) {
       body = null;
     }
