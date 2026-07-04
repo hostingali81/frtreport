@@ -52,17 +52,12 @@ String? _defaultCategory(String? subType) {
   return null;
 }
 
+// Pops with 'logged' when a call log was saved — the complaints screen reacts
+// by reloading the list and kicking off an FRT sync.
 class DetailSheet extends StatefulWidget {
   final Complaint complaint;
-  final Future<void> Function() onLogged;
 
-  // Power-dialer session: shows "n / total", auto-dials after a short
-  // countdown, and swaps the buttons to End / Skip / Save & Next. The sheet
-  // pops with 'logged' | 'skip' | 'exit'.
-  final int? sessionIndex;
-  final int? sessionTotal;
-
-  const DetailSheet({super.key, required this.complaint, required this.onLogged, this.sessionIndex, this.sessionTotal});
+  const DetailSheet({super.key, required this.complaint});
 
   @override
   State<DetailSheet> createState() => _DetailSheetState();
@@ -95,13 +90,8 @@ class _DetailSheetState extends State<DetailSheet> {
   bool _listening = false;
   String? _speechLocale;
 
-  int? _countdown;
-  Timer? _countTimer;
-
   DateTime _now = DateTime.now();
   Timer? _tick;
-
-  bool get _sessionMode => widget.sessionTotal != null;
 
   String _fmtMs(Duration d) => '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
 
@@ -119,7 +109,6 @@ class _DetailSheetState extends State<DetailSheet> {
   @override
   void dispose() {
     _tick?.cancel();
-    _countTimer?.cancel();
     _tracker.stop();
     _speech.cancel();
     _notes.dispose();
@@ -163,7 +152,6 @@ class _DetailSheetState extends State<DetailSheet> {
         _contact = c;
         _loadingContact = false;
       });
-      if (_sessionMode && (c.mobile ?? '').isNotEmpty) _startCountdown(c.mobile!);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -173,38 +161,10 @@ class _DetailSheetState extends State<DetailSheet> {
     }
   }
 
-  // --- power-dialer auto-call countdown ---
-
-  void _startCountdown(String mobile) {
-    _countTimer?.cancel();
-    setState(() => _countdown = 3);
-    _countTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) {
-        t.cancel();
-        return;
-      }
-      final next = (_countdown ?? 1) - 1;
-      if (next <= 0) {
-        t.cancel();
-        setState(() => _countdown = null);
-        _call(mobile);
-      } else {
-        setState(() => _countdown = next);
-      }
-    });
-  }
-
-  void _cancelCountdown() {
-    Haptics.tap();
-    _countTimer?.cancel();
-    setState(() => _countdown = null);
-  }
-
   // --- calling ---
 
   Future<void> _call(String mobile) async {
     Haptics.medium();
-    _cancelCountdownSilently();
     final perms = await CallChannel.ensureCallPermissions();
     _perms = perms;
 
@@ -255,11 +215,6 @@ class _DetailSheetState extends State<DetailSheet> {
         if (mounted) showSnack(context, 'Could not open the dialer', error: true);
       }
     }
-  }
-
-  void _cancelCountdownSilently() {
-    _countTimer?.cancel();
-    if (_countdown != null) setState(() => _countdown = null);
   }
 
   Future<(bool aborted, String? accountId)> _chooseSim(List<PhoneAccount> accounts) async {
@@ -430,10 +385,9 @@ class _DetailSheetState extends State<DetailSheet> {
     _logged = true;
     await Store.removeDraft(widget.complaint.dataid);
     Haptics.success();
-    // Refresh runs behind the closing sheet — Save must feel instant.
-    unawaited(widget.onLogged());
     if (mounted) {
       showSnack(context, 'Call logged');
+      // The complaints screen sees the 'logged' result and refreshes.
       Navigator.pop(context, 'logged');
     }
   }
@@ -482,10 +436,6 @@ class _DetailSheetState extends State<DetailSheet> {
                     ],
                   ),
                 ),
-                if (_sessionMode) ...[
-                  Pill('${widget.sessionIndex}/${widget.sessionTotal}', fg: AppColors.brand),
-                  Gap.sm,
-                ],
                 Pill(c.actionStatus ?? '—', fg: statusColor(c.actionStatus)),
               ],
             ),
@@ -546,30 +496,6 @@ class _DetailSheetState extends State<DetailSheet> {
                       : _contactCard(_contact!),
             ),
             Gap.lg,
-
-            // Power-dialer countdown
-            AnimatedSize(
-              duration: const Duration(milliseconds: 220),
-              child: _countdown != null
-                  ? Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: AppColors.brand.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(kRadiusSm),
-                          border: Border.all(color: AppColors.brand.withValues(alpha: 0.35)),
-                        ),
-                        child: Row(children: [
-                          const Icon(Icons.phone_forwarded, size: 18, color: AppColors.brand),
-                          Gap.sm,
-                          Expanded(child: Text('Auto-calling in $_countdown…', style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.brand))),
-                          TextButton(onPressed: _cancelCountdown, child: const Text('Cancel')),
-                        ]),
-                      ),
-                    )
-                  : const SizedBox(width: double.infinity),
-            ),
 
             // Auto call-outcome banner
             AnimatedSize(
@@ -649,40 +575,21 @@ class _DetailSheetState extends State<DetailSheet> {
               ),
             if (_saveError != null) ...[Gap.sm, Text(_saveError!, style: const TextStyle(color: AppColors.danger))],
             Gap.lg,
-            if (!_sessionMode)
-              Row(
-                children: [
-                  Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))),
-                  Gap.sm,
-                  Expanded(
-                    flex: 2,
-                    child: FilledButton(
-                      onPressed: _saving ? null : _save,
-                      child: _saving
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Text('Save call log'),
-                    ),
+            Row(
+              children: [
+                Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))),
+                Gap.sm,
+                Expanded(
+                  flex: 2,
+                  child: FilledButton(
+                    onPressed: _saving ? null : _save,
+                    child: _saving
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Text('Save call log'),
                   ),
-                ],
-              )
-            else
-              Row(
-                children: [
-                  OutlinedButton(onPressed: () => Navigator.pop(context, 'exit'), child: const Text('End')),
-                  Gap.sm,
-                  Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context, 'skip'), child: const Text('Skip'))),
-                  Gap.sm,
-                  Expanded(
-                    flex: 2,
-                    child: FilledButton(
-                      onPressed: _saving ? null : _save,
-                      child: _saving
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Text('Save & Next'),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
+            ),
           ],
         ),
       ),

@@ -128,14 +128,6 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
     }
   }
 
-  // After a call log is saved: refresh the local list right away, then kick
-  // off the same FRT sync as the Refresh button in the background (the app-bar
-  // spinner shows while it runs, and the list updates again when it lands).
-  Future<void> _onLogged() async {
-    await _load();
-    unawaited(_fetchLatest());
-  }
-
   Future<void> _fetchLatest() async {
     if (_syncing) return;
     setState(() => _syncing = true);
@@ -144,11 +136,9 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
       await _load();
       Haptics.success();
     } catch (e) {
+      // Keep showing the current list — a failed sync must never blank it.
       Haptics.error();
-      if (mounted) {
-        setState(() => _error = '$e');
-        showSnack(context, 'Sync failed: $e', error: true);
-      }
+      if (mounted) showSnack(context, 'Sync failed: $e', error: true);
     } finally {
       if (mounted) setState(() => _syncing = false);
     }
@@ -185,7 +175,6 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   Widget build(BuildContext context) {
     final filtered = _filtered;
     final pending = _all.where((c) => c.callCount == 0).length;
-    final uncalled = filtered.where((c) => c.callCount == 0).length;
     final pendingLogs = Store.pendingCount();
     final viewPadding = MediaQuery.viewPaddingOf(context);
     final overdue = _all.where((c) {
@@ -324,15 +313,6 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
           ),
         ),
       ),
-      floatingActionButton: (!_loading && uncalled > 0)
-          ? FloatingActionButton.extended(
-              onPressed: _startSession,
-              backgroundColor: AppColors.brand,
-              foregroundColor: Colors.white,
-              icon: const Icon(Icons.play_arrow_rounded),
-              label: Text('Call session ($uncalled)', style: const TextStyle(fontWeight: FontWeight.w700)),
-            )
-          : null,
       body: Column(
         children: [
           if (pendingLogs > 0)
@@ -387,7 +367,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                                 )
                               ])
                             : ListView.separated(
-                                padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
+                                padding: const EdgeInsets.all(12),
                                 itemCount: filtered.length,
                                 separatorBuilder: (_, _) => Gap.sm,
                                 itemBuilder: (_, i) => _card(filtered[i]),
@@ -413,41 +393,6 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
     });
   }
 
-  // Power dialer: walk the uncalled complaints (respecting current filters and
-  // sort) one by one — each sheet auto-dials, and saving moves to the next.
-  Future<void> _startSession() async {
-    Haptics.medium();
-    final queue = _filtered.where((c) => c.callCount == 0).toList();
-    if (queue.isEmpty) return;
-    var logged = 0;
-    var endedEarly = false;
-    for (var i = 0; i < queue.length; i++) {
-      if (!mounted) return;
-      final res = await showModalBottomSheet<String>(
-        context: context,
-        isScrollControlled: true,
-        isDismissible: false,
-        enableDrag: false,
-        useSafeArea: true,
-        backgroundColor: AppColors.surface,
-        builder: (_) => DetailSheet(
-          complaint: queue[i],
-          onLogged: _onLogged,
-          sessionIndex: i + 1,
-          sessionTotal: queue.length,
-        ),
-      );
-      if (res == 'logged') logged++;
-      if (res == 'exit' || res == null) {
-        endedEarly = true;
-        break;
-      }
-    }
-    if (mounted) {
-      showSnack(context, endedEarly ? 'Session ended · $logged call${logged == 1 ? '' : 's'} logged' : 'Session complete · $logged call${logged == 1 ? '' : 's'} logged');
-    }
-  }
-
   Widget _dropdown(String hint, String? value, List<String> items, ValueChanged<String?> onChanged) {
     return DropdownButtonFormField<String?>(
       initialValue: value,
@@ -468,14 +413,23 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   }
 
   void _openSheet(Complaint c) {
-    showModalBottomSheet(
+    showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       useSafeArea: true,
       backgroundColor: AppColors.surface,
-      builder: (_) => DetailSheet(complaint: c, onLogged: _onLogged),
-    );
+      builder: (_) => DetailSheet(complaint: c),
+    ).then((res) {
+      if (!mounted) return;
+      setState(() {}); // refresh the pending-logs banner
+      if (res == 'logged') {
+        // Auto-refresh: reload the list right away, then run the same FRT
+        // sync as the Refresh button (spinner shows in the app bar).
+        _load();
+        _fetchLatest();
+      }
+    });
   }
 
   Widget _card(Complaint c) {
