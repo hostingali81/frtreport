@@ -207,7 +207,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _recentTile(Map<String, dynamic> r, bool showOperator) {
-    final connected = r['call_status'] == 'Connected';
+    final connected = r['connected'] == true || r['call_status'] == 'Connected';
+    final secs = (r['duration_seconds'] as num?)?.toInt();
+    final dur = secs != null && secs > 0 ? '${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}' : null;
+    // The app prefixes notes with "Call m:ss" — strip it here since the
+    // duration is shown as its own chip.
+    var notes = ('${r['notes'] ?? ''}').replaceFirst(RegExp(r'^Call \d+:\d{2}\s*(·\s*)?'), '').trim();
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       child: AppCard(
@@ -221,11 +226,35 @@ class _ReportsScreenState extends State<ReportsScreen> {
               Expanded(child: Text('${r['complaint_number'] ?? '—'}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5, color: AppColors.ink))),
               Text(fmtDateTime(r['call_time']), style: const TextStyle(fontSize: 11, color: AppColors.muted)),
             ]),
-            const SizedBox(height: 3),
-            Text(
-              [r['call_status'] ?? '', if (r['problem_category'] != null) '· ${r['problem_category']}', if (showOperator && r['operator'] != null) '· ${r['operator']}'].join(' '),
-              style: TextStyle(fontSize: 12, color: connected ? AppColors.success : AppColors.inkSoft),
-            ),
+            const SizedBox(height: 4),
+            Row(children: [
+              Expanded(
+                child: Text(
+                  [r['call_status'] ?? '', if (r['problem_category'] != null) '· ${r['problem_category']}', if (showOperator && r['operator'] != null) '· ${r['operator']}'].join(' '),
+                  style: TextStyle(fontSize: 12, color: connected ? AppColors.success : AppColors.inkSoft),
+                ),
+              ),
+              if (dur != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(color: AppColors.brand.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(6)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.timer_outlined, size: 11, color: AppColors.brand),
+                    const SizedBox(width: 3),
+                    Text(dur, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.brand)),
+                  ]),
+                ),
+            ]),
+            if (notes.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                  decoration: BoxDecoration(color: const Color(0xFFF6F7FB), borderRadius: BorderRadius.circular(7)),
+                  child: Text('"$notes"', maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: AppColors.inkSoft)),
+                ),
+              ),
           ],
         ),
       ),
