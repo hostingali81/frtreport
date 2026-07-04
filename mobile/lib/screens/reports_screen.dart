@@ -91,35 +91,39 @@ class _ReportsScreenState extends State<ReportsScreen> {
             else if (_error != null)
               Padding(padding: const EdgeInsets.only(top: 40), child: EmptyState(icon: Icons.cloud_off, title: 'Could not load', subtitle: _error, action: FilledButton(onPressed: _load, child: const Text('Retry'))))
             else ...[
-              Row(
-                children: [
-                  Expanded(child: _stat('${totals?['total'] ?? 0}', 'Total calls', AppColors.ink, Icons.call)),
-                  Gap.sm,
-                  Expanded(
-                    child: _stat(
-                      '${totals?['connected'] ?? byStatus['Connected'] ?? 0}',
-                      totals?['connectRate'] != null ? 'Connected · ${totals!['connectRate']}%' : 'Connected',
-                      AppColors.success,
-                      Icons.check_circle,
+              Builder(builder: (context) {
+                final total = (totals?['total'] as num?)?.toInt() ?? 0;
+                final connected = (totals?['connected'] as num?)?.toInt() ?? (byStatus['Connected'] as num?)?.toInt() ?? 0;
+                final rate = (totals?['connectRate'] as num?)?.toInt();
+                final talkSecs = (totals?['talkSeconds'] as num?)?.toInt() ?? 0;
+                final avgTalk = (totals?['avgTalkSeconds'] as num?)?.toInt();
+                final respMins = (totals?['avgFirstCallMinutes'] as num?)?.toInt();
+                return Column(children: [
+                  Row(children: [
+                    Expanded(
+                      child: _stat('$total', 'Total calls', AppColors.ink, Icons.call,
+                          sub: '${_fmtNice.format(_from)} – ${_fmtNice.format(_to)}'),
                     ),
-                  ),
-                ],
-              ),
-              Gap.sm,
-              Row(
-                children: [
-                  Expanded(child: _stat(_fmtTalk((totals?['talkSeconds'] as num?)?.toInt() ?? 0), 'Talk time', AppColors.brand, Icons.timer_outlined)),
-                  Gap.sm,
-                  Expanded(
-                    child: _stat(
-                      totals?['avgFirstCallMinutes'] == null ? '—' : '${totals!['avgFirstCallMinutes']}m',
-                      'Avg. first call',
-                      AppColors.warning,
-                      Icons.bolt,
+                    Gap.sm,
+                    Expanded(
+                      child: _stat(rate == null ? '—' : '$rate%', 'Calls answered', AppColors.success, Icons.check_circle,
+                          sub: total == 0 ? 'No calls yet' : '$connected of $total picked up'),
                     ),
-                  ),
-                ],
-              ),
+                  ]),
+                  Gap.sm,
+                  Row(children: [
+                    Expanded(
+                      child: _stat(_fmtTalk(talkSecs), 'Total talk time', AppColors.brand, Icons.timer_outlined,
+                          sub: avgTalk == null ? 'Answered calls only' : 'Avg ${_fmtMmSs(avgTalk)} min per call'),
+                    ),
+                    Gap.sm,
+                    Expanded(
+                      child: _stat(respMins == null ? '—' : _fmtMins(respMins), 'Response speed', AppColors.warning, Icons.bolt,
+                          sub: 'Complaint aane se pehli call tak'),
+                    ),
+                  ]),
+                ]);
+              }),
               if (byStatus.isNotEmpty) ...[
                 Gap.md,
                 Wrap(spacing: 6, runSpacing: 6, children: byStatus.entries.map((e) => Pill('${e.key} · ${e.value}', bg: const Color(0xFFEFF2F7))).toList()),
@@ -151,15 +155,35 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return '${seconds}s';
   }
 
-  Widget _stat(String value, String label, Color color, IconData icon) {
+  // 105 -> "1h 45m", 45 -> "45 min"
+  String _fmtMins(int mins) {
+    if (mins < 60) return '$mins min';
+    return '${mins ~/ 60}h ${mins % 60}m';
+  }
+
+  // 133 -> "2:13"
+  String _fmtMmSs(int seconds) => '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+
+  Widget _stat(String value, String label, Color color, IconData icon, {String? sub}) {
     return AppCard(
+      padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [Icon(icon, size: 16, color: color), const Spacer()]),
-          const SizedBox(height: 6),
-          Text(value, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: color)),
-          Text(label, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          Row(children: [
+            Icon(icon, size: 15, color: color),
+            const SizedBox(width: 5),
+            Expanded(
+              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: color)),
+          if (sub != null) ...[
+            const SizedBox(height: 2),
+            Text(sub, maxLines: 2, style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+          ],
         ],
       ),
     );
