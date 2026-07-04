@@ -393,17 +393,42 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
     });
   }
 
+  // A filter dropdown that clearly shows when it's active: brand-colored bold
+  // text + border while a value is selected, quiet grey when showing "All".
   Widget _dropdown(String hint, String? value, List<String> items, ValueChanged<String?> onChanged) {
+    final active = value != null;
+    OutlineInputBorder fieldBorder(Color c, [double w = 1]) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(kRadiusSm),
+          borderSide: BorderSide(color: c, width: w),
+        );
     return DropdownButtonFormField<String?>(
       initialValue: value,
       isExpanded: true,
-      icon: const Icon(Icons.expand_more, size: 20, color: AppColors.muted),
-      style: const TextStyle(fontSize: 13, color: AppColors.ink),
-      decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10)),
+      borderRadius: BorderRadius.circular(kRadiusSm),
+      dropdownColor: Colors.white,
+      menuMaxHeight: 380,
+      elevation: 4,
+      icon: Icon(Icons.expand_more, size: 20, color: active ? AppColors.brand : AppColors.muted),
+      decoration: InputDecoration(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        enabledBorder: fieldBorder(active ? AppColors.brand : AppColors.border, active ? 1.4 : 1),
+        focusedBorder: fieldBorder(AppColors.brand, 1.5),
+        fillColor: active ? const Color(0xFFF5F5FF) : AppColors.surface,
+      ),
       hint: Text('All ${hint.toLowerCase()}', style: const TextStyle(fontSize: 13, color: AppColors.muted)),
       items: [
-        DropdownMenuItem<String?>(value: null, child: Text('All ${hint.toLowerCase()}', style: const TextStyle(fontSize: 13))),
-        ...items.map((e) => DropdownMenuItem<String?>(value: e, child: Text(e, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis))),
+        DropdownMenuItem<String?>(
+          value: null,
+          child: Text('All ${hint.toLowerCase()}', style: const TextStyle(fontSize: 13.5, color: AppColors.muted, fontWeight: FontWeight.w600)),
+        ),
+        ...items.map((e) => DropdownMenuItem<String?>(
+              value: e,
+              child: Text(e, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, color: AppColors.ink, fontWeight: FontWeight.w500)),
+            )),
+      ],
+      selectedItemBuilder: (context) => [
+        Text('All ${hint.toLowerCase()}', style: const TextStyle(fontSize: 13, color: AppColors.muted)),
+        ...items.map((e) => Text(e, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: AppColors.brand, fontWeight: FontWeight.w700))),
       ],
       onChanged: (v) {
         Haptics.tap();

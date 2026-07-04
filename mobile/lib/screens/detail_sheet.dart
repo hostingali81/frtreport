@@ -19,6 +19,8 @@ const _categories = [
   'Meter Related issue',
   'Phase Problam',
   'Supply Issue Whole Area',
+  'Rosting',
+  'Emergency Rosting',
   'Individiual Cable fault',
   'T/F Fault',
   'Voltage Flactuation',
@@ -30,27 +32,6 @@ const _categories = [
   'Low Voltage',
   'Other',
 ];
-
-// Complaint sub-type usually hints at the problem — pre-select the category as
-// a default the operator can still change. Check specific patterns before
-// generic ones (e.g. "low voltage" before "voltage").
-String? _defaultCategory(String? subType) {
-  final t = (subType ?? '').toLowerCase();
-  if (t.contains('bill')) return 'Bill Related Issue';
-  if (t.contains('meter')) return 'Meter Related issue';
-  if (t.contains('phase')) return 'Phase Problam';
-  if (t.contains('transformer')) return 'T/F Fault';
-  if (t.contains('low voltage')) return 'Low Voltage';
-  if (t.contains('voltage')) return 'Voltage Flactuation';
-  if (t.contains('33kv') || t.contains('33 kv')) return '33kv Line Fault';
-  if (t.contains('11kv') || t.contains('11 kv')) return '11kv Line Fault';
-  if (t.contains('lt line') || t.contains('lt fault')) return 'LT Line Fault';
-  if (t.contains('pole')) return 'Pole Damage';
-  if (t.contains('underground')) return 'Underground Cable Fault';
-  if (t.contains('cable') || t.contains('wire') || t.contains('conductor')) return 'Individiual Cable fault';
-  if (t.contains('supply')) return 'Supply Issue Whole Area';
-  return null;
-}
 
 // Pops with 'logged' when a call log was saved — the complaints screen reacts
 // by reloading the list and kicking off an FRT sync.
@@ -101,12 +82,8 @@ class _DetailSheetState extends State<DetailSheet> {
   @override
   void initState() {
     super.initState();
-    // Repeat call: default to the category diagnosed on the last attempt
-    // (only if it's still in the list); otherwise guess from the sub-type.
-    final last = widget.complaint.lastCallCategory;
-    _category = (last != null && _categories.contains(last))
-        ? last
-        : _defaultCategory(widget.complaint.complaintSubType ?? widget.complaint.complaintType);
+    // Problem stays unselected by default; picking the blank first option
+    // keeps it that way and nothing is written to the database for it.
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
@@ -594,12 +571,33 @@ class _DetailSheetState extends State<DetailSheet> {
               }).toList(),
             ),
             Gap.md,
-            DropdownButtonFormField<String>(
+            DropdownButtonFormField<String?>(
               initialValue: _category,
               isExpanded: true,
-              icon: const Icon(Icons.expand_more, color: AppColors.muted),
-              decoration: const InputDecoration(labelText: 'Problem category (optional)'),
-              items: _categories.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+              borderRadius: BorderRadius.circular(kRadiusSm),
+              dropdownColor: Colors.white,
+              menuMaxHeight: 380,
+              elevation: 4,
+              icon: Icon(Icons.expand_more, color: _category != null ? AppColors.brand : AppColors.muted),
+              decoration: InputDecoration(
+                labelText: 'Problem category (optional)',
+                prefixIcon: Icon(Icons.build_circle_outlined, size: 20, color: _category != null ? AppColors.brand : AppColors.muted),
+              ),
+              // Blank first row (default): selecting it saves nothing.
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('—  Not selected', style: TextStyle(fontSize: 13.5, color: AppColors.muted, fontWeight: FontWeight.w500)),
+                ),
+                ..._categories.map((e) => DropdownMenuItem<String?>(
+                      value: e,
+                      child: Text(e, style: const TextStyle(fontSize: 13.5, color: AppColors.ink, fontWeight: FontWeight.w500)),
+                    )),
+              ],
+              selectedItemBuilder: (context) => [
+                const Text('—  Not selected', style: TextStyle(fontSize: 13.5, color: AppColors.muted)),
+                ..._categories.map((e) => Text(e, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, color: AppColors.ink, fontWeight: FontWeight.w700))),
+              ],
               onChanged: (v) {
                 Haptics.tap();
                 setState(() => _category = v);
