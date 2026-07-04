@@ -1,7 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
-import 'package:permission_handler/permission_handler.dart';
+
+import 'call_channel.dart';
 
 class CallOutcome {
   final Duration duration;
@@ -10,9 +11,10 @@ class CallOutcome {
 }
 
 // Watches the device call state for an outgoing tap-to-call: OFFHOOK marks the
-// call active, the next IDLE marks it ended and yields the duration. A call
-// lasting >= 10s is treated as "likely connected" (best available heuristic —
-// Android doesn't tell normal apps whether the other side actually answered).
+// call active, the next IDLE marks it ended and yields the wall duration
+// (dial + ring + talk). The exact post-pickup duration comes afterwards from
+// the device call log (CallChannel.lastOutgoingCall); the >= 10s heuristic is
+// only the fallback when READ_CALL_LOG is unavailable.
 class CallTracker {
   static const _channel = EventChannel('frt/call_state');
   StreamSubscription<dynamic>? _sub;
@@ -20,8 +22,8 @@ class CallTracker {
   bool _sawOffhook = false;
 
   Future<bool> ensurePermission() async {
-    final status = await Permission.phone.request();
-    return status.isGranted;
+    final perms = await CallChannel.ensureCallPermissions();
+    return perms.phoneState;
   }
 
   void start(void Function(CallOutcome) onEnded) {

@@ -15,6 +15,9 @@ class Complaint {
   final String? complaintDate;
   final int callCount;
   final String? lastCallStatus;
+  final String? lastCallTime;
+  final String? claimedByName;
+  final String? claimedAt;
 
   Complaint({
     required this.dataid,
@@ -29,6 +32,9 @@ class Complaint {
     this.complaintDate,
     this.callCount = 0,
     this.lastCallStatus,
+    this.lastCallTime,
+    this.claimedByName,
+    this.claimedAt,
   });
 
   factory Complaint.fromJson(Map<String, dynamic> j) => Complaint(
@@ -44,7 +50,17 @@ class Complaint {
         complaintDate: j['complaint_date'],
         callCount: _int(j['call_count']) ?? 0,
         lastCallStatus: j['last_call_status'],
+        lastCallTime: j['last_call_time'],
+        claimedByName: j['claimed_by_name'],
+        claimedAt: j['claimed_at'],
       );
+
+  // Someone (possibly me) opened this complaint to call in the last 3 minutes.
+  bool get activeClaim {
+    if (claimedByName == null || claimedAt == null) return false;
+    final t = DateTime.tryParse(claimedAt!);
+    return t != null && DateTime.now().difference(t) < const Duration(minutes: 3);
+  }
 }
 
 class Contact {

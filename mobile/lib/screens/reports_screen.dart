@@ -95,7 +95,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 children: [
                   Expanded(child: _stat('${totals?['total'] ?? 0}', 'Total calls', AppColors.ink, Icons.call)),
                   Gap.sm,
-                  Expanded(child: _stat('${byStatus['Connected'] ?? 0}', 'Connected', AppColors.success, Icons.check_circle)),
+                  Expanded(
+                    child: _stat(
+                      '${totals?['connected'] ?? byStatus['Connected'] ?? 0}',
+                      totals?['connectRate'] != null ? 'Connected · ${totals!['connectRate']}%' : 'Connected',
+                      AppColors.success,
+                      Icons.check_circle,
+                    ),
+                  ),
+                ],
+              ),
+              Gap.sm,
+              Row(
+                children: [
+                  Expanded(child: _stat(_fmtTalk((totals?['talkSeconds'] as num?)?.toInt() ?? 0), 'Talk time', AppColors.brand, Icons.timer_outlined)),
+                  Gap.sm,
+                  Expanded(
+                    child: _stat(
+                      totals?['avgFirstCallMinutes'] == null ? '—' : '${totals!['avgFirstCallMinutes']}m',
+                      'Avg. first call',
+                      AppColors.warning,
+                      Icons.bolt,
+                    ),
+                  ),
                 ],
               ),
               if (byStatus.isNotEmpty) ...[
@@ -118,6 +140,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
         ),
       ),
     );
+  }
+
+  String _fmtTalk(int seconds) {
+    if (seconds <= 0) return '0m';
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    if (h > 0) return '${h}h ${m}m';
+    if (m > 0) return '${m}m';
+    return '${seconds}s';
   }
 
   Widget _stat(String value, String label, Color color, IconData icon) {
@@ -152,6 +183,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget _operatorRow(Map<String, dynamic> o, int maxTotal) {
     final total = (o['total'] as num?)?.toInt() ?? 0;
     final connected = (o['connected'] as num?)?.toInt() ?? 0;
+    final talk = (o['talk_seconds'] as num?)?.toInt() ?? 0;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       child: Column(
@@ -159,7 +191,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         children: [
           Row(children: [
             Expanded(child: Text('${o['operator'] ?? 'Unknown'}', style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink))),
-            Text('$connected/$total', style: const TextStyle(fontSize: 12, color: AppColors.inkSoft)),
+            Text('$connected/$total${talk > 0 ? ' · ${_fmtTalk(talk)}' : ''}', style: const TextStyle(fontSize: 12, color: AppColors.inkSoft)),
           ]),
           const SizedBox(height: 6),
           ClipRRect(

@@ -22,6 +22,8 @@ export async function POST(request: Request) {
       call_status?: string;
       problem_category?: string;
       notes?: string;
+      duration_seconds?: number;
+      connected?: boolean;
     } | null;
 
     const dataid = Number(body?.dataid);
@@ -32,6 +34,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'call_status is required' }, { status: 400 });
     }
 
+    const durationSeconds = Number(body.duration_seconds);
     const { data, error } = await supabase
       .from('call_logs')
       .insert({
@@ -40,12 +43,21 @@ export async function POST(request: Request) {
         call_status: body.call_status,
         problem_category: body.problem_category ?? null,
         notes: body.notes ?? null,
+        duration_seconds: Number.isFinite(durationSeconds) && durationSeconds >= 0 ? Math.round(durationSeconds) : null,
+        connected: typeof body.connected === 'boolean' ? body.connected : null,
         operator: session.displayName || session.email,
         operator_id: session.id
       })
       .select('id, call_time')
       .single();
     if (error) throw new Error(error.message);
+
+    // Logging a call ends this operator's claim on the complaint.
+    await supabase
+      .from('live_complaints')
+      .update({ claimed_by: null, claimed_by_name: null, claimed_at: null })
+      .eq('dataid', dataid)
+      .eq('claimed_by', session.id);
 
     return NextResponse.json({ success: true, log: data });
   } catch (error) {

@@ -2,6 +2,20 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Detect call state (OFFHOOK/IDLE) to auto-suggest the call outcome + duration. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+    <!-- One-tap direct dialing (no confirmation tap in the dialer). -->
+    <uses-permission android:name="android.permission.CALL_PHONE"/>
+    <!-- Read the exact duration of the just-finished outgoing call: duration > 0
+         means the consumer actually answered (accurate Connected/No Answer). -->
+    <uses-permission android:name="android.permission.READ_CALL_LOG"/>
+    <!-- Auto-return to the app when the call ends + the in-call info bubble. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <!-- Call-monitor foreground service (keeps tracking alive during the call). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <!-- "Call ended — log it", new-complaint and SLA alerts (Android 13+). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Voice notes: Hindi speech-to-text into the notes field. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
         android:label="FRT Calling"
         android:name="${applicationName}"
@@ -29,6 +43,16 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Lives only while a tracked outgoing call is in progress; brings the
+             app back to the foreground when the call ends. -->
+        <service
+            android:name=".CallMonitorService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Tracks an operator-initiated outgoing call to log its outcome" />
+        </service>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
@@ -49,6 +73,10 @@
         <intent>
             <action android:name="android.intent.action.DIAL"/>
             <data android:scheme="tel"/>
+        </intent>
+        <!-- Voice notes: discover the on-device speech recognition service. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
         </intent>
     </queries>
 </manifest>

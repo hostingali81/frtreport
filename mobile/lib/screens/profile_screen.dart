@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../api.dart';
+import '../call_channel.dart';
 import '../models.dart';
+import '../storage.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
@@ -38,6 +40,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: AppColors.surface,
       builder: (_) => _ChangePasswordSheet(email: widget.user.email),
     );
+  }
+
+  // Choose (or clear) the SIM used for one-tap calls on dual-SIM phones.
+  Future<void> _chooseSim() async {
+    Haptics.tap();
+    await CallChannel.ensureCallPermissions();
+    final accounts = await CallChannel.phoneAccounts();
+    if (!mounted) return;
+    if (accounts.isEmpty) {
+      showSnack(context, 'No SIM info available (check phone permission)', error: true);
+      return;
+    }
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Preferred SIM for calls', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.ink)),
+            Gap.sm,
+            ...accounts.map((a) => ListTile(
+                  leading: const Icon(Icons.sim_card_outlined, color: AppColors.brand),
+                  title: Text(a.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  onTap: () => Navigator.pop(ctx, a.id),
+                )),
+            ListTile(
+              leading: const Icon(Icons.help_outline, color: AppColors.muted),
+              title: const Text('Ask every time', style: TextStyle(fontWeight: FontWeight.w600)),
+              onTap: () => Navigator.pop(ctx, '__ask__'),
+            ),
+            Gap.sm,
+          ],
+        ),
+      ),
+    );
+    if (picked == null) return;
+    if (picked == '__ask__') {
+      await Store.setSim(null, null);
+    } else {
+      await Store.setSim(picked, accounts.firstWhere((a) => a.id == picked).label);
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _overlaySetting() async {
+    Haptics.tap();
+    final granted = await CallChannel.canDrawOverlays();
+    if (granted) {
+      if (mounted) showSnack(context, 'Auto-return is already enabled');
+      return;
+    }
+    await CallChannel.requestOverlayPermission();
   }
 
   Future<void> _logout() async {
@@ -116,6 +172,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 _actionTile(Icons.edit_outlined, 'Edit profile', 'Change your display name', _openEditName),
                 const Divider(height: 1, indent: 56),
                 _actionTile(Icons.lock_reset, 'Change password', 'Update your account password', _openChangePassword),
+              ],
+            ),
+          ),
+          Gap.lg,
+
+          const SectionHeader('Calling settings'),
+          AppCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                _actionTile(Icons.sim_card_outlined, 'Preferred SIM', Store.simLabel() ?? 'Ask every time', _chooseSim),
+                const Divider(height: 1, indent: 56),
+                _actionTile(Icons.flip_to_front, 'Auto-return after calls', 'Needs "Display over other apps"', _overlaySetting),
               ],
             ),
           ),

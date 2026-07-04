@@ -2,12 +2,16 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../alerts.dart';
 import '../api.dart';
+import '../call_channel.dart';
 import '../models.dart';
 import '../sla.dart';
+import '../storage.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'detail_sheet.dart';
+import 'pending_sheet.dart';
 
 class ComplaintsScreen extends StatefulWidget {
   const ComplaintsScreen({super.key});
@@ -20,6 +24,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   List<Complaint> _all = [];
   bool _loading = true;
   bool _syncing = false;
+  bool _offline = false;
   String? _error;
   DateTime _now = DateTime.now();
 
@@ -31,11 +36,13 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
 
   Timer? _tick;
   Timer? _poll;
+  bool _resyncing = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _onboard();
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
@@ -49,21 +56,75 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
     super.dispose();
   }
 
+  // First launch: ask for the calling permissions up front and explain the
+  // "Display over other apps" toggle that powers auto-return + the call bubble.
+  Future<void> _onboard() async {
+    if (Store.onboarded()) return;
+    await Store.setOnboarded();
+    await CallChannel.ensureCallPermissions();
+    if (!mounted || await CallChannel.canDrawOverlays()) return;
+    if (!mounted) return;
+    final enable = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadius)),
+        title: const Text('Auto-return after calls', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        content: const Text(
+          'Allow "Display over other apps" so the app comes back on screen the moment a call ends, with the result pre-filled — and shows the consumer\'s details during the call.',
+          style: TextStyle(fontSize: 13.5, color: AppColors.inkSoft),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Not now')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Enable')),
+        ],
+      ),
+    );
+    if (enable == true) await CallChannel.requestOverlayPermission();
+  }
+
   Future<void> _load() async {
     try {
-      final list = await Api.complaints();
+      final raw = await Api.complaintsRaw();
+      final list = raw.map(Complaint.fromJson).toList();
       if (!mounted) return;
       setState(() {
         _all = list;
         _error = null;
+        _offline = false;
         _loading = false;
       });
+      Store.cacheComplaints(raw);
+      Alerts.check(list);
+      _syncOutboxIfAny();
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = '$e';
-        _loading = false;
-      });
+      final cached = Store.cachedComplaints();
+      if (cached.isNotEmpty) {
+        // Offline: keep working from the last good list.
+        setState(() {
+          _all = cached.map(Complaint.fromJson).toList();
+          _offline = true;
+          _error = null;
+          _loading = false;
+        });
+      } else {
+        setState(() {
+          _error = '$e';
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _syncOutboxIfAny() async {
+    if (Store.outbox().isEmpty || _resyncing) return;
+    final n = await Store.syncOutbox();
+    if (n > 0 && mounted) {
+      showSnack(context, '$n offline log${n == 1 ? '' : 's'} synced');
+      _resyncing = true;
+      await _load();
+      _resyncing = false;
     }
   }
 
@@ -116,6 +177,8 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   Widget build(BuildContext context) {
     final filtered = _filtered;
     final pending = _all.where((c) => c.callCount == 0).length;
+    final uncalled = filtered.where((c) => c.callCount == 0).length;
+    final pendingLogs = Store.pendingCount();
     final viewPadding = MediaQuery.viewPaddingOf(context);
     final overdue = _all.where((c) {
       final d = complaintDeadline(c);
@@ -191,6 +254,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                     Gap.sm,
                     Pill('$pending uncalled', fg: AppColors.inkSoft),
                     if (overdue > 0) ...[Gap.sm, Pill('$overdue overdue', fg: AppColors.danger, bg: AppColors.dangerBg)],
+                    if (_offline) ...[Gap.sm, const Pill('Offline', fg: AppColors.warning, bg: AppColors.warningBg)],
                     const Spacer(),
                   ],
                 ),
@@ -249,45 +313,128 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
           ),
         ),
       ),
-      body: _loading
-          ? const SkeletonList()
-          : RefreshIndicator(
-              onRefresh: () {
-                Haptics.light();
-                return _load();
-              },
-              child: _error != null
-                  ? ListView(children: [
-                      Padding(
-                        padding: const EdgeInsets.only(top: 60),
-                        child: EmptyState(
-                          icon: Icons.cloud_off,
-                          title: 'Could not load',
-                          subtitle: _error,
-                          action: FilledButton(onPressed: _load, child: const Text('Retry')),
-                        ),
-                      )
-                    ])
-                  : filtered.isEmpty
-                      ? ListView(children: [
-                          Padding(
-                            padding: const EdgeInsets.only(top: 60),
-                            child: EmptyState(
-                              icon: Icons.inbox_outlined,
-                              title: _all.isEmpty ? 'No complaints yet' : 'Nothing matches your filters',
-                              subtitle: _all.isEmpty ? 'Tap "Latest" to pull the live grid.' : 'Try clearing the search or filters.',
-                              action: _all.isEmpty ? FilledButton.icon(onPressed: _syncing ? null : _fetchLatest, icon: const Icon(Icons.refresh, size: 18), label: const Text('Fetch Latest')) : null,
-                            ),
-                          )
-                        ])
-                      : ListView.separated(
-                          padding: const EdgeInsets.all(12),
-                          itemCount: filtered.length,
-                          separatorBuilder: (_, _) => Gap.sm,
-                          itemBuilder: (_, i) => _card(filtered[i]),
-                        ),
+      floatingActionButton: (!_loading && uncalled > 0)
+          ? FloatingActionButton.extended(
+              onPressed: _startSession,
+              backgroundColor: AppColors.brand,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: Text('Call session ($uncalled)', style: const TextStyle(fontWeight: FontWeight.w700)),
+            )
+          : null,
+      body: Column(
+        children: [
+          if (pendingLogs > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              child: AppCard(
+                background: AppColors.warningBg,
+                borderColor: const Color(0xFFFDE68A),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                onTap: _openPending,
+                child: Row(children: [
+                  const Icon(Icons.pending_actions, size: 18, color: AppColors.warning),
+                  Gap.sm,
+                  Expanded(
+                    child: Text('$pendingLogs call log${pendingLogs == 1 ? '' : 's'} pending — tap to finish',
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.warning)),
+                  ),
+                  const Icon(Icons.chevron_right, size: 18, color: AppColors.warning),
+                ]),
+              ),
             ),
+          Expanded(
+            child: _loading
+                ? const SkeletonList()
+                : RefreshIndicator(
+                    onRefresh: () {
+                      Haptics.light();
+                      return _load();
+                    },
+                    child: _error != null
+                        ? ListView(children: [
+                            Padding(
+                              padding: const EdgeInsets.only(top: 60),
+                              child: EmptyState(
+                                icon: Icons.cloud_off,
+                                title: 'Could not load',
+                                subtitle: _error,
+                                action: FilledButton(onPressed: _load, child: const Text('Retry')),
+                              ),
+                            )
+                          ])
+                        : filtered.isEmpty
+                            ? ListView(children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 60),
+                                  child: EmptyState(
+                                    icon: Icons.inbox_outlined,
+                                    title: _all.isEmpty ? 'No complaints yet' : 'Nothing matches your filters',
+                                    subtitle: _all.isEmpty ? 'Tap "Latest" to pull the live grid.' : 'Try clearing the search or filters.',
+                                    action: _all.isEmpty ? FilledButton.icon(onPressed: _syncing ? null : _fetchLatest, icon: const Icon(Icons.refresh, size: 18), label: const Text('Fetch Latest')) : null,
+                                  ),
+                                )
+                              ])
+                            : ListView.separated(
+                                padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
+                                itemCount: filtered.length,
+                                separatorBuilder: (_, _) => Gap.sm,
+                                itemBuilder: (_, i) => _card(filtered[i]),
+                              ),
+                  ),
+          ),
+        ],
+      ),
     );
+  }
+
+  void _openPending() {
+    Haptics.light();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      useSafeArea: true,
+      backgroundColor: AppColors.bg,
+      builder: (_) => PendingSheet(onChanged: _load),
+    ).whenComplete(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  // Power dialer: walk the uncalled complaints (respecting current filters and
+  // sort) one by one — each sheet auto-dials, and saving moves to the next.
+  Future<void> _startSession() async {
+    Haptics.medium();
+    final queue = _filtered.where((c) => c.callCount == 0).toList();
+    if (queue.isEmpty) return;
+    var logged = 0;
+    var endedEarly = false;
+    for (var i = 0; i < queue.length; i++) {
+      if (!mounted) return;
+      final res = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        isDismissible: false,
+        enableDrag: false,
+        useSafeArea: true,
+        backgroundColor: AppColors.surface,
+        builder: (_) => DetailSheet(
+          complaint: queue[i],
+          onLogged: _load,
+          sessionIndex: i + 1,
+          sessionTotal: queue.length,
+        ),
+      );
+      if (res == 'logged') logged++;
+      if (res == 'exit' || res == null) {
+        endedEarly = true;
+        break;
+      }
+    }
+    if (mounted) {
+      showSnack(context, endedEarly ? 'Session ended · $logged call${logged == 1 ? '' : 's'} logged' : 'Session complete · $logged call${logged == 1 ? '' : 's'} logged');
+    }
   }
 
   Widget _dropdown(String hint, String? value, List<String> items, ValueChanged<String?> onChanged) {
@@ -393,6 +540,11 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                                       const SizedBox(width: 3),
                                       Text(c.lastCallStatus ?? 'Called', style: const TextStyle(fontSize: 11, color: AppColors.success, fontWeight: FontWeight.w600)),
                                     ]),
+                                  ),
+                                if (c.activeClaim)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Pill('On call · ${c.claimedByName}', fg: AppColors.warning, bg: AppColors.warningBg),
                                   ),
                               ],
                             ),

@@ -51,10 +51,14 @@ class Api {
 
   static Future<SessionUser> me() async => SessionUser.fromJson((await _get('/api/auth/me'))['user']);
 
-  static Future<List<Complaint>> complaints() async {
+  // Raw JSON rows — the caller caches these for offline use.
+  static Future<List<Map<String, dynamic>>> complaintsRaw() async {
     final j = await _get('/api/calling/complaints');
-    return (j['complaints'] as List).map((e) => Complaint.fromJson(e as Map<String, dynamic>)).toList();
+    return (j['complaints'] as List).cast<Map<String, dynamic>>();
   }
+
+  static Future<List<Complaint>> complaints() async =>
+      (await complaintsRaw()).map(Complaint.fromJson).toList();
 
   static Future<Map<String, dynamic>> sync() => _get('/api/calling/sync');
 
@@ -67,14 +71,35 @@ class Api {
     required String callStatus,
     String? problemCategory,
     String? notes,
+    int? durationSeconds,
+    bool? connected,
   }) async {
-    await _post('/api/calling/log', {
+    await logRaw({
       'dataid': dataid,
       'complaint_number': complaintNumber,
       'call_status': callStatus,
       'problem_category': problemCategory,
       'notes': notes,
+      'duration_seconds': durationSeconds,
+      'connected': connected,
     });
+  }
+
+  // Same POST with a ready payload — used by the offline outbox on retry.
+  static Future<void> logRaw(Map<String, dynamic> payload) async {
+    await _post('/api/calling/log', payload);
+  }
+
+  // Soft-claim before calling so two operators don't ring the same consumer.
+  // Returns {'claimed': bool, 'claimed_by_name': ...} — advisory only.
+  static Future<Map<String, dynamic>> claim(int dataid) => _post('/api/calling/claim', {'dataid': dataid});
+
+  static Future<void> release(int dataid) async {
+    try {
+      await _post('/api/calling/claim', {'dataid': dataid, 'release': true});
+    } catch (_) {
+      // Best effort — a stale claim expires on its own in ~3 minutes.
+    }
   }
 
   static Future<Map<String, dynamic>> reports({String? from, String? to}) {

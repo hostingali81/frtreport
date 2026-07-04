@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'storage.dart';
 import 'theme.dart';
 
 Future<void> main() async {
@@ -23,6 +24,7 @@ Future<void> main() async {
     systemNavigationBarColor: Colors.white,
     systemNavigationBarIconBrightness: Brightness.dark,
   ));
+  await Store.init();
   await Supabase.initialize(url: Config.supabaseUrl, publishableKey: Config.supabaseAnonKey);
   runApp(const FrtApp());
 }
