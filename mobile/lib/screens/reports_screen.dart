@@ -19,7 +19,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Map<String, dynamic>? _data;
   bool _loading = true;
   String? _error;
-  DateTime _from = DateTime.now().subtract(const Duration(days: 6));
+  // Default range: today only (pick other dates from the two buttons).
+  DateTime _from = DateTime.now();
   DateTime _to = DateTime.now();
 
   final _fmt = DateFormat('yyyy-MM-dd');
@@ -102,7 +103,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   Row(children: [
                     Expanded(
                       child: _stat('$total', 'Total calls', AppColors.ink, Icons.call,
-                          sub: '${_fmtNice.format(_from)} – ${_fmtNice.format(_to)}'),
+                          sub: _fmt.format(_from) == _fmt.format(_to)
+                              ? (_fmt.format(_from) == _fmt.format(DateTime.now()) ? 'Today' : _fmtNice.format(_from))
+                              : '${_fmtNice.format(_from)} – ${_fmtNice.format(_to)}'),
                     ),
                     Gap.sm,
                     Expanded(
