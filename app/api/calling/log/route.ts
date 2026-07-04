@@ -6,6 +6,36 @@ import { getSupabaseClient } from '../../../lib/shared-scraper';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// Full call history for one complaint. Every operator sees all attempts (their
+// own and others') so a repeat call starts with full context.
+export async function GET(request: Request) {
+  try {
+    const session = await getSession();
+    if (!session) return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return NextResponse.json({ success: false, error: 'Supabase not configured' }, { status: 500 });
+
+    const dataid = Number(new URL(request.url).searchParams.get('dataid'));
+    if (!Number.isFinite(dataid) || dataid <= 0) {
+      return NextResponse.json({ success: false, error: 'Invalid or missing dataid' }, { status: 400 });
+    }
+
+    const { data, error } = await supabase
+      .from('call_logs')
+      .select('id, call_time, call_status, problem_category, notes, operator, duration_seconds, connected')
+      .eq('dataid', dataid)
+      .order('call_time', { ascending: false })
+      .limit(50);
+    if (error) throw new Error(error.message);
+
+    return NextResponse.json({ success: true, logs: data || [] });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
+}
+
 // Record a post-call outcome into call_logs (the app's value-add over FRT). The
 // operator is taken from the session, never the client body.
 export async function POST(request: Request) {

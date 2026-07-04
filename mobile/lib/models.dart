@@ -16,6 +16,7 @@ class Complaint {
   final int callCount;
   final String? lastCallStatus;
   final String? lastCallTime;
+  final String? lastCallCategory;
   final String? claimedByName;
   final String? claimedAt;
 
@@ -33,6 +34,7 @@ class Complaint {
     this.callCount = 0,
     this.lastCallStatus,
     this.lastCallTime,
+    this.lastCallCategory,
     this.claimedByName,
     this.claimedAt,
   });
@@ -51,6 +53,7 @@ class Complaint {
         callCount: _int(j['call_count']) ?? 0,
         lastCallStatus: j['last_call_status'],
         lastCallTime: j['last_call_time'],
+        lastCallCategory: j['last_call_category'],
         claimedByName: j['claimed_by_name'],
         claimedAt: j['claimed_at'],
       );

@@ -85,6 +85,9 @@ class _DetailSheetState extends State<DetailSheet> {
 
   String? _claimedByOther;
 
+  // Previous attempts on this complaint (all operators), newest first.
+  List<Map<String, dynamic>>? _history;
+
   final _speech = SpeechToText();
   bool _speechReady = false;
   bool _listening = false;
@@ -98,12 +101,27 @@ class _DetailSheetState extends State<DetailSheet> {
   @override
   void initState() {
     super.initState();
-    _category = _defaultCategory(widget.complaint.complaintSubType ?? widget.complaint.complaintType);
+    // Repeat call: default to the category diagnosed on the last attempt
+    // (only if it's still in the list); otherwise guess from the sub-type.
+    final last = widget.complaint.lastCallCategory;
+    _category = (last != null && _categories.contains(last))
+        ? last
+        : _defaultCategory(widget.complaint.complaintSubType ?? widget.complaint.complaintType);
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
     _fetchContact();
     _claim();
+    if (widget.complaint.callCount > 0) _fetchHistory();
+  }
+
+  Future<void> _fetchHistory() async {
+    try {
+      final h = await Api.callHistory(widget.complaint.dataid);
+      if (mounted) setState(() => _history = h);
+    } catch (_) {
+      if (mounted) setState(() => _history = []);
+    }
   }
 
   @override
@@ -436,6 +454,10 @@ class _DetailSheetState extends State<DetailSheet> {
                     ],
                   ),
                 ),
+                if (c.callCount > 0) ...[
+                  Pill('${c.callCount}× called', fg: AppColors.warning, bg: AppColors.warningBg),
+                  Gap.sm,
+                ],
                 Pill(c.actionStatus ?? '—', fg: statusColor(c.actionStatus)),
               ],
             ),
@@ -516,6 +538,40 @@ class _DetailSheetState extends State<DetailSheet> {
                     )
                   : const SizedBox(width: double.infinity),
             ),
+
+            // History of earlier attempts — full context before a repeat call.
+            if (c.callCount > 0) ...[
+              SectionHeader('Previous calls (${_history?.length ?? c.callCount})'),
+              AppCard(
+                padding: EdgeInsets.zero,
+                child: _history == null
+                    ? const Padding(
+                        padding: EdgeInsets.all(14),
+                        child: Row(children: [
+                          SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                          Gap.sm,
+                          Text('Loading history…', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+                        ]),
+                      )
+                    : _history!.isEmpty
+                        ? const Padding(
+                            padding: EdgeInsets.all(14),
+                            child: Text('Could not load call history', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+                          )
+                        : Column(children: [
+                            for (var i = 0; i < _history!.length && i < 5; i++) ...[
+                              if (i > 0) const Divider(height: 1),
+                              _historyTile(_history![i], _history!.length - i),
+                            ],
+                            if (_history!.length > 5)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Text('+ ${_history!.length - 5} more', style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+                              ),
+                          ]),
+              ),
+              Gap.lg,
+            ],
 
             const SectionHeader('Call outcome'),
             Wrap(
@@ -617,6 +673,58 @@ class _DetailSheetState extends State<DetailSheet> {
             height: 48,
             decoration: BoxDecoration(color: const Color(0xFFE9EDF3), borderRadius: BorderRadius.circular(kRadiusSm)),
           ),
+        ],
+      ),
+    );
+  }
+
+  // One earlier attempt: "#2 · No Answer · 2:13 · time", then remark + operator.
+  Widget _historyTile(Map<String, dynamic> l, int attemptNo) {
+    final connected = l['connected'] == true || l['call_status'] == 'Connected';
+    final color = connected ? AppColors.success : AppColors.inkSoft;
+    final secs = (l['duration_seconds'] as num?)?.toInt();
+    final dur = secs != null && secs > 0 ? '${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}' : null;
+    // Notes carry a "Call m:ss" prefix from older saves — the chip replaces it.
+    final notes = ('${l['notes'] ?? ''}').replaceFirst(RegExp(r'^Call \d+:\d{2}\s*(·\s*)?'), '').trim();
+    final category = l['problem_category'] as String?;
+    final operator = l['operator'] as String?;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Text('#$attemptNo', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.muted)),
+            const SizedBox(width: 6),
+            Icon(connected ? Icons.call_made : Icons.call_missed, size: 13, color: color),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                '${l['call_status'] ?? '—'}${category != null ? ' · $category' : ''}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: color),
+              ),
+            ),
+            const Spacer(),
+            if (dur != null) ...[
+              const Icon(Icons.timer_outlined, size: 11, color: AppColors.brand),
+              const SizedBox(width: 2),
+              Text(dur, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.brand)),
+              const SizedBox(width: 6),
+            ],
+            Text(fmtDateTime(l['call_time']), style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+          ]),
+          if (notes.isNotEmpty || operator != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 3, left: 20),
+              child: Text(
+                [if (notes.isNotEmpty) '"$notes"', if (operator != null) '— $operator'].join(' '),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11.5, fontStyle: FontStyle.italic, color: AppColors.muted),
+              ),
+            ),
         ],
       ),
     );

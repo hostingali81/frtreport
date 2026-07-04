@@ -90,6 +90,10 @@ class Api {
     await _post('/api/calling/log', payload);
   }
 
+  // Every past call attempt on this complaint (all operators), newest first.
+  static Future<List<Map<String, dynamic>>> callHistory(int dataid) async =>
+      ((await _get('/api/calling/log?dataid=$dataid'))['logs'] as List).cast<Map<String, dynamic>>();
+
   // Soft-claim before calling so two operators don't ring the same consumer.
   // Returns {'claimed': bool, 'claimed_by_name': ...} — advisory only.
   static Future<Map<String, dynamic>> claim(int dataid) => _post('/api/calling/claim', {'dataid': dataid});

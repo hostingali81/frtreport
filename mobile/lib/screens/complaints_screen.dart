@@ -518,7 +518,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                                       const Icon(Icons.check_circle, size: 13, color: AppColors.success),
                                       const SizedBox(width: 3),
-                                      Text(c.lastCallStatus ?? 'Called', style: const TextStyle(fontSize: 11, color: AppColors.success, fontWeight: FontWeight.w600)),
+                                      Text('${c.callCount > 1 ? '${c.callCount}× · ' : ''}${c.lastCallStatus ?? 'Called'}', style: const TextStyle(fontSize: 11, color: AppColors.success, fontWeight: FontWeight.w600)),
                                     ]),
                                   ),
                                 if (c.activeClaim)
