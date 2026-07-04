@@ -92,9 +92,9 @@ class _ResetScreenState extends State<ResetScreen> {
                     decoration: const InputDecoration(hintText: '••••••', counterText: '', hintStyle: TextStyle(letterSpacing: 10, color: AppColors.border)),
                   ),
                   Gap.md,
-                  TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: 'New password (min 6)', prefixIcon: Icon(Icons.lock_outline, size: 20))),
+                  TextField(controller: _password, obscureText: true, autofillHints: const [AutofillHints.newPassword], decoration: const InputDecoration(labelText: 'New password (min 6)', prefixIcon: Icon(Icons.lock_outline, size: 20))),
                   Gap.sm,
-                  TextField(controller: _confirm, obscureText: true, decoration: const InputDecoration(labelText: 'Confirm new password', prefixIcon: Icon(Icons.lock_outline, size: 20))),
+                  TextField(controller: _confirm, obscureText: true, autofillHints: const [AutofillHints.newPassword], decoration: const InputDecoration(labelText: 'Confirm new password', prefixIcon: Icon(Icons.lock_outline, size: 20))),
                   if (_error != null) ...[Gap.md, Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 13))],
                   Gap.lg,
                   FilledButton(

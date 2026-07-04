@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../theme.dart';
@@ -35,6 +36,9 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       await Supabase.instance.client.auth.signInWithPassword(email: _email.text.trim(), password: _password.text);
+      // Commit the autofill context so Google Password Manager offers to save
+      // the just-used credentials.
+      TextInput.finishAutofillContext();
       Haptics.success();
     } on AuthException catch (e) {
       Haptics.error();
@@ -76,13 +80,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 Gap.xl,
                 AppCard(
                   padding: const EdgeInsets.all(20),
-                  child: Column(
+                  child: AutofillGroup(
+                    child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       TextField(
                         controller: _email,
                         keyboardType: TextInputType.emailAddress,
                         autocorrect: false,
+                        autofillHints: const [AutofillHints.username, AutofillHints.email],
                         textInputAction: TextInputAction.next,
                         decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.mail_outline, size: 20)),
                       ),
@@ -90,6 +96,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextField(
                         controller: _password,
                         obscureText: _obscure,
+                        autofillHints: const [AutofillHints.password],
+                        textInputAction: TextInputAction.done,
                         onSubmitted: (_) => _submit(),
                         decoration: InputDecoration(
                           labelText: 'Password',
@@ -128,6 +136,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: const Text('Forgot password?'),
                       ),
                     ],
+                    ),
                   ),
                 ),
               ],

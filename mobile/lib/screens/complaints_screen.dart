@@ -128,8 +128,16 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
     }
   }
 
+  // After a call log is saved: refresh the local list right away, then kick
+  // off the same FRT sync as the Refresh button in the background (the app-bar
+  // spinner shows while it runs, and the list updates again when it lands).
+  Future<void> _onLogged() async {
+    await _load();
+    unawaited(_fetchLatest());
+  }
+
   Future<void> _fetchLatest() async {
-    Haptics.medium();
+    if (_syncing) return;
     setState(() => _syncing = true);
     try {
       await Api.sync();
@@ -223,7 +231,10 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                     ),
                   )
                 : FilledButton.tonalIcon(
-                    onPressed: _fetchLatest,
+                    onPressed: () {
+                      Haptics.medium();
+                      _fetchLatest();
+                    },
                     icon: const Icon(Icons.refresh_rounded, size: 16),
                     label: const Text('Refresh'),
                     style: FilledButton.styleFrom(
@@ -272,7 +283,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                   children: [
                     Expanded(child: _dropdown('Status', _statusFilter, _statuses, (v) => setState(() => _statusFilter = v))),
                     Gap.sm,
-                    Expanded(child: _dropdown('Area', _areaFilter, _areas, (v) => setState(() => _areaFilter = v))),
+                    Expanded(child: _dropdown('Substation', _areaFilter, _areas, (v) => setState(() => _areaFilter = v))),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -421,7 +432,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
         backgroundColor: AppColors.surface,
         builder: (_) => DetailSheet(
           complaint: queue[i],
-          onLogged: _load,
+          onLogged: _onLogged,
           sessionIndex: i + 1,
           sessionTotal: queue.length,
         ),
@@ -463,7 +474,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
       showDragHandle: true,
       useSafeArea: true,
       backgroundColor: AppColors.surface,
-      builder: (_) => DetailSheet(complaint: c, onLogged: _load),
+      builder: (_) => DetailSheet(complaint: c, onLogged: _onLogged),
     );
   }
 
@@ -491,7 +502,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                 Container(width: 4, color: sla.fg),
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.all(13),
+                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -502,25 +513,40 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                             Pill(c.actionStatus ?? '—', fg: statusColor(c.actionStatus)),
                           ],
                         ),
-                        const SizedBox(height: 5),
+                        const SizedBox(height: 4),
                         Text(c.complaintSubType ?? c.complaintType ?? 'Complaint', style: const TextStyle(fontSize: 14, color: AppColors.ink, fontWeight: FontWeight.w500)),
-                        const SizedBox(height: 3),
+                        const SizedBox(height: 4),
                         Row(children: [
-                          const Icon(Icons.place_outlined, size: 13, color: AppColors.muted),
-                          const SizedBox(width: 3),
-                          Expanded(child: Text('${c.area ?? '—'} · ${c.district ?? '—'}${c.areaType != null ? ' · ${c.areaType}' : ''}', style: const TextStyle(fontSize: 12, color: AppColors.inkSoft), overflow: TextOverflow.ellipsis)),
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(color: AppColors.brand.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(7)),
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                const Icon(Icons.bolt, size: 12, color: AppColors.brand),
+                                const SizedBox(width: 3),
+                                Flexible(
+                                  child: Text(
+                                    c.area ?? 'Substation —',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12, color: AppColors.brand, fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                              ]),
+                            ),
+                          ),
+                          if (c.areaType != null) ...[const SizedBox(width: 6), Pill(c.areaType!, fg: AppColors.inkSoft, bg: const Color(0xFFEFF2F7))],
                         ]),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 8),
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(fmtDateTime(c.complaintDate), style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-                                  Text(elapsedLabel(c.complaintDate, _now), style: const TextStyle(fontSize: 11, color: AppColors.muted)),
-                                ],
+                              child: Text(
+                                '${fmtDateTime(c.complaintDate)} · ${elapsedLabel(c.complaintDate, _now)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
                               ),
                             ),
                             Column(

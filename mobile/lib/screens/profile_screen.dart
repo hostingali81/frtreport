@@ -353,11 +353,11 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SectionHeader('Change password'),
-          TextField(controller: _cur, obscureText: true, decoration: const InputDecoration(labelText: 'Current password', prefixIcon: Icon(Icons.lock_outline, size: 20))),
+          TextField(controller: _cur, obscureText: true, autofillHints: const [AutofillHints.password], decoration: const InputDecoration(labelText: 'Current password', prefixIcon: Icon(Icons.lock_outline, size: 20))),
           Gap.sm,
-          TextField(controller: _next, obscureText: true, decoration: const InputDecoration(labelText: 'New password (min 6)', prefixIcon: Icon(Icons.lock_reset, size: 20))),
+          TextField(controller: _next, obscureText: true, autofillHints: const [AutofillHints.newPassword], decoration: const InputDecoration(labelText: 'New password (min 6)', prefixIcon: Icon(Icons.lock_reset, size: 20))),
           Gap.sm,
-          TextField(controller: _confirm, obscureText: true, decoration: const InputDecoration(labelText: 'Confirm new password', prefixIcon: Icon(Icons.lock_reset, size: 20))),
+          TextField(controller: _confirm, obscureText: true, autofillHints: const [AutofillHints.newPassword], decoration: const InputDecoration(labelText: 'Confirm new password', prefixIcon: Icon(Icons.lock_reset, size: 20))),
           Gap.lg,
           FilledButton(
             onPressed: _saving ? null : _save,

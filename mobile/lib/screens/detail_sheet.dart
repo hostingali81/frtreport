@@ -14,17 +14,41 @@ import '../theme.dart';
 import '../widgets.dart';
 
 const _callStatuses = ['Connected', 'No Answer', 'Switched Off', 'Busy', 'Wrong Number'];
-const _categories = ['Meter Fault', 'Wire Broken', 'Transformer', 'Voltage', 'Pole / Line', 'No Fault Found', 'Other'];
+const _categories = [
+  'Bill Related Issue',
+  'Meter Related issue',
+  'Phase Problam',
+  'Supply Issue Whole Area',
+  'Individiual Cable fault',
+  'T/F Fault',
+  'Voltage Flactuation',
+  '33kv Line Fault',
+  '11kv Line Fault',
+  'LT Line Fault',
+  'Pole Damage',
+  'Underground Cable Fault',
+  'Low Voltage',
+  'Other',
+];
 
 // Complaint sub-type usually hints at the problem — pre-select the category as
-// a default the operator can still change.
+// a default the operator can still change. Check specific patterns before
+// generic ones (e.g. "low voltage" before "voltage").
 String? _defaultCategory(String? subType) {
   final t = (subType ?? '').toLowerCase();
-  if (t.contains('transformer')) return 'Transformer';
-  if (t.contains('meter')) return 'Meter Fault';
-  if (t.contains('wire') || t.contains('conductor') || t.contains('cable')) return 'Wire Broken';
-  if (t.contains('voltage')) return 'Voltage';
-  if (t.contains('pole')) return 'Pole / Line';
+  if (t.contains('bill')) return 'Bill Related Issue';
+  if (t.contains('meter')) return 'Meter Related issue';
+  if (t.contains('phase')) return 'Phase Problam';
+  if (t.contains('transformer')) return 'T/F Fault';
+  if (t.contains('low voltage')) return 'Low Voltage';
+  if (t.contains('voltage')) return 'Voltage Flactuation';
+  if (t.contains('33kv') || t.contains('33 kv')) return '33kv Line Fault';
+  if (t.contains('11kv') || t.contains('11 kv')) return '11kv Line Fault';
+  if (t.contains('lt line') || t.contains('lt fault')) return 'LT Line Fault';
+  if (t.contains('pole')) return 'Pole Damage';
+  if (t.contains('underground')) return 'Underground Cable Fault';
+  if (t.contains('cable') || t.contains('wire') || t.contains('conductor')) return 'Individiual Cable fault';
+  if (t.contains('supply')) return 'Supply Issue Whole Area';
   return null;
 }
 
@@ -406,7 +430,8 @@ class _DetailSheetState extends State<DetailSheet> {
     _logged = true;
     await Store.removeDraft(widget.complaint.dataid);
     Haptics.success();
-    await widget.onLogged();
+    // Refresh runs behind the closing sheet — Save must feel instant.
+    unawaited(widget.onLogged());
     if (mounted) {
       showSnack(context, 'Call logged');
       Navigator.pop(context, 'logged');
