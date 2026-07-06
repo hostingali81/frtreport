@@ -36,7 +36,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          # supabase-js >= 2.110 needs Node 22+ (native WebSocket); on 20 the
+          # client throws "native WebSocket not found" at createClient().
+          node-version: '22'
           cache: 'npm'
 
       - name: Install Dependencies
