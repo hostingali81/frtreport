@@ -30,6 +30,7 @@ const SORT_COLUMNS: Record<string, string> = {
   'Closed Date': 'closed_date',
   'Resolution Time': 'closed_date',
   'Area Type': 'area_type',
+  'Feeder': 'feeder',
   'Division': 'division',
   'Sub Division': 'sub_division',
   'Sub Station': 'sub_station',

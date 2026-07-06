@@ -42,7 +42,6 @@ export default function Home() {
 
   useEffect(() => {
     router.prefetch('/charts');
-    router.prefetch('/deep-analysis');
   }, [router]);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -5249,13 +5248,7 @@ export default function Home() {
                       onClick={() => router.push('/charts')}
                       className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-slate-800"
                     >
-                      <FiBarChart2 className="text-lg" /> <span>View Charts</span>
-                    </button>
-                    <button
-                      onClick={() => router.push('/deep-analysis')}
-                      className="inline-flex items-center gap-2 rounded-xl bg-pink-600 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-pink-700"
-                    >
-                      <FiActivity className="text-lg" /> <span>Deep Analysis</span>
+                      <FiBarChart2 className="text-lg" /> <span>Analytics & Charts</span>
                     </button>
                     <button
                       onClick={exportTrendChartsPDF}
@@ -5355,6 +5348,7 @@ export default function Home() {
                           'Division',
                           'Sub Division',
                           'Sub Station',
+                          'Feeder',
                           'Closed By',
                           'Closing Remarks'
                         ];
@@ -5397,6 +5391,7 @@ export default function Home() {
                         'Division',
                         'Sub Division',
                         'Sub Station',
+                        'Feeder',
                         'Closed By',
                         'Closing Remarks'
                       ];

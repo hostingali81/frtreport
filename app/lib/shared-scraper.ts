@@ -350,6 +350,7 @@ export async function saveToNewDb(
             closed_date: toISTISOString(closedDate),
             closing_remarks: row['Closing Remarks'],
             area_type: row['Area Type'],
+            feeder: row['Feeder'] || null,
             raw_data: row
         };
 
