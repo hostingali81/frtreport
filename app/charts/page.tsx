@@ -24,11 +24,11 @@ const FeederReport = dynamic(() => import('../components/FeederReport'), { ssr: 
 type TabId = 'trends' | 'deep' | 'months' | 'consumers' | 'feeders';
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
-  { id: 'trends', label: 'Trends', icon: '📈' },
   { id: 'deep', label: 'Deep Analysis', icon: '🔬' },
+  { id: 'feeders', label: 'Feeder Report', icon: '⚡' },
+  { id: 'trends', label: 'Trends', icon: '📈' },
   { id: 'months', label: 'Month Comparison', icon: '📅' },
-  { id: 'consumers', label: 'Repeat Consumers', icon: '👥' },
-  { id: 'feeders', label: 'Feeder Report', icon: '⚡' }
+  { id: 'consumers', label: 'Repeat Consumers', icon: '👥' }
 ];
 
 const formatMins = (mins: number) => {
@@ -44,7 +44,7 @@ export default function AnalyticsPage() {
   const { stats, statsLoading, refreshData, applyFilters } = useData();
   const router = useRouter();
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<TabId>('trends');
+  const [activeTab, setActiveTab] = useState<TabId>('deep');
 
   const { filterBarProps, buildFilters } = useComplaintFilters();
 

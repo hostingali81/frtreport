@@ -235,6 +235,7 @@ export default function FilterBar({
           {setMonthFilter && (
             <div className="w-40 flex items-center gap-2">
               <Select
+                instanceId="fb-month"
                 options={monthOptions}
                 value={monthOptions?.find(o => o.value === monthFilter)}
                 onChange={(opt) => setMonthFilter(opt?.value || '')}
@@ -319,6 +320,7 @@ export default function FilterBar({
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1.5">Division</label>
               <Select
+                instanceId="fb-division"
                 value={divisionFilter ? { value: divisionFilter, label: divisionFilter } : null}
                 onChange={(opt) => setDivisionFilter(opt?.value || '')}
                 options={toOptions(divisionOptions)}
@@ -331,6 +333,7 @@ export default function FilterBar({
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1.5">Sub Division</label>
               <Select
+                instanceId="fb-subdivision"
                 value={subDivisionFilter ? { value: subDivisionFilter, label: subDivisionFilter } : null}
                 onChange={(opt) => setSubDivisionFilter(opt?.value || '')}
                 options={toOptions(subDivisionOptions)}
@@ -343,6 +346,7 @@ export default function FilterBar({
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1.5">Sub Station</label>
               <Select
+                instanceId="fb-substation"
                 value={subStationFilter ? { value: subStationFilter, label: subStationFilter } : null}
                 onChange={(opt) => setSubStationFilter(opt?.value || '')}
                 options={toOptions(subStationOptions)}
@@ -355,6 +359,7 @@ export default function FilterBar({
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1.5">Status</label>
               <Select
+                instanceId="fb-status"
                 value={statusFilter ? { value: statusFilter, label: statusFilter } : null}
                 onChange={(opt) => setStatusFilter(opt?.value || '')}
                 options={toOptions(statusOptions)}
@@ -367,6 +372,7 @@ export default function FilterBar({
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1.5">Closed Status</label>
               <Select
+                instanceId="fb-closedstatus"
                 value={closedStatusFilter ? { value: closedStatusFilter, label: closedStatusFilter } : null}
                 onChange={(opt) => setClosedStatusFilter(opt?.value || '')}
                 options={toOptions(closedStatusOptions)}
