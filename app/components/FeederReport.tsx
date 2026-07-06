@@ -27,6 +27,7 @@ function FeederReport({ stats }: Props) {
 
     const feeders = useMemo(() => stats.byFeeder ?? [], [stats]);
     const withFeeder = useMemo(() => feeders.reduce((sum, f) => sum + f.n, 0), [feeders]);
+    const withoutFeeder = Math.max(0, stats.total - withFeeder);
     const coverage = stats.total > 0 ? Math.round((withFeeder / stats.total) * 100) : 0;
     const totalPending = useMemo(() => feeders.reduce((sum, f) => sum + f.pending, 0), [feeders]);
     const totalBeyond = useMemo(() => feeders.reduce((sum, f) => sum + f.beyond, 0), [feeders]);
@@ -113,7 +114,7 @@ function FeederReport({ stats }: Props) {
             const wb = new ExcelJS.Workbook();
             const ws = wb.addWorksheet('Feeder Report', { views: [{ state: 'frozen', xSplit: 0, ySplit: 2 }] });
 
-            ws.addRow([`Feeder-wise Complaint Report  |  ${withFeeder} of ${stats.total} complaints carry feeder info (${coverage}%)`]);
+            ws.addRow([`Feeder-wise Complaint Report  |  ${withFeeder} of ${stats.total} complaints carry feeder info (${coverage}%)  |  ${withoutFeeder} without feeder`]);
             ws.mergeCells(1, 1, 1, 7);
             ws.getRow(1).font = { bold: true, size: 12 };
 
@@ -159,8 +160,9 @@ function FeederReport({ stats }: Props) {
                 <FiZap className="mx-auto mb-3 text-4xl text-amber-500" />
                 <p className="text-lg font-bold text-amber-900">No feeder data in this range</p>
                 <p className="mt-2 text-sm text-amber-800">
-                    Feeder information started coming in the FRT report only recently, so older complaints
-                    do not have it. Try a recent date range (e.g. Today / Last 24 Hours).
+                    All <b>{stats.total.toLocaleString('en-IN')}</b> complaints in this range came without feeder info.
+                    Feeder started coming in the FRT report only recently, so older complaints do not have it —
+                    try a recent date range (e.g. Today / Last 24 Hours).
                 </p>
             </div>
         );
@@ -169,42 +171,66 @@ function FeederReport({ stats }: Props) {
     return (
         <div className="flex flex-col gap-6 animate-in fade-in duration-500">
             {/* Header + coverage */}
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                <div>
-                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                        <span className="p-2 bg-amber-100 text-amber-600 rounded-lg"><FiZap /></span>
-                        Feeder Report
-                    </h2>
-                    <p className="text-sm text-gray-500 mt-1">
-                        {withFeeder} of {stats.total} complaints carry feeder info ({coverage}% coverage)
-                    </p>
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                    <div>
+                        <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                            <span className="p-2 bg-amber-100 text-amber-600 rounded-lg"><FiZap /></span>
+                            Feeder Report
+                        </h2>
+                        <p className="text-sm text-gray-500 mt-1">
+                            {withFeeder} of {stats.total} complaints carry feeder info ({coverage}% coverage)
+                            {withoutFeeder > 0 && <> · <span className="font-semibold text-gray-700">{withoutFeeder} without feeder</span></>}
+                        </p>
+                    </div>
+                    <button
+                        onClick={exportExcel}
+                        disabled={exporting}
+                        className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:bg-gray-400"
+                    >
+                        <FiDownload /> {exporting ? 'Exporting…' : 'Export Excel'}
+                    </button>
                 </div>
-                <button
-                    onClick={exportExcel}
-                    disabled={exporting}
-                    className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:bg-gray-400"
-                >
-                    <FiDownload /> {exporting ? 'Exporting…' : 'Export Excel'}
-                </button>
+                {/* Coverage bar: with feeder vs without */}
+                <div className="mt-3">
+                    <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-gray-200" title={`${withFeeder} with feeder · ${withoutFeeder} without feeder`}>
+                        <div className="bg-blue-600" style={{ width: `${coverage}%` }}></div>
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-4 text-xs text-gray-500">
+                        <span className="inline-flex items-center gap-1.5">
+                            <span className="h-2 w-2 rounded-full bg-blue-600"></span> With feeder: <b className="text-gray-700">{withFeeder}</b>
+                        </span>
+                        <span className="inline-flex items-center gap-1.5">
+                            <span className="h-2 w-2 rounded-full bg-gray-300"></span> Without feeder: <b className="text-gray-700">{withoutFeeder}</b>
+                        </span>
+                    </div>
+                </div>
             </div>
 
             {/* KPI cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
                 <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
                     <p className="text-xs text-gray-500 uppercase tracking-wide">Feeders</p>
                     <p className="text-2xl font-bold text-gray-900">{feeders.length}</p>
                 </div>
                 <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                    <p className="text-xs text-gray-500 uppercase tracking-wide">Complaints (with feeder)</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">With Feeder</p>
                     <p className="text-2xl font-bold text-blue-700">{withFeeder}</p>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">Without Feeder</p>
+                    <p className="text-2xl font-bold text-gray-500">{withoutFeeder}</p>
+                    <p className="text-[11px] text-gray-400">{stats.total > 0 ? 100 - coverage : 0}% of total</p>
                 </div>
                 <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
                     <p className="text-xs text-gray-500 uppercase tracking-wide">Pending</p>
                     <p className="text-2xl font-bold text-red-600">{totalPending}</p>
+                    <p className="text-[11px] text-gray-400">on feeders</p>
                 </div>
                 <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
                     <p className="text-xs text-gray-500 uppercase tracking-wide">Closed Beyond</p>
                     <p className="text-2xl font-bold text-amber-600">{totalBeyond}</p>
+                    <p className="text-[11px] text-gray-400">on feeders</p>
                 </div>
             </div>
 
