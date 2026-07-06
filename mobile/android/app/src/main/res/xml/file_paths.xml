@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider roots for the self-updater: update.apk is downloaded into the
+     app cache dir and handed to the system installer from here. -->
+<paths>
+    <cache-path name="updates" path="." />
+</paths>

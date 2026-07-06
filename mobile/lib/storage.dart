@@ -120,6 +120,13 @@ class Store {
     }
   }
 
+  // --- Alert notifications on/off (new complaint / SLA / retry) ---
+  // Bookkeeping in Alerts.check still runs while off, so turning it back on
+  // doesn't flood the user with everything they missed.
+
+  static bool notificationsEnabled() => _p?.getBool('notifications_enabled') ?? true;
+  static Future<void> setNotificationsEnabled(bool v) async => _p?.setBool('notifications_enabled', v);
+
   // --- One-time onboarding (permissions + overlay explainer) ---
 
   static bool onboarded() => _p?.getBool('onboarded') ?? false;

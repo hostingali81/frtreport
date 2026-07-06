@@ -35,7 +35,27 @@ type Contact = {
 };
 
 const CALL_STATUSES = ['Connected', 'No Answer', 'Switched Off', 'Busy', 'Wrong Number'];
-const PROBLEM_CATEGORIES = ['Meter Fault', 'Wire Broken', 'Transformer', 'Voltage', 'Pole / Line', 'No Fault Found', 'Other'];
+// Kept in sync with the mobile app's list (mobile/lib/screens/detail_sheet.dart)
+// so report tallies don't split across two naming schemes.
+const PROBLEM_CATEGORIES = [
+  '33 KV Line Fault',
+  '11 KV Line Fault',
+  'Transformer (DT) Fault',
+  'Lead/Cable Cut from DT',
+  'LT Line Fault',
+  'Underground Cable Fault',
+  'Service Cable Fault (Individual)',
+  'Pole Damage',
+  'Phase Missing',
+  'Scheduled Rostering',
+  'Emergency Rostering',
+  'Low Voltage',
+  'High Voltage',
+  'Voltage Fluctuation',
+  'Billing Issue',
+  'Meter Issue',
+  'Other',
+];
 const POLL_MS = 180_000;
 const WARNING_MS = 15 * 60 * 1000; // last 15 min before the SLA deadline turns amber
 

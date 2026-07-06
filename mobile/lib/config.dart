@@ -14,4 +14,8 @@ class Config {
     'API_BASE_URL',
     defaultValue: 'https://frtreport.vercel.app',
   );
+
+  // Self-update manifest published by scripts/release-app.mjs (public bucket).
+  static const updateManifestUrl =
+      '$supabaseUrl/storage/v1/object/public/app-updates/latest.json';
 }

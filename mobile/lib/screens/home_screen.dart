@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../models.dart';
 import '../theme.dart';
+import '../updater.dart';
 import '../widgets.dart';
 import 'complaints_screen.dart';
 import 'profile_screen.dart';
@@ -23,6 +24,10 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _userFuture = Api.me();
+    // Self-update check after the first frame; silent no-op when up to date.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Updater.checkOnLaunch(context);
+    });
   }
 
   @override

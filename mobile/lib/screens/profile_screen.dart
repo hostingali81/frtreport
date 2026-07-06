@@ -6,6 +6,7 @@ import '../call_channel.dart';
 import '../models.dart';
 import '../storage.dart';
 import '../theme.dart';
+import '../updater.dart';
 import '../widgets.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -18,6 +19,39 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   late String _displayName = widget.user.displayName ?? '';
+  bool _notifications = Store.notificationsEnabled();
+  String _appVersion = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final name = await Updater.versionName();
+    final build = await Updater.currentBuild();
+    if (mounted) setState(() => _appVersion = name.isEmpty ? '' : '$name (build $build)');
+  }
+
+  Future<void> _checkForUpdate() async {
+    Haptics.tap();
+    await Updater.checkNow(context);
+  }
+
+  // In-app alert notifications (new complaint / SLA / retry). Turning it on
+  // also makes sure the system-level notification permission is granted.
+  Future<void> _toggleNotifications(bool v) async {
+    Haptics.tap();
+    await Store.setNotificationsEnabled(v);
+    if (mounted) setState(() => _notifications = v);
+    if (v) {
+      final perms = await CallChannel.ensureCallPermissions();
+      if (!perms.notifications && mounted) {
+        showSnack(context, 'Also allow notifications for FRT Calling in system settings', error: true);
+      }
+    }
+  }
 
   Future<void> _openEditName() async {
     Haptics.tap();
@@ -159,6 +193,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 _detailRow(Icons.mail_outline, 'Email', u.email),
                 const Divider(height: 1),
                 _detailRow(Icons.shield_outlined, 'Role', u.role.replaceAll('_', ' ')),
+                const Divider(height: 1),
+                _detailRow(Icons.info_outline, 'App version', _appVersion.isEmpty ? '—' : _appVersion),
               ],
             ),
           ),
@@ -172,6 +208,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 _actionTile(Icons.edit_outlined, 'Edit profile', 'Change your display name', _openEditName),
                 const Divider(height: 1, indent: 56),
                 _actionTile(Icons.lock_reset, 'Change password', 'Update your account password', _openChangePassword),
+                const Divider(height: 1, indent: 56),
+                _actionTile(Icons.system_update_alt, 'Check for update', 'Download and install the latest version', _checkForUpdate),
               ],
             ),
           ),
@@ -185,6 +223,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 _actionTile(Icons.sim_card_outlined, 'Preferred SIM', Store.simLabel() ?? 'Ask every time', _chooseSim),
                 const Divider(height: 1, indent: 56),
                 _actionTile(Icons.flip_to_front, 'Auto-return after calls', 'Needs "Display over other apps"', _overlaySetting),
+                const Divider(height: 1, indent: 56),
+                SwitchListTile(
+                  value: _notifications,
+                  onChanged: _toggleNotifications,
+                  secondary: CircleAvatar(
+                    backgroundColor: AppColors.brand.withValues(alpha: 0.1),
+                    child: const Icon(Icons.notifications_active_outlined, color: AppColors.brand, size: 20),
+                  ),
+                  title: const Text('Notifications', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink)),
+                  subtitle: const Text('New complaints, SLA warnings, retry reminders', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+                ),
               ],
             ),
           ),

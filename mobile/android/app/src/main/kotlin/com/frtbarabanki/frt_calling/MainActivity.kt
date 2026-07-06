@@ -14,7 +14,9 @@ import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
+import java.io.File
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
@@ -101,6 +103,15 @@ class MainActivity : FlutterActivity() {
                     Notifications.alert(this, call.argument<Int>("id") ?: 0, call.argument<String>("title") ?: "", call.argument<String>("body") ?: "")
                     result.success(null)
                 }
+                // In-app self-update: Dart downloads the new APK to this path, then
+                // installApk hands it to the system package installer.
+                "getBuildNumber" -> result.success(currentBuildNumber())
+                "getVersionName" -> result.success(
+                    try { packageManager.getPackageInfo(packageName, 0).versionName ?: "" } catch (_: Exception) { "" }
+                )
+                "getAbis" -> result.success(Build.SUPPORTED_ABIS.toList())
+                "getUpdateApkPath" -> result.success(File(cacheDir, "update.apk").absolutePath)
+                "installApk" -> result.success(installApk(call.argument<String>("path") ?: ""))
                 else -> result.notImplemented()
             }
         }
@@ -179,6 +190,41 @@ class MainActivity : FlutterActivity() {
                 if (handle != null) intent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle)
             }
             startActivity(intent)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun currentBuildNumber(): Long {
+        return try {
+            val info = packageManager.getPackageInfo(packageName, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
+            else @Suppress("DEPRECATION") info.versionCode.toLong()
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    // Opens the system installer for the downloaded APK. On Android 8+ the user
+    // must allow "install unknown apps" for this app; if not yet granted we send
+    // them straight to that settings screen and return false so Dart can ask them
+    // to tap Install again afterwards.
+    private fun installApk(path: String): Boolean {
+        val file = File(path)
+        if (!file.exists()) return false
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+                )
+                return false
+            }
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            startActivity(Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
             true
         } catch (_: Exception) {
             false

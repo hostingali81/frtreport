@@ -197,7 +197,13 @@ class _DraftDialogState extends State<_DraftDialog> {
     final d = widget.draft;
     final secs = (d['duration_seconds'] as num?)?.toInt();
     final base = _notes.text.trim();
-    final durText = secs == null ? '' : 'Call ${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}';
+    // Unanswered tracked calls store 0 talk seconds — say "Not picked" instead
+    // of a noisy "Call 0:00".
+    final durText = secs == null
+        ? ''
+        : secs == 0 && d['connected'] == false
+            ? 'Not picked'
+            : 'Call ${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}';
     final payload = {
       'dataid': (d['dataid'] as num).toInt(),
       'complaint_number': d['complaint_number'],

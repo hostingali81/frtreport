@@ -17,15 +17,19 @@ class Alerts {
     final now = DateTime.now();
     final currentIds = complaints.map((c) => c.dataid).toSet();
     final firstRun = !Store.alertsInitialized();
+    // Profile-screen toggle. Bookkeeping below still runs while off, so
+    // re-enabling doesn't flood the user with everything they missed.
+    final notifyOn = Store.notificationsEnabled();
 
     // New complaints (skip the very first run: everything would be "new").
     if (!firstRun) {
       final seen = Store.seenIds();
       final fresh = complaints.where((c) => !seen.contains(c.dataid)).toList();
       if (fresh.length > 3) {
-        await CallChannel.notify(100, '${fresh.length} new complaints', 'Open FRT Calling to start calling.');
+        if (notifyOn) await CallChannel.notify(100, '${fresh.length} new complaints', 'Open FRT Calling to start calling.');
       } else {
         for (final c in fresh) {
+          if (!notifyOn) break;
           await CallChannel.notify(
             100 + (c.dataid % 900),
             'New: ${c.complaintSubType ?? c.complaintType ?? 'Complaint'}',
@@ -44,11 +48,13 @@ class Alerts {
       final rem = dl.difference(now);
       if (rem > Duration.zero && rem <= _slaWarn) {
         overdueNotified.add(c.dataid);
-        await CallChannel.notify(
-          2000 + (c.dataid % 900),
-          'SLA warning · ${rem.inMinutes}m left',
-          '${c.complaintNumber ?? '#${c.dataid}'} · ${c.area ?? ''} — not called yet',
-        );
+        if (notifyOn) {
+          await CallChannel.notify(
+            2000 + (c.dataid % 900),
+            'SLA warning · ${rem.inMinutes}m left',
+            '${c.complaintNumber ?? '#${c.dataid}'} · ${c.area ?? ''} — not called yet',
+          );
+        }
       }
     }
 
@@ -61,11 +67,13 @@ class Alerts {
       final key = '${c.dataid}:${c.lastCallTime}';
       if (now.difference(last) >= _retryAfter && !retryNotified.contains(key)) {
         retryNotified.add(key);
-        await CallChannel.notify(
-          3000 + (c.dataid % 900),
-          'Retry: ${c.lastCallStatus}',
-          '${c.complaintNumber ?? '#${c.dataid}'} · last tried ${now.difference(last).inMinutes}m ago',
-        );
+        if (notifyOn) {
+          await CallChannel.notify(
+            3000 + (c.dataid % 900),
+            'Retry: ${c.lastCallStatus}',
+            '${c.complaintNumber ?? '#${c.dataid}'} · last tried ${now.difference(last).inMinutes}m ago',
+          );
+        }
       }
     }
 

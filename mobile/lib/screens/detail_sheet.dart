@@ -14,22 +14,26 @@ import '../theme.dart';
 import '../widgets.dart';
 
 const _callStatuses = ['Connected', 'No Answer', 'Switched Off', 'Busy', 'Wrong Number'];
+// Grouped for the dropdown: network faults from the highest voltage level down
+// to the consumer end, then scheduled/emergency cuts, voltage quality, and
+// billing/metering. Stored as free text — old logs keep their original labels.
 const _categories = [
-  'Bill Related Issue',
-  'Meter Related issue',
-  'Phase Problam',
-  'Supply Issue Whole Area',
-  'Rosting',
-  'Emergency Rosting',
-  'Individiual Cable fault',
-  'T/F Fault',
-  'Voltage Flactuation',
-  '33kv Line Fault',
-  '11kv Line Fault',
+  '33 KV Line Fault',
+  '11 KV Line Fault',
+  'Transformer (DT) Fault',
+  'Lead/Cable Cut from DT',
   'LT Line Fault',
-  'Pole Damage',
   'Underground Cable Fault',
+  'Service Cable Fault (Individual)',
+  'Pole Damage',
+  'Phase Missing',
+  'Scheduled Rostering',
+  'Emergency Rostering',
   'Low Voltage',
+  'High Voltage',
+  'Voltage Fluctuation',
+  'Billing Issue',
+  'Meter Issue',
   'Other',
 ];
 
@@ -60,6 +64,7 @@ class _DetailSheetState extends State<DetailSheet> {
   final _tracker = CallTracker();
   CallPermissions? _perms;
   Duration? _callDuration;
+  Duration? _wallDuration; // OFFHOOK→IDLE wall time (dial + ring + talk)
   bool _callTracked = false;
   bool _exact = false; // duration came from the device call log
   bool _connected = false;
@@ -260,16 +265,24 @@ class _DetailSheetState extends State<DetailSheet> {
   Future<void> _onCallEnded(String mobile, CallOutcome outcome) async {
     if (!mounted) return;
     Haptics.light();
+    final hasCallLog = _perms?.callLog == true;
     setState(() {
       _callDuration = outcome.duration;
+      _wallDuration = outcome.duration;
       _callTracked = true;
-      if (!_statusManual) _callStatus = outcome.likelyConnected ? 'Connected' : 'No Answer';
+      // The wall time (dial + ring + talk) can't tell "talked 30s" from "rang
+      // 30s unanswered", so the >=10s guess is only used when the call log is
+      // unavailable. With call-log access the exact answer lands in a few
+      // seconds — don't pre-fill a guess the operator might save first.
+      if (!_statusManual && !hasCallLog) {
+        _callStatus = outcome.likelyConnected ? 'Connected' : 'No Answer';
+      }
     });
-    if (_perms?.callLog != true) return;
-    // The OS writes the call-log row a moment after the call ends; poll
-    // briefly for the exact post-pickup duration (the real "did they answer").
-    for (var attempt = 0; attempt < 3; attempt++) {
-      await Future.delayed(Duration(milliseconds: 900 + attempt * 900));
+    if (!hasCallLog) return;
+    // The OS writes the call-log row a moment after the call ends — some OEMs
+    // take several seconds, so keep polling for ~15s total.
+    for (var attempt = 0; attempt < 6; attempt++) {
+      await Future.delayed(Duration(milliseconds: 800 + attempt * 700));
       final entry = await CallChannel.lastOutgoingCall(mobile);
       if (entry == null) continue;
       if (DateTime.now().millisecondsSinceEpoch - entry.dateMillis > 30 * 60 * 1000) continue;
@@ -277,10 +290,16 @@ class _DetailSheetState extends State<DetailSheet> {
       setState(() {
         _exact = true;
         _connected = entry.answered;
-        _callDuration = entry.answered ? Duration(seconds: entry.durationSeconds) : outcome.duration;
+        // Outgoing-call duration only counts after pickup: unanswered means
+        // zero talk time — the wall duration was just ringing.
+        _callDuration = Duration(seconds: entry.answered ? entry.durationSeconds : 0);
         if (!_statusManual) _callStatus = entry.answered ? 'Connected' : 'No Answer';
       });
       break;
+    }
+    // Call log never showed the call (rare) — fall back to the wall-time guess.
+    if (!_exact && mounted && !_statusManual && _callStatus == null) {
+      setState(() => _callStatus = outcome.likelyConnected ? 'Connected' : 'No Answer');
     }
   }
 
@@ -337,14 +356,45 @@ class _DetailSheetState extends State<DetailSheet> {
       setState(() => _saveError = 'Select a call outcome');
       return;
     }
+    // Logging without having called from the app: allowed (consumer may have
+    // called back, phone issues, ...) but confirmed and audit-marked, so a
+    // desk-filled "No Answer" can't pass as a real attempt.
+    if (!_callTracked) {
+      Haptics.warn();
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Log without calling?'),
+          content: const Text('No call was made from the app for this complaint. The log will be marked "No call from app".'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Log anyway')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
     setState(() {
       _saving = true;
       _saveError = null;
     });
     final base = _notes.text.trim();
-    final notes = _callTracked && _callDuration != null
-        ? 'Call ${_fmtMs(_callDuration!)}${base.isEmpty ? '' : ' · $base'}'
-        : (base.isEmpty ? null : base);
+    // Audit prefix, written by the app (the operator can't edit it out):
+    //  - talked             -> "Call 1:23" (exact talk time)
+    //  - rang, not picked   -> "Rang 0:27 · not picked" (how long it rang)
+    //  - tracked, no log    -> "Call ended after 0:41" (talk vs ring unknown)
+    //  - no call from app   -> "⚠ No call from app" (spot desk-filled logs)
+    final String prefix;
+    if (!_callTracked) {
+      prefix = '⚠ No call from app';
+    } else if (_exact && !_connected) {
+      prefix = 'Rang ${_fmtMs(_wallDuration ?? Duration.zero)} · not picked';
+    } else if (_exact) {
+      prefix = 'Call ${_fmtMs(_callDuration ?? Duration.zero)}';
+    } else {
+      prefix = 'Call ended after ${_fmtMs(_callDuration ?? Duration.zero)}';
+    }
+    final notes = base.isEmpty ? prefix : '$prefix · $base';
     final payload = {
       'dataid': widget.complaint.dataid,
       'complaint_number': widget.complaint.complaintNumber,
@@ -396,6 +446,8 @@ class _DetailSheetState extends State<DetailSheet> {
           ? 'Connected · talked ${_fmtMs(d)} · suggested "${_callStatus ?? '—'}"'
           : 'No talk time recorded (not answered) · suggested "${_callStatus ?? '—'}"';
     }
+    // Waiting for the call-log poll — no premature Connected/No Answer guess.
+    if (_callStatus == null) return 'Call ended · checking the call log for the exact result…';
     return 'Call ended · lasted ${_fmtMs(d)} · suggested "${_callStatus ?? '—'}". Adjust if needed.';
   }
 

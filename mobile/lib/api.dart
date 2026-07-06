@@ -18,12 +18,39 @@ class ApiException implements Exception {
 class Api {
   static SupabaseClient get _sb => Supabase.instance.client;
 
-  static Map<String, String> _headers() {
-    final token = _sb.auth.currentSession?.accessToken;
+  static Future<Map<String, String>> _headers() async {
+    var session = _sb.auth.currentSession;
+    // On a cold start the restored access token can already be expired while
+    // the SDK is still refreshing it in the background; sending it as-is 401s
+    // the first request (seen on the Reports tab, which loads immediately).
+    // Refresh proactively when it's expired or about to expire.
+    final exp = session?.expiresAt;
+    if (session != null && exp != null && DateTime.now().millisecondsSinceEpoch ~/ 1000 >= exp - 30) {
+      try {
+        await _sb.auth.refreshSession();
+        session = _sb.auth.currentSession;
+      } catch (_) {
+        // Offline — send the stale token; the caller surfaces the error.
+      }
+    }
+    final token = session?.accessToken;
     return {
       'Content-Type': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
     };
+  }
+
+  // Runs a request; on 401 refreshes the session once and retries, so a token
+  // that expired mid-flight doesn't bubble up as an error to the operator.
+  static Future<Map<String, dynamic>> _send(Future<http.Response> Function(Map<String, String> headers) run) async {
+    var r = await run(await _headers());
+    if (r.statusCode == 401 && _sb.auth.currentSession != null) {
+      try {
+        await _sb.auth.refreshSession();
+      } catch (_) {}
+      r = await run(await _headers());
+    }
+    return _decode(r);
   }
 
   static Map<String, dynamic> _decode(http.Response r) {
@@ -44,12 +71,12 @@ class Api {
     throw ApiException('HTTP ${r.statusCode}');
   }
 
-  static Future<Map<String, dynamic>> _get(String path) async =>
-      _decode(await http.get(Uri.parse('${Config.apiBaseUrl}$path'), headers: _headers()));
-  static Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async =>
-      _decode(await http.post(Uri.parse('${Config.apiBaseUrl}$path'), headers: _headers(), body: jsonEncode(body)));
-  static Future<Map<String, dynamic>> _patch(String path, Map<String, dynamic> body) async =>
-      _decode(await http.patch(Uri.parse('${Config.apiBaseUrl}$path'), headers: _headers(), body: jsonEncode(body)));
+  static Future<Map<String, dynamic>> _get(String path) =>
+      _send((h) => http.get(Uri.parse('${Config.apiBaseUrl}$path'), headers: h));
+  static Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) =>
+      _send((h) => http.post(Uri.parse('${Config.apiBaseUrl}$path'), headers: h, body: jsonEncode(body)));
+  static Future<Map<String, dynamic>> _patch(String path, Map<String, dynamic> body) =>
+      _send((h) => http.patch(Uri.parse('${Config.apiBaseUrl}$path'), headers: h, body: jsonEncode(body)));
 
   static Future<SessionUser> me() async => SessionUser.fromJson((await _get('/api/auth/me'))['user']);
 

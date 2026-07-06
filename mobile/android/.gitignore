@@ -9,6 +9,9 @@ GeneratedPluginRegistrant.java
 
 # Remember to never publicly share your keystore.
 # See https://flutter.dev/to/reference-keystore
-key.properties
 **/*.keystore
 **/*.jks
+# Deliberately committed (private repo): the app key is the promoted debug
+# keystore (well-known debug passwords, no Play Store) — losing it would break
+# in-app updates on every installed device. key.properties is committed too.
+!app/frt-upload.keystore
