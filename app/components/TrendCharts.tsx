@@ -18,6 +18,20 @@ import {
   DoughnutController
 } from 'chart.js';
 import type { ChartStats } from '../context/DataContext';
+import {
+  CAT,
+  INK,
+  GRID,
+  SURFACE,
+  nfmt,
+  TOOLTIP,
+  axisTicks,
+  hairlineGrid,
+  barTopLabels,
+  barEndLabels,
+  doughnutCenter,
+  ChartCard
+} from './chartTheme';
 
 Chart.register(
   CategoryScale,
@@ -39,14 +53,8 @@ interface TrendChartsProps {
   stats: ChartStats;
 }
 
-// Validated categorical palette (fixed slot order — the ordering is the
-// CVD-safety mechanism, don't shuffle). Single-series charts always use slot 1.
-const CAT = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948', '#e87ba4', '#eb6834'];
-const INK = { primary: '#0b0b0b', secondary: '#52514e', muted: '#898781' };
-const GRID = '#e7e6e0';
-const SURFACE = '#ffffff';
-
-const nfmt = (n: number) => n.toLocaleString('en-IN');
+// Palette + shared plugins/card live in chartTheme.tsx (shared with the other
+// /analytics tabs).
 
 // '2026-06-11' -> '11/06' (short axis label); tooltip carries the full date.
 const shortDate = (isoDate: string) => {
@@ -57,105 +65,6 @@ const fullDate = (isoDate: string) => {
   const [y, m, d] = isoDate.split('-');
   return `${d}/${m}/${y}`;
 };
-
-const TOOLTIP = {
-  backgroundColor: 'rgba(11, 11, 11, 0.92)',
-  titleFont: { size: 12, weight: 'bold' as const },
-  bodyFont: { size: 12 },
-  padding: 10,
-  cornerRadius: 8,
-  boxPadding: 4,
-  displayColors: true,
-  usePointStyle: true
-};
-
-const axisTicks = { color: INK.muted, font: { size: 11 } };
-const hairlineGrid = { color: GRID, drawTicks: false };
-
-// Muted count labels above vertical bars (relief for the sub-3:1 palette slots
-// and the counts operators read off these reports).
-const barTopLabels = {
-  id: 'barTopLabels',
-  afterDatasetsDraw: (chart: any) => {
-    const ctx = chart.ctx;
-    chart.data.datasets.forEach((dataset: any, i: number) => {
-      const meta = chart.getDatasetMeta(i);
-      if (meta.type !== 'bar' || chart.options.indexAxis === 'y') return;
-      meta.data.forEach((bar: any, index: number) => {
-        ctx.fillStyle = INK.secondary;
-        ctx.font = '600 11px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText(nfmt(dataset.data[index]), bar.x, bar.y - 4);
-      });
-    });
-  }
-};
-
-const barEndLabels = {
-  id: 'barEndLabels',
-  afterDatasetsDraw: (chart: any) => {
-    if (chart.options.indexAxis !== 'y') return;
-    const ctx = chart.ctx;
-    chart.data.datasets.forEach((dataset: any, i: number) => {
-      const meta = chart.getDatasetMeta(i);
-      meta.data.forEach((bar: any, index: number) => {
-        ctx.fillStyle = INK.secondary;
-        ctx.font = '600 11px system-ui, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(nfmt(dataset.data[index]), bar.x + 6, bar.y);
-      });
-    });
-  }
-};
-
-// Total in the doughnut hole, in ink (never a series color).
-const doughnutCenter = (label: string) => ({
-  id: 'doughnutCenter',
-  afterDraw: (chart: any) => {
-    const { ctx } = chart;
-    const meta = chart.getDatasetMeta(0);
-    if (!meta?.data?.[0]) return;
-    const { x, y } = meta.data[0];
-    const total = (chart.data.datasets[0].data as number[]).reduce((a, b) => a + b, 0);
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.fillStyle = INK.primary;
-    ctx.font = '700 22px system-ui, sans-serif';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(nfmt(total), x, y + 2);
-    ctx.fillStyle = INK.muted;
-    ctx.font = '500 11px system-ui, sans-serif';
-    ctx.textBaseline = 'top';
-    ctx.fillText(label, x, y + 6);
-    ctx.restore();
-  }
-});
-
-function ChartCard({
-  title,
-  subtitle,
-  height,
-  children,
-  className = ''
-}: {
-  title: string;
-  subtitle: string;
-  height: number;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={`bg-white rounded-2xl border border-gray-200 shadow-sm p-5 ${className}`}>
-      <div className="mb-4">
-        <h3 className="text-sm font-bold text-gray-900">{title}</h3>
-        <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>
-      </div>
-      <div style={{ height: `${height}px`, position: 'relative' }}>{children}</div>
-    </div>
-  );
-}
 
 export default function TrendCharts({ stats }: TrendChartsProps) {
   const comparisonChartRef = useRef<HTMLCanvasElement>(null);

@@ -41,7 +41,7 @@ export default function Home() {
   const monthwiseNeedsRefreshRef = useRef(false);
 
   useEffect(() => {
-    router.prefetch('/charts');
+    router.prefetch('/analytics');
   }, [router]);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -5245,7 +5245,7 @@ export default function Home() {
                       <FiBarChart2 className="text-lg" /> <span>Summary PDF</span>
                     </button>
                     <button
-                      onClick={() => router.push('/charts')}
+                      onClick={() => router.push('/analytics')}
                       className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-slate-800"
                     >
                       <FiBarChart2 className="text-lg" /> <span>Analytics & Charts</span>

@@ -20,15 +20,17 @@ const DeepDivePanel = dynamic(() => import('../components/DeepDivePanel'), { ssr
 const MonthComparison = dynamic(() => import('../components/MonthComparison'), { ssr: false, loading: () => <LoadingSkeleton /> });
 const ConsumerInsights = dynamic(() => import('../components/ConsumerInsights'), { ssr: false, loading: () => <LoadingSkeleton /> });
 const FeederReport = dynamic(() => import('../components/FeederReport'), { ssr: false, loading: () => <LoadingSkeleton /> });
+const CallingReport = dynamic(() => import('../components/CallingReport'), { ssr: false, loading: () => <LoadingSkeleton /> });
 
-type TabId = 'trends' | 'deep' | 'months' | 'consumers' | 'feeders';
+type TabId = 'trends' | 'deep' | 'months' | 'consumers' | 'feeders' | 'calling';
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'deep', label: 'Deep Analysis', icon: '🔬' },
   { id: 'feeders', label: 'Feeder Report', icon: '⚡' },
   { id: 'trends', label: 'Trends', icon: '📈' },
   { id: 'months', label: 'Month Comparison', icon: '📅' },
-  { id: 'consumers', label: 'Repeat Consumers', icon: '👥' }
+  { id: 'consumers', label: 'Repeat Consumers', icon: '👥' },
+  { id: 'calling', label: 'Calling Report', icon: '📞' }
 ];
 
 const formatMins = (mins: number) => {
@@ -37,9 +39,11 @@ const formatMins = (mins: number) => {
   return `${h}h ${m}m`;
 };
 
-// Analytics dashboard: the old Charts + Deep Analysis pages merged into one
-// page. Everything renders from server-computed stats (no row downloads);
-// sections live in tabs so only the active one mounts.
+// Analytics dashboard (moved here from /charts; that URL now redirects). The
+// complaint tabs render from server-computed stats (no row downloads) and
+// sections live in tabs so only the active one mounts. The Calling Report tab
+// is a separate universe (live_complaints + call_logs from the calling app)
+// with its own date filter, so the complaints FilterBar/KPIs hide on it.
 export default function AnalyticsPage() {
   const { stats, statsLoading, refreshData, applyFilters } = useData();
   const router = useRouter();
@@ -81,7 +85,7 @@ export default function AnalyticsPage() {
             <Image src="/logo.png" alt="FRT Logo" width={56} height={56} className="rounded-lg" priority />
             <div>
               <h1 className="text-xl md:text-3xl font-bold">📊 Analytics Dashboard</h1>
-              <p className="text-gray-500 text-sm md:text-base">Trends, deep analysis, consumers & feeder report — one place</p>
+              <p className="text-gray-500 text-sm md:text-base">Trends, deep analysis, consumers, feeder & calling report — one place</p>
             </div>
           </div>
           <div className="flex gap-3">
@@ -107,20 +111,23 @@ export default function AnalyticsPage() {
           </div>
         </header>
 
-        {error && (
+        {error && activeTab !== 'calling' && (
           <div className="bg-red-50 border-l-4 border-red-500 text-red-800 px-4 py-3 rounded">
             <p className="font-semibold">⚠️ {error}</p>
           </div>
         )}
 
-        <FilterBar
-          {...filterBarProps}
-          onApply={applyCurrentFilters}
-          loading={statsLoading}
-        />
+        {/* The complaints FilterBar/KPIs don't apply to the calling universe. */}
+        {activeTab !== 'calling' && (
+          <FilterBar
+            {...filterBarProps}
+            onApply={applyCurrentFilters}
+            loading={statsLoading}
+          />
+        )}
 
         {/* KPI strip */}
-        {!statsLoading && kpis && kpis.total > 0 && (
+        {activeTab !== 'calling' && !statsLoading && kpis && kpis.total > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
               <p className="text-xs text-gray-500 uppercase tracking-wide">Total</p>
@@ -168,7 +175,13 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {statsLoading && (
+        {activeTab === 'calling' && (
+          <div className="pb-8">
+            <CallingReport />
+          </div>
+        )}
+
+        {activeTab !== 'calling' && statsLoading && (
           <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
             <div className="flex items-center justify-center py-16">
               <div className="text-center">
@@ -179,14 +192,14 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {!statsLoading && !error && (!stats || stats.total === 0) && (
+        {activeTab !== 'calling' && !statsLoading && !error && (!stats || stats.total === 0) && (
           <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 px-4 py-3 rounded">
             <p className="font-semibold">No complaints found for the current filters.</p>
             <p className="mt-1 text-sm">Try another date range, a broader preset, or clear filters.</p>
           </div>
         )}
 
-        {!statsLoading && !error && stats && stats.total > 0 && (
+        {activeTab !== 'calling' && !statsLoading && !error && stats && stats.total > 0 && (
           <div className="pb-8">
             {activeTab === 'trends' && <TrendCharts stats={stats} />}
             {activeTab === 'deep' && <DeepDivePanel stats={stats} />}
