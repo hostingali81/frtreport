@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FiArrowLeft, FiRefreshCw } from 'react-icons/fi';
+import { FiArrowLeft, FiClock, FiLoader, FiRefreshCw } from 'react-icons/fi';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import FilterBar from '../components/FilterBar';
@@ -49,6 +49,8 @@ export default function AnalyticsPage() {
   const router = useRouter();
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<TabId>('deep');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [navigating, setNavigating] = useState(false);
 
   const { filterBarProps, buildFilters } = useComplaintFilters();
 
@@ -90,23 +92,43 @@ export default function AnalyticsPage() {
           </div>
           <div className="flex gap-3">
             <button
-              onClick={() => router.push('/')}
-              className="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white font-semibold py-2 px-4 md:px-5 rounded-lg transition shadow-sm"
+              onClick={() => {
+                setNavigating(true);
+                router.push('/');
+              }}
+              disabled={navigating}
+              className="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white font-semibold py-2 px-4 md:px-5 rounded-lg transition active:scale-95 disabled:bg-slate-500 disabled:cursor-wait shadow-sm"
             >
-              <FiArrowLeft /> Back
+              {navigating ? <FiLoader className="animate-spin" /> : <FiArrowLeft />} Back
             </button>
+            {/* Same sync as the homepage "Sync Latest": scrape fresh data, then
+                reload stats — with the same completion/failure feedback. */}
             <button
               onClick={async () => {
                 setError('');
-                const result = await refreshData();
-                if (!result.success) {
-                  setError(result.error || 'Refresh failed');
+                setIsSyncing(true);
+                const startTime = Date.now();
+                try {
+                  const result = await refreshData();
+                  const duration = Math.round((Date.now() - startTime) / 1000);
+                  if (!result.success) {
+                    throw new Error(result.error || 'Refresh failed');
+                  }
+                  const newRows = result.stats?.new || 0;
+                  const updatedRows = result.stats?.updated || 0;
+                  alert(`Refresh complete in ${duration}s.\n\nNew: ${newRows} | Updated: ${updatedRows}`);
+                } catch (err: any) {
+                  const message = err.message || 'Refresh failed';
+                  setError(message);
+                  alert(`❌ Refresh failed\n\n${message}`);
+                } finally {
+                  setIsSyncing(false);
                 }
               }}
-              disabled={statsLoading}
-              className="inline-flex items-center gap-2 bg-sky-700 hover:bg-sky-800 text-white font-semibold py-2 px-4 md:px-5 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-sm"
+              disabled={isSyncing || statsLoading}
+              className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-700 text-white font-semibold py-2 px-4 md:px-5 rounded-lg transition active:scale-95 disabled:bg-slate-400 disabled:cursor-not-allowed shadow-sm"
             >
-              <FiRefreshCw className={statsLoading ? 'animate-spin' : ''} /> Refresh
+              {isSyncing ? (<><FiClock className="animate-pulse" /> Refreshing...</>) : (<><FiRefreshCw /> Sync Latest</>)}
             </button>
           </div>
         </header>
@@ -163,10 +185,10 @@ export default function AnalyticsPage() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition active:scale-95 ${
                   activeTab === tab.id
                     ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    : 'text-gray-600 hover:bg-gray-100 active:bg-gray-200'
                 }`}
               >
                 <span className="mr-1.5">{tab.icon}</span>{tab.label}

@@ -125,7 +125,7 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ stats }) => {
                     </div>
                     {byMobile.length > limit && (
                         <div className="p-4 border-t border-gray-100 bg-gray-50 text-center">
-                            <button onClick={() => setLimit(l => l + 10)} className="text-indigo-600 hover:text-indigo-800 font-medium text-sm">
+                            <button onClick={() => setLimit(l => l + 10)} className="text-indigo-600 hover:text-indigo-800 active:text-indigo-900 font-medium text-sm transition active:scale-95">
                                 Show More
                             </button>
                         </div>
@@ -198,7 +198,7 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ stats }) => {
                     </div>
                     {byNameAddress.length > limit && (
                         <div className="p-4 border-t border-gray-100 bg-gray-50 text-center">
-                            <button onClick={() => setLimit(l => l + 10)} className="text-pink-600 hover:text-pink-800 font-medium text-sm">
+                            <button onClick={() => setLimit(l => l + 10)} className="text-pink-600 hover:text-pink-800 active:text-pink-900 font-medium text-sm transition active:scale-95">
                                 Show More
                             </button>
                         </div>
@@ -227,7 +227,7 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ stats }) => {
                             </div>
                             <button
                                 onClick={() => setSelectedConsumer(null)}
-                                className="p-2 bg-gray-800 hover:bg-gray-700 rounded-full transition-colors text-gray-400 hover:text-white"
+                                className="p-2 bg-gray-800 hover:bg-gray-700 rounded-full transition text-gray-400 hover:text-white active:scale-90"
                             >
                                 <FiX size={20} />
                             </button>

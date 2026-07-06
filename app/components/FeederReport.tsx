@@ -196,7 +196,7 @@ function FeederReport({ stats }: Props) {
                     <button
                         onClick={exportExcel}
                         disabled={exporting}
-                        className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:bg-gray-400"
+                        className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-emerald-800 active:scale-95 disabled:bg-gray-400"
                     >
                         <FiDownload /> {exporting ? 'Exporting…' : 'Export Excel'}
                     </button>
@@ -310,7 +310,7 @@ function FeederReport({ stats }: Props) {
                 </div>
                 {filteredFeeders.length > limit && (
                     <div className="p-4 border-t border-gray-100 bg-gray-50 text-center">
-                        <button onClick={() => setLimit((l) => l + 20)} className="text-blue-600 hover:text-blue-800 font-medium text-sm">
+                        <button onClick={() => setLimit((l) => l + 20)} className="text-blue-600 hover:text-blue-800 active:text-blue-900 font-medium text-sm transition active:scale-95">
                             Show More ({filteredFeeders.length - limit} remaining)
                         </button>
                     </div>

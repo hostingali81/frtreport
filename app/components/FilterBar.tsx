@@ -213,7 +213,7 @@ export default function FilterBar({
 
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all shadow-sm border ${isExpanded ? 'bg-blue-600 text-white border-blue-600 shadow-blue-200' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'}`}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all active:scale-95 shadow-sm border ${isExpanded ? 'bg-blue-600 text-white border-blue-600 shadow-blue-200' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'}`}
           >
             <FiFilter className={isExpanded ? 'text-white' : 'text-gray-500'} />
             <span className="hidden sm:inline">Filters</span>
@@ -225,7 +225,7 @@ export default function FilterBar({
 
           <button
             onClick={() => setShowCalendar(!showCalendar)}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all shadow-sm border ${showCalendar ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-200' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'}`}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all active:scale-95 shadow-sm border ${showCalendar ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-200' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'}`}
           >
             <FiCalendar className={showCalendar ? 'text-white' : 'text-gray-500'} />
             <span className="hidden sm:inline">Calendar</span>
@@ -278,9 +278,9 @@ export default function FilterBar({
             <button
               onClick={onApply}
               disabled={loading}
-              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition active:scale-95 hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
             >
-              <FiFilter />
+              <FiFilter className={loading ? 'animate-pulse' : ''} />
               <span>{loading ? 'Fetching...' : 'Apply Filters'}</span>
             </button>
           )}
@@ -288,7 +288,7 @@ export default function FilterBar({
           {activeCount > 0 && (
             <button
               onClick={clearAllFilters}
-              className="text-red-600 hover:text-red-700 text-sm font-medium flex items-center gap-1 hover:underline px-2"
+              className="text-red-600 hover:text-red-700 active:text-red-900 text-sm font-medium flex items-center gap-1 hover:underline px-2 transition active:scale-95"
             >
               <FiX /> Clear
             </button>
@@ -440,7 +440,7 @@ export default function FilterBar({
                         }
                         setSelectedShift('');
                       }}
-                      className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-all ${activePreset === preset.id && !selectedShift
+                      className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-all active:scale-95 ${activePreset === preset.id && !selectedShift
                         ? 'bg-blue-600 text-white border-blue-600'
                         : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                         }`}
@@ -475,7 +475,7 @@ export default function FilterBar({
                             const isActive = selectedShift.startsWith('Today') && selectedShift.includes(`Control Room ${capShiftName}`);
                             return (
                               <button key={s} onClick={() => applyShiftPreset(s)}
-                                className={`flex-1 text-[10px] py-1.5 rounded border ${isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-white/50 border-gray-200 text-gray-600'}`}>
+                                className={`flex-1 text-[10px] py-1.5 rounded border transition active:scale-95 ${isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-white/50 border-gray-200 text-gray-600'}`}>
                                 {capShiftName}
                               </button>
                             );
@@ -491,7 +491,7 @@ export default function FilterBar({
                             const isActive = selectedShift.startsWith('Yesterday') && selectedShift.includes(`Control Room ${capShiftName}`);
                             return (
                               <button key={s} onClick={() => applyShiftPreset(s)}
-                                className={`flex-1 text-[10px] py-1.5 rounded border ${isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-white/50 border-gray-200 text-gray-600'}`}>
+                                className={`flex-1 text-[10px] py-1.5 rounded border transition active:scale-95 ${isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-white/50 border-gray-200 text-gray-600'}`}>
                                 {capShiftName}
                               </button>
                             );
@@ -513,7 +513,7 @@ export default function FilterBar({
                             const isActive = selectedShift.startsWith('Today') && selectedShift.includes(`Field Shift ${letter}`);
                             return (
                               <button key={s} onClick={() => applyShiftPreset(s)}
-                                className={`flex-1 text-[10px] py-1.5 rounded border flex items-center justify-center ${isActive ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-white/50 border-gray-200 text-gray-600'}`}>
+                                className={`flex-1 text-[10px] py-1.5 rounded border transition active:scale-95 flex items-center justify-center ${isActive ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-white/50 border-gray-200 text-gray-600'}`}>
                                 <span className="font-bold">{letter}</span>
                               </button>
                             );
@@ -528,7 +528,7 @@ export default function FilterBar({
                             const isActive = selectedShift.startsWith('Yesterday') && selectedShift.includes(`Field Shift ${letter}`);
                             return (
                               <button key={s} onClick={() => applyShiftPreset(s)}
-                                className={`flex-1 text-[10px] py-1.5 rounded border flex items-center justify-center ${isActive ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-white/50 border-gray-200 text-gray-600'}`}>
+                                className={`flex-1 text-[10px] py-1.5 rounded border transition active:scale-95 flex items-center justify-center ${isActive ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-white/50 border-gray-200 text-gray-600'}`}>
                                 <span className="font-bold">{letter}</span>
                               </button>
                             );
@@ -563,7 +563,7 @@ export default function FilterBar({
                                 }
                                 applyCustomDateShift(s as any);
                               }}
-                              className={`px-2 py-1 text-[10px] font-medium rounded border ${isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200'}`}>
+                              className={`px-2 py-1 text-[10px] font-medium rounded border transition active:scale-95 ${isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200'}`}>
                               {capS}
                             </button>
                           );
@@ -583,7 +583,7 @@ export default function FilterBar({
                                 }
                                 applyCustomDateShift(s as any);
                               }}
-                              className={`px-2 py-1 text-[10px] font-medium rounded border ${isActive ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200'}`}>
+                              className={`px-2 py-1 text-[10px] font-medium rounded border transition active:scale-95 ${isActive ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200'}`}>
                               Sh-{letter}
                             </button>
                           );
@@ -612,7 +612,7 @@ export default function FilterBar({
             <FiLayers className="text-sky-600" />
             <span>Active Shift: <b>{selectedShift}</b></span>
           </div>
-          <button onClick={() => setSelectedShift('')} className="text-sky-600 hover:text-sky-800 text-xs underline">
+          <button onClick={() => setSelectedShift('')} className="text-sky-600 hover:text-sky-800 active:text-sky-900 text-xs underline transition active:scale-95">
             Clear Shift
           </button>
         </div>

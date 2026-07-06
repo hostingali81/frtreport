@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiDownload, FiPhoneCall, FiSearch } from 'react-icons/fi';
+import { FiDownload, FiLoader, FiPhoneCall, FiSearch } from 'react-icons/fi';
 import { loadExcelJS } from '../utils/lazyImports';
 import {
     CAT,
@@ -380,9 +380,9 @@ function CallingReport() {
                 <button
                     onClick={exportExcel}
                     disabled={exporting || !stats || stats.total === 0}
-                    className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:bg-gray-400"
+                    className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-emerald-800 active:scale-95 disabled:bg-gray-400"
                 >
-                    <FiDownload /> {exporting ? 'Exporting…' : 'Export Excel'}
+                    {exporting ? <FiLoader className="animate-spin" /> : <FiDownload />} {exporting ? 'Exporting…' : 'Export Excel'}
                 </button>
             </div>
             {/* One filter row above everything it scopes. */}
@@ -391,8 +391,8 @@ function CallingReport() {
                     <button
                         key={p.id}
                         onClick={() => applyPreset(p.id)}
-                        className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
-                            preset === p.id ? 'bg-sky-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition active:scale-95 ${
+                            preset === p.id ? 'bg-sky-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 active:bg-gray-300'
                         }`}
                     >
                         {p.label}
@@ -527,8 +527,8 @@ function CallingReport() {
                         <button
                             key={t.id}
                             onClick={() => setSubTab(t.id)}
-                            className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                                subTab === t.id ? 'bg-sky-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'
+                            className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition active:scale-95 ${
+                                subTab === t.id ? 'bg-sky-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100 active:bg-gray-200'
                             }`}
                         >
                             {t.label}
@@ -826,7 +826,7 @@ function CallingReport() {
                             </div>
                             {filteredFeeders.length > feederLimit && (
                                 <div className="p-4 border-t border-gray-100 bg-gray-50 text-center">
-                                    <button onClick={() => setFeederLimit((l) => l + 20)} className="text-sky-600 hover:text-sky-800 font-medium text-sm">
+                                    <button onClick={() => setFeederLimit((l) => l + 20)} className="text-sky-600 hover:text-sky-800 active:text-sky-900 font-medium text-sm transition active:scale-95">
                                         Show More ({filteredFeeders.length - feederLimit} remaining)
                                     </button>
                                 </div>
@@ -905,7 +905,7 @@ function CallingReport() {
                                     </div>
                                     {filteredSs.length > ssLimit && (
                                         <div className="p-4 border-t border-gray-100 bg-gray-50 text-center">
-                                            <button onClick={() => setSsLimit((l) => l + 20)} className="text-sky-600 hover:text-sky-800 font-medium text-sm">
+                                            <button onClick={() => setSsLimit((l) => l + 20)} className="text-sky-600 hover:text-sky-800 active:text-sky-900 font-medium text-sm transition active:scale-95">
                                                 Show More ({filteredSs.length - ssLimit} remaining)
                                             </button>
                                         </div>
