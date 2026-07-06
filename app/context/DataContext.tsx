@@ -53,9 +53,11 @@ export interface ChartStats {
   bySubStation: { k: string; n: number }[];
   byAreaType: { k: string; n: number }[];
   byClosedStatus: { k: string; n: number }[];
-  // Feeder-wise rollup; rows without a feeder (scraped before the FRT report
-  // exposed the column) are excluded, so sum(n) < total is expected.
-  byFeeder?: { k: string; n: number; pending: number; beyond: number; resSum: number; resN: number }[];
+  // Feeder-wise rollup grouped by (substation, feeder) — the same feeder name
+  // under two substations is two different feeders. Rows without a feeder
+  // (scraped before the FRT report exposed the column) are excluded, so
+  // sum(n) < total is expected.
+  byFeeder?: { k: string; ss: string; n: number; pending: number; beyond: number; resSum: number; resN: number }[];
   beyondByDivision: { k: string; n: number }[];
   daily: { d: string; n: number; cr: number; frt: number; resSum: number; resN: number }[];
   months: { key: string; label: string; total: number; beyond: number; resSum: number; resN: number }[];

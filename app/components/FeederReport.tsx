@@ -35,7 +35,7 @@ function FeederReport({ stats }: Props) {
     const filteredFeeders = useMemo(() => {
         const q = tableSearch.trim().toLowerCase();
         if (!q) return feeders;
-        return feeders.filter((f) => f.k.toLowerCase().includes(q));
+        return feeders.filter((f) => f.k.toLowerCase().includes(q) || (f.ss || '').toLowerCase().includes(q));
     }, [feeders, tableSearch]);
 
     useEffect(() => {
@@ -76,7 +76,16 @@ function FeederReport({ stats }: Props) {
                     plugins: {
                         title: { display: true, text: 'Top 15 Feeders by Complaints', font: { size: 15, weight: 'bold' } },
                         legend: { position: 'top' },
-                        tooltip: { mode: 'index', intersect: false }
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                title: (items: any[]) => {
+                                    const f = top[items[0]?.dataIndex];
+                                    return f ? `${f.k} — ${f.ss || 'Unknown substation'}` : '';
+                                }
+                            }
+                        }
                     },
                     scales: {
                         x: { stacked: true, beginAtZero: true, grid: { display: false } },
@@ -115,10 +124,10 @@ function FeederReport({ stats }: Props) {
             const ws = wb.addWorksheet('Feeder Report', { views: [{ state: 'frozen', xSplit: 0, ySplit: 2 }] });
 
             ws.addRow([`Feeder-wise Complaint Report  |  ${withFeeder} of ${stats.total} complaints carry feeder info (${coverage}%)  |  ${withoutFeeder} without feeder`]);
-            ws.mergeCells(1, 1, 1, 7);
+            ws.mergeCells(1, 1, 1, 8);
             ws.getRow(1).font = { bold: true, size: 12 };
 
-            const header = ws.addRow(['Rank', 'Feeder', 'Total', 'Pending', 'Closed', 'Closed Beyond', 'Avg Resolution']);
+            const header = ws.addRow(['Rank', 'Feeder', 'Substation', 'Total', 'Pending', 'Closed', 'Closed Beyond', 'Avg Resolution']);
             header.font = { bold: true };
             header.eachCell((cell: any) => {
                 cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } };
@@ -129,6 +138,7 @@ function FeederReport({ stats }: Props) {
                 ws.addRow([
                     i + 1,
                     f.k,
+                    f.ss || 'Unknown',
                     f.n,
                     f.pending,
                     f.n - f.pending,
@@ -138,8 +148,8 @@ function FeederReport({ stats }: Props) {
             });
 
             ws.columns = [
-                { width: 6 }, { width: 32 }, { width: 10 }, { width: 10 },
-                { width: 10 }, { width: 14 }, { width: 16 }
+                { width: 6 }, { width: 32 }, { width: 28 }, { width: 10 },
+                { width: 10 }, { width: 10 }, { width: 14 }, { width: 16 }
             ];
 
             const buffer = await wb.xlsx.writeBuffer();
@@ -250,7 +260,7 @@ function FeederReport({ stats }: Props) {
                         <input
                             value={tableSearch}
                             onChange={(e) => { setTableSearch(e.target.value); setLimit(20); }}
-                            placeholder="Search feeder…"
+                            placeholder="Search feeder or substation…"
                             className="w-full rounded-lg border border-gray-200 py-2 pl-9 pr-3 text-sm focus:border-blue-400 focus:outline-none"
                         />
                     </div>
@@ -261,6 +271,7 @@ function FeederReport({ stats }: Props) {
                             <tr>
                                 <th className="px-4 py-3 font-semibold">#</th>
                                 <th className="px-4 py-3 font-semibold">Feeder</th>
+                                <th className="px-4 py-3 font-semibold">Substation</th>
                                 <th className="px-4 py-3 font-semibold text-right">Total</th>
                                 <th className="px-4 py-3 font-semibold text-right">Pending</th>
                                 <th className="px-4 py-3 font-semibold text-right">Closed</th>
@@ -270,9 +281,10 @@ function FeederReport({ stats }: Props) {
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                             {filteredFeeders.slice(0, limit).map((f, idx) => (
-                                <tr key={f.k} className="hover:bg-amber-50/50 transition-colors">
+                                <tr key={`${f.k}|${f.ss}`} className="hover:bg-amber-50/50 transition-colors">
                                     <td className="px-4 py-3 text-gray-400 font-semibold">{idx + 1}</td>
                                     <td className="px-4 py-3 font-semibold text-gray-900">{f.k}</td>
+                                    <td className="px-4 py-3 text-gray-600">{f.ss || 'Unknown'}</td>
                                     <td className="px-4 py-3 text-right font-bold text-gray-900">{f.n}</td>
                                     <td className="px-4 py-3 text-right">
                                         <span className={`font-semibold ${f.pending > 0 ? 'text-red-600' : 'text-gray-400'}`}>{f.pending}</span>
@@ -288,7 +300,7 @@ function FeederReport({ stats }: Props) {
                             ))}
                             {filteredFeeders.length === 0 && (
                                 <tr>
-                                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500 italic">
+                                    <td colSpan={8} className="px-4 py-8 text-center text-gray-500 italic">
                                         No feeder matches “{tableSearch}”.
                                     </td>
                                 </tr>
