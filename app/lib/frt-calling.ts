@@ -272,7 +272,13 @@ export async function syncLiveComplaints(rows: ComplaintRecord[]): Promise<SyncR
     if (!supabase) throw new Error('Supabase is not configured');
 
     const now = new Date().toISOString();
-    const payload = rows.map(r => ({ ...r, last_synced_at: now, still_in_feed: true }));
+    // The grid occasionally repeats a DATAID; duplicate conflict keys inside one
+    // upsert batch make Postgres reject the whole statement ("ON CONFLICT DO
+    // UPDATE command cannot affect row a second time"), so keep the last
+    // occurrence of each.
+    const byDataid = new Map<number, ComplaintRecord>();
+    for (const r of rows) byDataid.set(r.dataid, r);
+    const payload = Array.from(byDataid.values()).map(r => ({ ...r, last_synced_at: now, still_in_feed: true }));
 
     if (payload.length) {
         for (let i = 0; i < payload.length; i += 500) {
@@ -286,7 +292,7 @@ export async function syncLiveComplaints(rows: ComplaintRecord[]): Promise<SyncR
 
     // Anything previously in the feed but absent now has left the live grid.
     let markedResolved = 0;
-    const currentIds = rows.map(r => r.dataid);
+    const currentIds = Array.from(byDataid.keys());
     if (currentIds.length) {
         const { data, error } = await supabase
             .from('live_complaints')
