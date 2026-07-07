@@ -223,8 +223,8 @@ class _DetailSheetState extends State<DetailSheet> {
           'substation': widget.complaint.area,
           'complaint_sub_type': widget.complaint.complaintSubType ?? widget.complaint.complaintType,
           'remarks': _contact?.remarks,
-          'total_complaints': _history.length,
-          'last_status': _history.isNotEmpty ? _history.first.callStatus : '',
+          'total_complaints': _history?.length ?? 0,
+          'last_status': (_history != null && _history!.isNotEmpty) ? _history!.first['call_status'] ?? '' : '',
         });
         CallChannel.startCallMonitor(info: infoJson);
       } catch (_) {
