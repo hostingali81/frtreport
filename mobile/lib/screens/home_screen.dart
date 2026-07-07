@@ -111,7 +111,13 @@ class _HomeShellState extends State<_HomeShell> with WidgetsBindingObserver {
         } else {
           final all = await Api.complaintsRaw();
           final server = all.firstWhere((x) => x['dataid'] == dataid, orElse: () => <String, dynamic>{});
-          if (server.isNotEmpty) c = Complaint.fromJson(server);
+          if (server.isNotEmpty) {
+            c = Complaint.fromJson(server);
+          } else {
+            final allResolved = await Api.complaintsRaw(includeResolved: true);
+            final serverResolved = allResolved.firstWhere((x) => x['dataid'] == dataid, orElse: () => <String, dynamic>{});
+            if (serverResolved.isNotEmpty) c = Complaint.fromJson(serverResolved);
+          }
         }
         if (c == null) throw Exception('Not found');
 

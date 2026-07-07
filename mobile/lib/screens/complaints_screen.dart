@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
@@ -97,6 +98,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
       Store.cacheComplaints(raw);
       Alerts.check(list);
       _syncOutboxIfAny();
+      _fetchCallerIdCache();
     } catch (e) {
       if (!mounted) return;
       final cached = Store.cachedComplaints();
@@ -114,6 +116,29 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
           _loading = false;
         });
       }
+    }
+  }
+
+  Future<void> _fetchCallerIdCache() async {
+    try {
+      final cache = await Api.callerIdCache();
+      for (final c in cache) {
+        if (c['mobile'] != null && c['mobile'].isNotEmpty) {
+          final baseInfo = {
+            'complaint_number': c['complaint_number'] ?? 'Complaint',
+            'consumer_name': c['consumer_name'] ?? 'Consumer',
+            'substation': c['area'] ?? 'Unknown',
+            'dataid': c['dataid'],
+            'complaint_sub_type': c['complaint_sub_type'] ?? '',
+            'remarks': c['remarks'] ?? '',
+            'total_complaints': 0, // Simplified for cache
+            'last_status': '',
+          };
+          Store.saveCallerId(c['mobile'], jsonEncode(baseInfo));
+        }
+      }
+    } catch (_) {
+      // Ignore background fetch errors
     }
   }
 

@@ -81,13 +81,18 @@ class Api {
   static Future<SessionUser> me() async => SessionUser.fromJson((await _get('/api/auth/me'))['user']);
 
   // Raw JSON rows — the caller caches these for offline use.
-  static Future<List<Map<String, dynamic>>> complaintsRaw() async {
-    final j = await _get('/api/calling/complaints');
+  static Future<List<Map<String, dynamic>>> complaintsRaw({bool includeResolved = false}) async {
+    final j = await _get('/api/calling/complaints${includeResolved ? '?include_resolved=1' : ''}');
     return (j['complaints'] as List).cast<Map<String, dynamic>>();
   }
 
   static Future<List<Complaint>> complaints() async =>
       (await complaintsRaw()).map(Complaint.fromJson).toList();
+
+  static Future<List<Map<String, dynamic>>> callerIdCache() async {
+    final j = await _get('/api/calling/contacts-cache');
+    return (j['contacts'] as List).cast<Map<String, dynamic>>();
+  }
 
   static Future<Map<String, dynamic>> sync() => _get('/api/calling/sync');
 
