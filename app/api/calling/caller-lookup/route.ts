@@ -54,21 +54,27 @@ export async function GET(request: Request) {
     if (error) throw new Error(error.message);
 
     // Flatten the nested live_complaints object for easier mobile consumption.
-    const complaints = (data ?? []).map(row => {
-      const lc = row.live_complaints as Record<string, unknown> | null;
-      return {
-        dataid: row.dataid,
-        consumer_name: row.consumer_name,
-        mobile: row.mobile,
-        remarks: row.remarks,
-        complaint_number: lc?.complaint_number ?? null,
-        complaint_type: lc?.complaint_type ?? null,
-        complaint_sub_type: lc?.complaint_sub_type ?? null,
-        area: lc?.area ?? null,
-        action_status: lc?.action_status ?? null,
-        complaint_date: lc?.complaint_date ?? null,
-        still_in_feed: lc?.still_in_feed ?? null,
-      };
+    const complaints = (data ?? []).flatMap(row => {
+      const lcArray = Array.isArray(row.live_complaints) 
+        ? row.live_complaints 
+        : (row.live_complaints ? [row.live_complaints] : [null]);
+        
+      return lcArray.map((lcRaw: any) => {
+        const lc = lcRaw as Record<string, unknown> | null;
+        return {
+          dataid: row.dataid,
+          consumer_name: row.consumer_name,
+          mobile: row.mobile,
+          remarks: row.remarks,
+          complaint_number: lc?.complaint_number ?? null,
+          complaint_type: lc?.complaint_type ?? null,
+          complaint_sub_type: lc?.complaint_sub_type ?? null,
+          area: lc?.area ?? null,
+          action_status: lc?.action_status ?? null,
+          complaint_date: lc?.complaint_date ?? null,
+          still_in_feed: lc?.still_in_feed ?? null,
+        };
+      });
     });
 
     // Sort by complaint_date descending (newest first).
