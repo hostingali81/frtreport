@@ -19,6 +19,10 @@ class Complaint {
   final String? lastCallCategory;
   final String? claimedByName;
   final String? claimedAt;
+  
+  // Cached for fast O(1) sorting in UI thread
+  final int deadlineMs;
+  final int complaintDateMs;
 
   Complaint({
     required this.dataid,
@@ -37,26 +41,42 @@ class Complaint {
     this.lastCallCategory,
     this.claimedByName,
     this.claimedAt,
+    required this.deadlineMs,
+    required this.complaintDateMs,
   });
 
-  factory Complaint.fromJson(Map<String, dynamic> j) => Complaint(
-        dataid: _int(j['dataid']) ?? 0,
-        complaintNumber: j['complaint_number'],
-        complaintType: j['complaint_type'],
-        complaintSubType: j['complaint_sub_type'],
-        district: j['district'],
-        area: j['area'],
-        areaType: j['area_type'],
-        feeder: j['feeder'],
-        actionStatus: j['action_status'],
-        complaintDate: j['complaint_date'],
-        callCount: _int(j['call_count']) ?? 0,
-        lastCallStatus: j['last_call_status'],
-        lastCallTime: j['last_call_time'],
-        lastCallCategory: j['last_call_category'],
-        claimedByName: j['claimed_by_name'],
-        claimedAt: j['claimed_at'],
-      );
+  factory Complaint.fromJson(Map<String, dynamic> j) {
+    final iso = j['complaint_date'] as String?;
+    final t = iso != null ? DateTime.tryParse(iso) : null;
+    final tMs = t?.millisecondsSinceEpoch ?? 0;
+    
+    int dMs = 1 << 62;
+    if (t != null) {
+      final urban = (j['area_type'] as String? ?? '').toLowerCase().contains('urban');
+      dMs = t.add(Duration(hours: urban ? 1 : 2)).millisecondsSinceEpoch;
+    }
+
+    return Complaint(
+      dataid: _int(j['dataid']) ?? 0,
+      complaintNumber: j['complaint_number'],
+      complaintType: j['complaint_type'],
+      complaintSubType: j['complaint_sub_type'],
+      district: j['district'],
+      area: j['area'],
+      areaType: j['area_type'],
+      feeder: j['feeder'],
+      actionStatus: j['action_status'],
+      complaintDate: iso,
+      callCount: _int(j['call_count']) ?? 0,
+      lastCallStatus: j['last_call_status'],
+      lastCallTime: j['last_call_time'],
+      lastCallCategory: j['last_call_category'],
+      claimedByName: j['claimed_by_name'],
+      claimedAt: j['claimed_at'],
+      deadlineMs: dMs,
+      complaintDateMs: tMs,
+    );
+  }
 
   // Someone (possibly me) opened this complaint to call in the last 3 minutes.
   bool get activeClaim {

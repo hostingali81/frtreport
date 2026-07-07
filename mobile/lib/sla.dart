@@ -18,12 +18,8 @@ String fmtDateTime(String? iso) {
 const _warning = Duration(minutes: 15);
 
 DateTime? complaintDeadline(Complaint c) {
-  final iso = c.complaintDate;
-  if (iso == null) return null;
-  final t = DateTime.tryParse(iso);
-  if (t == null) return null;
-  final urban = (c.areaType ?? '').toLowerCase().contains('urban');
-  return t.add(Duration(hours: urban ? 1 : 2));
+  if (c.deadlineMs == (1 << 62)) return null;
+  return DateTime.fromMillisecondsSinceEpoch(c.deadlineMs);
 }
 
 String formatDur(Duration d) {
@@ -72,17 +68,11 @@ Sla slaFor(Complaint c, DateTime now) {
 // Urgent = SLA deadline ascending (most overdue / least time left first; no-date
 // sinks to the bottom). Newest = complaint date descending.
 int compareUrgent(Complaint a, Complaint b) {
-  final da = complaintDeadline(a);
-  final db = complaintDeadline(b);
-  final va = da?.millisecondsSinceEpoch ?? 1 << 62;
-  final vb = db?.millisecondsSinceEpoch ?? 1 << 62;
-  return va.compareTo(vb);
+  return a.deadlineMs.compareTo(b.deadlineMs);
 }
 
 int compareNewest(Complaint a, Complaint b) {
-  final ta = DateTime.tryParse(a.complaintDate ?? '')?.millisecondsSinceEpoch ?? 0;
-  final tb = DateTime.tryParse(b.complaintDate ?? '')?.millisecondsSinceEpoch ?? 0;
-  return tb.compareTo(ta);
+  return b.complaintDateMs.compareTo(a.complaintDateMs);
 }
 
 Color statusColor(String? status) {

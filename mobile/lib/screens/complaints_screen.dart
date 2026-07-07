@@ -134,7 +134,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
             'total_complaints': 0, // Simplified for cache
             'last_status': '',
           };
-          Store.saveCallerId(c['mobile'], jsonEncode(baseInfo));
+          await Store.saveCallerId(c['mobile'], jsonEncode(baseInfo));
         }
       }
     } catch (_) {
