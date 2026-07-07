@@ -217,13 +217,16 @@ class _DetailSheetState extends State<DetailSheet> {
         _tracker.start((outcome) => _onCallEnded(mobile, outcome));
         // Foreground service: keeps tracking alive during the call, shows the
         // info bubble, and brings the app back when the call ends.
-        CallChannel.startCallMonitor(
-          line1: _contact?.consumerName ?? widget.complaint.complaintNumber ?? 'Consumer',
-          line2: [
-            widget.complaint.complaintSubType ?? widget.complaint.complaintType,
-            widget.complaint.area,
-          ].whereType<String>().join(' · '),
-        );
+        final infoJson = jsonEncode({
+          'complaint_number': widget.complaint.complaintNumber,
+          'consumer_name': _contact?.consumerName ?? 'Consumer',
+          'substation': widget.complaint.area,
+          'complaint_sub_type': widget.complaint.complaintSubType ?? widget.complaint.complaintType,
+          'remarks': _contact?.remarks,
+          'total_complaints': _history.length,
+          'last_status': _history.isNotEmpty ? _history.first.callStatus : '',
+        });
+        CallChannel.startCallMonitor(info: infoJson);
       } catch (_) {
         /* still place the call */
       }

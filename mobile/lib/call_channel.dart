@@ -92,9 +92,9 @@ class CallChannel {
 
   // Foreground service for the duration of the call: keeps tracking alive,
   // shows the info bubble, brings the app back when the call ends.
-  static Future<void> startCallMonitor({required String line1, String line2 = ''}) async {
+  static Future<void> startCallMonitor({required String info}) async {
     try {
-      await _ch.invokeMethod('startCallMonitor', {'line1': line1, 'line2': line2});
+      await _ch.invokeMethod('startCallMonitor', {'info': info});
     } catch (_) {}
   }
 

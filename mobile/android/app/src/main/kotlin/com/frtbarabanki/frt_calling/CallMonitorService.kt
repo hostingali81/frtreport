@@ -31,14 +31,12 @@ import androidx.core.content.ContextCompat
 // activity starts without it).
 class CallMonitorService : Service() {
     companion object {
-        private const val EXTRA_LINE1 = "line1"
-        private const val EXTRA_LINE2 = "line2"
+        private const val EXTRA_INFO = "info"
         private const val NOTIF_ID = 41
 
-        fun start(ctx: Context, line1: String, line2: String) {
+        fun start(ctx: Context, info: String) {
             val i = Intent(ctx, CallMonitorService::class.java)
-                .putExtra(EXTRA_LINE1, line1)
-                .putExtra(EXTRA_LINE2, line2)
+                .putExtra(EXTRA_INFO, info)
             if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
         }
     }
@@ -48,8 +46,7 @@ class CallMonitorService : Service() {
     private var modernCallback: TelephonyCallback? = null
     private val handler = Handler(Looper.getMainLooper())
 
-    private var line1 = ""
-    private var line2 = ""
+    private var info = ""
     private var sawOffhook = false
     private var offhookAt = 0L
     private var finishing = false
@@ -64,14 +61,13 @@ class CallMonitorService : Service() {
         sawOffhook = false
         offhookAt = 0L
         finishing = false
-        line1 = intent?.getStringExtra(EXTRA_LINE1) ?: ""
-        line2 = intent?.getStringExtra(EXTRA_LINE2) ?: ""
+        info = intent?.getStringExtra(EXTRA_INFO) ?: ""
 
         Notifications.ensureChannels(this)
         val notif = NotificationCompat.Builder(this, Notifications.CH_ONGOING)
             .setSmallIcon(applicationInfo.icon)
             .setContentTitle("On call — FRT Calling")
-            .setContentText(line1.ifEmpty { "Tracking the call result" })
+            .setContentText("Tracking the call result")
             .setOngoing(true)
             .setContentIntent(Notifications.openAppIntent(this))
             .build()
@@ -121,7 +117,7 @@ class CallMonitorService : Service() {
             Notifications.callEnd(
                 this,
                 "Call ended · ${durSec / 60}:${(durSec % 60).toString().padStart(2, '0')}",
-                "Tap to log the result${if (line1.isNotEmpty()) " — $line1" else ""}"
+                "Tap to log the result"
             )
         }
         finish()
@@ -175,34 +171,174 @@ class CallMonitorService : Service() {
     // Small draggable dark card pinned near the top of whatever is on screen
     // (the in-call UI), so the operator sees who they're talking to and why.
     private fun showBubble() {
-        if (bubble != null || line1.isEmpty() || !Settings.canDrawOverlays(this)) return
+        if (bubble != null || info.isEmpty() || !Settings.canDrawOverlays(this)) return
         try {
             val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
             val density = resources.displayMetrics.density
             fun dp(v: Int) = (v * density).toInt()
 
+            var cNumber = ""
+            var cName = ""
+            var cSubstation = ""
+            var cSubType = ""
+            var cRemarks = ""
+            var cTotalComplaints = 0
+            var cLastStatus = ""
+            try {
+                val obj = org.json.JSONObject(info)
+                cNumber = obj.optString("complaint_number", "")
+                cName = obj.optString("consumer_name", "")
+                cSubstation = obj.optString("substation", "")
+                cSubType = obj.optString("complaint_sub_type", "")
+                cRemarks = obj.optString("remarks", "")
+                cTotalComplaints = obj.optInt("total_complaints", 0)
+                cLastStatus = obj.optString("last_status", "")
+            } catch (e: Exception) {
+                val lines = info.split("\n")
+                cNumber = lines.getOrNull(0) ?: ""
+                cName = if (lines.size > 1) lines.subList(1, lines.size).joinToString("\n") else ""
+            }
+
+            val trimmedRemarks = if (cRemarks.length > 60) cRemarks.substring(0, 58) + ".." else cRemarks
+
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(16), dp(11), dp(16), dp(11))
+                setPadding(dp(24), dp(20), dp(24), dp(20))
                 background = GradientDrawable().apply {
-                    cornerRadius = dp(14).toFloat()
-                    setColor(0xF20F172A.toInt())
+                    cornerRadius = dp(18).toFloat()
+                    setColor(0xFF0F172A.toInt())
+                    setStroke(dp(2), 0xFF38BDF8.toInt())
                 }
+                elevation = dp(8).toFloat()
             }
-            card.addView(TextView(this).apply {
-                text = line1
-                setTextColor(0xFFFFFFFF.toInt())
-                textSize = 15f
+            
+            val header = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, dp(10))
+            }
+            header.addView(TextView(this).apply {
+                text = "⚡ FRT Caller ID"
+                setTextColor(0xFF38BDF8.toInt())
+                textSize = 13f
                 setTypeface(typeface, Typeface.BOLD)
-                maxWidth = dp(250)
+                setPadding(dp(10), dp(4), dp(10), dp(4))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(8).toFloat()
+                    setColor(0xFF1E3A5F.toInt())
+                }
             })
-            if (line2.isNotEmpty()) {
+            card.addView(header)
+
+            if (cName.isNotEmpty()) {
                 card.addView(TextView(this).apply {
-                    text = line2
-                    setTextColor(0xFFCBD5E1.toInt())
-                    textSize = 12.5f
-                    maxWidth = dp(250)
+                    text = cName
+                    setTextColor(0xFFFFFFFF.toInt())
+                    textSize = 20f
+                    setTypeface(typeface, Typeface.BOLD)
+                    maxWidth = dp(320)
+                    setPadding(0, 0, 0, dp(6))
                 })
+            }
+
+            if (cNumber.isNotEmpty()) {
+                card.addView(TextView(this).apply {
+                    text = "📋 $cNumber"
+                    setTextColor(0xFF38BDF8.toInt())
+                    textSize = 15f
+                    setTypeface(typeface, Typeface.BOLD)
+                    setPadding(0, dp(2), 0, dp(4))
+                    maxWidth = dp(320)
+                })
+            }
+
+            if (cSubType.isNotEmpty()) {
+                card.addView(TextView(this).apply {
+                    text = "🔧 $cSubType"
+                    setTextColor(0xFFE2E8F0.toInt())
+                    textSize = 14f
+                    setTypeface(typeface, Typeface.BOLD)
+                    setPadding(0, dp(2), 0, dp(2))
+                    maxWidth = dp(320)
+                })
+            }
+
+            if (cSubstation.isNotEmpty()) {
+                card.addView(TextView(this).apply {
+                    text = "📍 $cSubstation"
+                    setTextColor(0xFFCBD5E1.toInt())
+                    textSize = 13f
+                    setPadding(0, dp(2), 0, dp(2))
+                    maxWidth = dp(320)
+                })
+            }
+
+            if (trimmedRemarks.isNotEmpty()) {
+                card.addView(View(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
+                    ).apply { topMargin = dp(8); bottomMargin = dp(8) }
+                    setBackgroundColor(0xFF334155.toInt())
+                })
+                card.addView(TextView(this).apply {
+                    text = "💬 $trimmedRemarks"
+                    setTextColor(0xFF94A3B8.toInt())
+                    textSize = 12.5f
+                    setTypeface(typeface, Typeface.ITALIC)
+                    setPadding(0, 0, 0, 0)
+                    maxWidth = dp(320)
+                    maxLines = 2
+                })
+            }
+
+            if (cTotalComplaints > 0) {
+                if (trimmedRemarks.isEmpty()) {
+                    card.addView(View(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
+                        ).apply { topMargin = dp(8); bottomMargin = dp(8) }
+                        setBackgroundColor(0xFF334155.toInt())
+                    })
+                }
+
+                val historyRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(4), 0, 0)
+                }
+
+                historyRow.addView(TextView(this).apply {
+                    text = "📊 $cTotalComplaints complaint${if (cTotalComplaints > 1) "s" else ""}"
+                    setTextColor(0xFFE2E8F0.toInt())
+                    textSize = 12.5f
+                    setTypeface(typeface, Typeface.BOLD)
+                    setPadding(dp(8), dp(3), dp(8), dp(3))
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(6).toFloat()
+                        setColor(0xFF1E293B.toInt())
+                    }
+                })
+
+                if (cLastStatus.isNotEmpty()) {
+                    val isResolved = cLastStatus.equals("Resolved", ignoreCase = true)
+                    val statusIcon = if (isResolved) "✅" else "🔴"
+                    val statusColor = if (isResolved) 0xFF4ADE80.toInt() else 0xFFFBBF24.toInt()
+                    val statusBg = if (isResolved) 0xFF14532D.toInt() else 0xFF78350F.toInt()
+
+                    historyRow.addView(TextView(this).apply {
+                        text = "  $statusIcon $cLastStatus"
+                        setTextColor(statusColor)
+                        textSize = 12.5f
+                        setTypeface(typeface, Typeface.BOLD)
+                        setPadding(dp(8), dp(3), dp(8), dp(3))
+                        background = GradientDrawable().apply {
+                            cornerRadius = dp(6).toFloat()
+                            setColor(statusBg)
+                        }
+                    })
+                }
+
+                card.addView(historyRow)
             }
 
             val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -215,21 +351,30 @@ class CallMonitorService : Service() {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                y = dp(72)
+                y = dp(100)
             }
 
             var downY = 0f
             var startY = 0
+            var isDrag = false
             card.setOnTouchListener { v, e ->
                 when (e.action) {
                     MotionEvent.ACTION_DOWN -> {
                         downY = e.rawY
                         startY = lp.y
+                        isDrag = false
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        lp.y = (startY + (e.rawY - downY)).toInt().coerceAtLeast(0)
-                        try { wm.updateViewLayout(v, lp) } catch (_: Exception) {}
+                        if (Math.abs(e.rawY - downY) > 10) isDrag = true
+                        if (isDrag) {
+                            lp.y = (startY + (e.rawY - downY)).toInt().coerceAtLeast(0)
+                            try { wm.updateViewLayout(v, lp) } catch (_: Exception) {}
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (!isDrag) removeBubble()
                         true
                     }
                     else -> false

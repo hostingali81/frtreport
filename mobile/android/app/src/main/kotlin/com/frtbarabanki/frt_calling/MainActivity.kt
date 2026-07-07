@@ -91,7 +91,7 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "startCallMonitor" -> {
-                    CallMonitorService.start(this, call.argument<String>("line1") ?: "", call.argument<String>("line2") ?: "")
+                    CallMonitorService.start(this, call.argument<String>("info") ?: "")
                     result.success(null)
                 }
                 "stopCallMonitor" -> {
