@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
-import { getSession } from '../../../../lib/session';
-import { getSupabaseClient } from '../../../../lib/shared-scraper';
+import { getSession } from '../../../lib/session';
+import { getSupabaseClient } from '../../../lib/shared-scraper';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
