@@ -69,6 +69,8 @@ class IncomingCallService : Service() {
             var cSubstation = ""
             var cSubType = ""
             var cRemarks = ""
+            var cTotalComplaints = 0
+            var cLastStatus = ""
             try {
                 val obj = org.json.JSONObject(info)
                 cNumber = obj.optString("complaint_number", "")
@@ -76,6 +78,8 @@ class IncomingCallService : Service() {
                 cSubstation = obj.optString("substation", "")
                 cSubType = obj.optString("complaint_sub_type", "")
                 cRemarks = obj.optString("remarks", "")
+                cTotalComplaints = obj.optInt("total_complaints", 0)
+                cLastStatus = obj.optString("last_status", "")
             } catch (e: Exception) {
                 // Fallback for old plaintext format
                 val lines = info.split("\n")
@@ -181,6 +185,61 @@ class IncomingCallService : Service() {
                     maxWidth = dp(320)
                     maxLines = 2
                 })
+            }
+
+            // Complaint history (total count + last status)
+            if (cTotalComplaints > 0) {
+                // Separator (if remark didn't add one)
+                if (trimmedRemarks.isEmpty()) {
+                    card.addView(View(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
+                        ).apply { topMargin = dp(8); bottomMargin = dp(8) }
+                        setBackgroundColor(0xFF334155.toInt())
+                    })
+                }
+
+                // History row container
+                val historyRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(4), 0, 0)
+                }
+
+                // Complaint count badge
+                historyRow.addView(TextView(this).apply {
+                    text = "📊 $cTotalComplaints complaint${if (cTotalComplaints > 1) "s" else ""}"
+                    setTextColor(0xFFE2E8F0.toInt()) // slate-200
+                    textSize = 12.5f
+                    setTypeface(typeface, Typeface.BOLD)
+                    setPadding(dp(8), dp(3), dp(8), dp(3))
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(6).toFloat()
+                        setColor(0xFF1E293B.toInt()) // slate-800
+                    }
+                })
+
+                // Last status badge
+                if (cLastStatus.isNotEmpty()) {
+                    val isResolved = cLastStatus.equals("Resolved", ignoreCase = true)
+                    val statusIcon = if (isResolved) "✅" else "🔴"
+                    val statusColor = if (isResolved) 0xFF4ADE80.toInt() else 0xFFFBBF24.toInt() // green-400 / amber-400
+                    val statusBg = if (isResolved) 0xFF14532D.toInt() else 0xFF78350F.toInt() // green-900 / amber-900
+
+                    historyRow.addView(TextView(this).apply {
+                        text = "  $statusIcon $cLastStatus"
+                        setTextColor(statusColor)
+                        textSize = 12.5f
+                        setTypeface(typeface, Typeface.BOLD)
+                        setPadding(dp(8), dp(3), dp(8), dp(3))
+                        background = GradientDrawable().apply {
+                            cornerRadius = dp(6).toFloat()
+                            setColor(statusBg)
+                        }
+                    })
+                }
+
+                card.addView(historyRow)
             }
 
             val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY

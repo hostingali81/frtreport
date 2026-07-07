@@ -157,15 +157,35 @@ class _DetailSheetState extends State<DetailSheet> {
         _loadingContact = false;
       });
       if (c.mobile != null && c.mobile!.isNotEmpty) {
-        final infoJson = jsonEncode({
+        // Base caller-ID info (available immediately).
+        final baseInfo = {
           'complaint_number': widget.complaint.complaintNumber ?? 'Complaint',
           'consumer_name': c.consumerName ?? 'Consumer',
           'substation': widget.complaint.area ?? 'Unknown',
           'dataid': widget.complaint.dataid,
           'complaint_sub_type': widget.complaint.complaintSubType ?? widget.complaint.complaintType ?? '',
           'remarks': c.remarks ?? '',
-        });
-        Store.saveCallerId(c.mobile!, infoJson);
+          'total_complaints': 0,
+          'last_status': '',
+        };
+
+        // Enrich with complaint history (active + closed) in the background.
+        // If it fails (offline, etc.) the basic info is still saved.
+        try {
+          final lookup = await Api.callerLookup(c.mobile!);
+          final complaints = lookup['complaints'] as List? ?? [];
+          final total = lookup['total_complaints'] ?? complaints.length;
+          if (complaints.isNotEmpty) {
+            final last = complaints.first as Map<String, dynamic>;
+            final stillInFeed = last['still_in_feed'] == true;
+            baseInfo['total_complaints'] = total;
+            baseInfo['last_status'] = stillInFeed ? 'Pending' : 'Resolved';
+          }
+        } catch (_) {
+          // Lookup failed — save with base info only.
+        }
+
+        Store.saveCallerId(c.mobile!, jsonEncode(baseInfo));
       }
     } catch (e) {
       if (!mounted) return;

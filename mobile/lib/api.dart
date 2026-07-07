@@ -125,6 +125,11 @@ class Api {
   static Future<List<Map<String, dynamic>>> callHistory(int dataid) async =>
       ((await _get('/api/calling/log?dataid=$dataid'))['logs'] as List).cast<Map<String, dynamic>>();
 
+  // All complaints (active + closed) linked to a phone number.
+  // Used to enrich the caller-ID overlay with complaint history.
+  static Future<Map<String, dynamic>> callerLookup(String mobile) =>
+      _get('/api/calling/caller-lookup?mobile=$mobile');
+
   // Soft-claim before calling so two operators don't ring the same consumer.
   // Returns {'claimed': bool, 'claimed_by_name': ...} — advisory only.
   static Future<Map<String, dynamic>> claim(int dataid) => _post('/api/calling/claim', {'dataid': dataid});
