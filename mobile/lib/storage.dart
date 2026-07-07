@@ -151,4 +151,40 @@ class Store {
 
   static Set<String> retryNotified() => (_p?.getStringList('retry_notified') ?? []).toSet();
   static Future<void> setRetryNotified(Set<String> v) async => _p?.setStringList('retry_notified', v.toList());
+
+  // --- Caller ID mapping for native BroadcastReceiver ---
+  
+  // Adds or updates a phone number to complaint mapping. The native side
+  // (IncomingCallReceiver) reads this JSON string directly from SharedPreferences.
+  static Future<void> saveCallerId(String mobile, String info) async {
+    // Strip non-digits from the stored key so native can match easily
+    final cleanMobile = mobile.replaceAll(RegExp(r'\D'), '');
+    if (cleanMobile.isEmpty) return;
+    // We only take the last 10 digits to ignore country code discrepancies
+    final key = cleanMobile.length > 10 ? cleanMobile.substring(cleanMobile.length - 10) : cleanMobile;
+
+    final raw = _p?.getString('caller_id_map') ?? '{}';
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      map[key] = info;
+      // Cap the map size so it doesn't grow indefinitely. Remove oldest if > 1000.
+      if (map.length > 1000) {
+        final keys = map.keys.toList();
+        for (var i = 0; i < map.length - 1000; i++) map.remove(keys[i]);
+      }
+      await _p?.setString('caller_id_map', jsonEncode(map));
+    } catch (_) {
+      await _p?.setString('caller_id_map', jsonEncode({key: info}));
+    }
+  }
+
+  // --- Pending incoming call to automatically open ---
+  static int? getPendingIncomingDataId() {
+    final raw = _p?.getString('pending_incoming_call_dataid');
+    return raw != null ? int.tryParse(raw) : null;
+  }
+  
+  static Future<void> clearPendingIncomingDataId() async {
+    await _p?.remove('pending_incoming_call_dataid');
+  }
 }

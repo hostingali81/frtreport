@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart';
@@ -41,8 +42,9 @@ const _categories = [
 // by reloading the list and kicking off an FRT sync.
 class DetailSheet extends StatefulWidget {
   final Complaint complaint;
+  final bool isIncomingCall;
 
-  const DetailSheet({super.key, required this.complaint});
+  const DetailSheet({super.key, required this.complaint, this.isIncomingCall = false});
 
   @override
   State<DetailSheet> createState() => _DetailSheetState();
@@ -95,6 +97,7 @@ class _DetailSheetState extends State<DetailSheet> {
     _fetchContact();
     _claim();
     if (widget.complaint.callCount > 0) _fetchHistory();
+    _setupIncomingCallDefault();
   }
 
   Future<void> _fetchHistory() async {
@@ -147,16 +150,37 @@ class _DetailSheetState extends State<DetailSheet> {
   Future<void> _fetchContact() async {
     try {
       final c = await Api.contact(widget.complaint.dataid);
+      
       if (!mounted) return;
       setState(() {
         _contact = c;
         _loadingContact = false;
       });
+      if (c.mobile != null && c.mobile!.isNotEmpty) {
+        final infoJson = jsonEncode({
+          'complaint_number': widget.complaint.complaintNumber ?? 'Complaint',
+          'consumer_name': c.consumerName ?? 'Consumer',
+          'substation': widget.complaint.area ?? 'Unknown',
+          'dataid': widget.complaint.dataid,
+          'complaint_sub_type': widget.complaint.complaintSubType ?? widget.complaint.complaintType ?? '',
+          'remarks': c.remarks ?? '',
+        });
+        Store.saveCallerId(c.mobile!, infoJson);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _contactError = '$e';
         _loadingContact = false;
+      });
+    }
+  }
+
+  void _setupIncomingCallDefault() {
+    if (widget.isIncomingCall && mounted) {
+      setState(() {
+        _callStatus = 'Connected';
+        _connected = true;
       });
     }
   }
@@ -402,7 +426,8 @@ class _DetailSheetState extends State<DetailSheet> {
       'problem_category': _category,
       'notes': notes,
       'duration_seconds': _callTracked ? _callDuration?.inSeconds : null,
-      'connected': _callTracked ? (_exact ? _connected : _callStatus == 'Connected') : null,
+      'connected': widget.isIncomingCall ? true : (_callTracked ? (_exact ? _connected : _callStatus == 'Connected') : (_callStatus == 'Connected')),
+      'is_incoming': widget.isIncomingCall,
     };
     try {
       await Api.logRaw(payload);

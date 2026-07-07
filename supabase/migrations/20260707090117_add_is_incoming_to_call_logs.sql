@@ -1,0 +1,2 @@
+ALTER TABLE public.call_logs
+ADD COLUMN is_incoming BOOLEAN DEFAULT FALSE;

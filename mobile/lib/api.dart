@@ -102,6 +102,7 @@ class Api {
     String? notes,
     int? durationSeconds,
     bool? connected,
+    bool? isIncoming,
   }) async {
     await logRaw({
       'dataid': dataid,
@@ -111,6 +112,7 @@ class Api {
       'notes': notes,
       'duration_seconds': durationSeconds,
       'connected': connected,
+      'is_incoming': isIncoming,
     });
   }
 

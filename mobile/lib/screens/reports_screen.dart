@@ -22,6 +22,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // Default range: today only (pick other dates from the two buttons).
   DateTime _from = DateTime.now();
   DateTime _to = DateTime.now();
+  int _recentFilter = 0; // 0=All, 1=Outgoing, 2=Incoming
 
   final _fmt = DateFormat('yyyy-MM-dd');
   final _fmtNice = DateFormat('d MMM');
@@ -137,11 +138,41 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 _operatorList(operators),
               ],
               Gap.xl,
-              const SectionHeader('Recent calls'),
-              if (recent.isEmpty)
-                Padding(padding: const EdgeInsets.only(top: 20), child: EmptyState(icon: Icons.history, title: 'No calls in this range'))
-              else
-                ...recent.map((r) => _recentTile(r as Map<String, dynamic>, isManager)),
+              Gap.xl,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const SectionHeader('Recent calls'),
+                  SegmentedButton<int>(
+                    segments: const [
+                      ButtonSegment(value: 0, label: Text('All')),
+                      ButtonSegment(value: 1, label: Text('Outgoing')),
+                      ButtonSegment(value: 2, label: Text('Incoming')),
+                    ],
+                    selected: {_recentFilter},
+                    onSelectionChanged: (s) => setState(() => _recentFilter = s.first),
+                    showSelectedIcon: false,
+                    style: SegmentedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      visualDensity: VisualDensity.compact,
+                      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+              Gap.sm,
+              Builder(
+                builder: (context) {
+                  var filtered = recent.cast<Map<String, dynamic>>();
+                  if (_recentFilter == 1) filtered = filtered.where((r) => r['is_incoming'] != true).toList();
+                  if (_recentFilter == 2) filtered = filtered.where((r) => r['is_incoming'] == true).toList();
+
+                  if (filtered.isEmpty) {
+                    return Padding(padding: const EdgeInsets.only(top: 20), child: EmptyState(icon: Icons.history, title: 'No calls in this tab'));
+                  }
+                  return Column(children: filtered.map((r) => _recentTile(r, isManager)).toList());
+                },
+              ),
             ],
           ],
         ),
@@ -248,7 +279,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              Icon(connected ? Icons.call_made : Icons.call_missed, size: 14, color: connected ? AppColors.success : AppColors.muted),
+              Icon(r['is_incoming'] == true ? Icons.arrow_downward : Icons.arrow_upward, 
+                   size: 14, 
+                   color: r['is_incoming'] == true ? AppColors.brand : (connected ? AppColors.success : AppColors.muted)),
               const SizedBox(width: 6),
               Expanded(child: Text('${r['complaint_number'] ?? '—'}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5, color: AppColors.ink))),
               Text(fmtDateTime(r['call_time']), style: const TextStyle(fontSize: 11, color: AppColors.muted)),

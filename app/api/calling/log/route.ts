@@ -23,7 +23,7 @@ export async function GET(request: Request) {
 
     const { data, error } = await supabase
       .from('call_logs')
-      .select('id, call_time, call_status, problem_category, notes, operator, duration_seconds, connected')
+      .select('id, call_time, call_status, problem_category, notes, operator, duration_seconds, connected, is_incoming')
       .eq('dataid', dataid)
       .order('call_time', { ascending: false })
       .limit(50);
@@ -54,6 +54,7 @@ export async function POST(request: Request) {
       notes?: string;
       duration_seconds?: number;
       connected?: boolean;
+      is_incoming?: boolean;
     } | null;
 
     const dataid = Number(body?.dataid);
@@ -75,6 +76,7 @@ export async function POST(request: Request) {
         notes: body.notes ?? null,
         duration_seconds: Number.isFinite(durationSeconds) && durationSeconds >= 0 ? Math.round(durationSeconds) : null,
         connected: typeof body.connected === 'boolean' ? body.connected : null,
+        is_incoming: typeof body.is_incoming === 'boolean' ? body.is_incoming : false,
         operator: session.displayName || session.email,
         operator_id: session.id
       })

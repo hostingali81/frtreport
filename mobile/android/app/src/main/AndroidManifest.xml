@@ -55,6 +55,24 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Tracks an operator-initiated outgoing call to log its outcome" />
         </service>
+        
+        <!-- Listens for incoming calls to display Caller ID popup when closed -->
+        <receiver android:name=".IncomingCallReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PHONE_STATE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Service to draw the Caller ID overlay bubble during an incoming call -->
+        <service
+            android:name=".IncomingCallService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Displays caller ID info for incoming calls from consumers" />
+        </service>
+
         <!-- Exposes the downloaded update APK (app cache dir) to the system installer. -->
         <provider
             android:name="androidx.core.content.FileProvider"

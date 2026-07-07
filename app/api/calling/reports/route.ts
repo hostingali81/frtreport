@@ -22,7 +22,7 @@ type Log = {
   id: number; dataid: number | null; complaint_number: string | null; call_time: string;
   call_status: string | null; problem_category: string | null; notes: string | null;
   operator: string | null; operator_id: string | null;
-  duration_seconds: number | null; connected: boolean | null;
+  duration_seconds: number | null; connected: boolean | null; is_incoming?: boolean | null;
 };
 
 // Old rows have connected=null; fall back to the recorded status.
@@ -54,7 +54,7 @@ export async function GET(request: Request) {
 
     let query = supabase
       .from('call_logs')
-      .select('id, dataid, complaint_number, call_time, call_status, problem_category, notes, operator, operator_id, duration_seconds, connected')
+      .select('id, dataid, complaint_number, call_time, call_status, problem_category, notes, operator, operator_id, duration_seconds, connected, is_incoming')
       .gte('call_time', `${from}T00:00:00+05:30`)
       .lte('call_time', `${to}T23:59:59+05:30`)
       .order('call_time', { ascending: false })
