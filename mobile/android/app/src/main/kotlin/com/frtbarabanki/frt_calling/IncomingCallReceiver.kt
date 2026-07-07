@@ -41,11 +41,11 @@ class IncomingCallReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 // Ignore parsing errors
             }
-        } else if (state == TelephonyManager.EXTRA_STATE_IDLE || state == TelephonyManager.EXTRA_STATE_OFFHOOK) {
+        } else if (state == TelephonyManager.EXTRA_STATE_IDLE) {
             // Call answered or missed/rejected, stop the overlay
             IncomingCallService.stop(context)
 
-            if (state == TelephonyManager.EXTRA_STATE_IDLE && activeDataId != null) {
+            if (activeDataId != null) {
                 // Call ended, save to SharedPreferences for Flutter to pick up
                 val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
                 prefs.edit().putString("flutter.pending_incoming_call_dataid", activeDataId).apply()

@@ -257,16 +257,25 @@ class IncomingCallService : Service() {
 
             var downY = 0f
             var startY = 0
+            var isDrag = false
             card.setOnTouchListener { v, e ->
                 when (e.action) {
                     MotionEvent.ACTION_DOWN -> {
                         downY = e.rawY
                         startY = lp.y
+                        isDrag = false
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        lp.y = (startY + (e.rawY - downY)).toInt().coerceAtLeast(0)
-                        try { wm.updateViewLayout(v, lp) } catch (_: Exception) {}
+                        if (Math.abs(e.rawY - downY) > 10) isDrag = true
+                        if (isDrag) {
+                            lp.y = (startY + (e.rawY - downY)).toInt().coerceAtLeast(0)
+                            try { wm.updateViewLayout(v, lp) } catch (_: Exception) {}
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (!isDrag) stopSelf()
                         true
                     }
                     else -> false
