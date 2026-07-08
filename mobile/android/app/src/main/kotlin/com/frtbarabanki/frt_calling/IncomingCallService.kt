@@ -27,8 +27,15 @@ class IncomingCallService : Service() {
             if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
         }
 
-        fun stop(ctx: Context) {
-            ctx.stopService(Intent(ctx, IncomingCallService::class.java))
+        fun stop(ctx: Context, dataId: String?) {
+            val i = Intent(ctx, IncomingCallService::class.java)
+            i.action = "STOP_AND_LAUNCH"
+            i.putExtra("dataid", dataId)
+            try {
+                if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+            } catch (e: Exception) {
+                ctx.stopService(Intent(ctx, IncomingCallService::class.java))
+            }
         }
     }
 
@@ -37,6 +44,22 @@ class IncomingCallService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "STOP_AND_LAUNCH") {
+            val dataId = intent.getStringExtra("dataid")
+            if (dataId != null) {
+                val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                prefs.edit().putString("flutter.pending_incoming_call_dataid", dataId).apply()
+                try {
+                    startActivity(Intent(this, MainActivity::class.java).apply {
+                        this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                    })
+                } catch (e: Exception) {}
+            }
+            stopForeground(true)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         val info = intent?.getStringExtra(EXTRA_INFO) ?: ""
         
         Notifications.ensureChannels(this)
@@ -80,6 +103,11 @@ class IncomingCallService : Service() {
                 cRemarks = obj.optString("remarks", "")
                 cTotalComplaints = obj.optInt("total_complaints", 0)
                 cLastStatus = obj.optString("last_status", "")
+                val lastDate = obj.optString("last_date", "")
+                if (lastDate.isNotEmpty() && cLastStatus.isNotEmpty()) {
+                    val dateOnly = lastDate.take(10) // YYYY-MM-DD
+                    cLastStatus = "$cLastStatus on $dateOnly"
+                }
             } catch (e: Exception) {
                 // Fallback for old plaintext format
                 val lines = info.split("\n")
@@ -248,7 +276,7 @@ class IncomingCallService : Service() {
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 type,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED,
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL

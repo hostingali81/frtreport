@@ -180,6 +180,7 @@ class _DetailSheetState extends State<DetailSheet> {
             final stillInFeed = last['still_in_feed'] == true;
             baseInfo['total_complaints'] = total;
             baseInfo['last_status'] = stillInFeed ? 'Pending' : 'Resolved';
+            baseInfo['last_date'] = last['complaint_date'] ?? '';
           }
         } catch (_) {
           // Lookup failed — save with base info only.

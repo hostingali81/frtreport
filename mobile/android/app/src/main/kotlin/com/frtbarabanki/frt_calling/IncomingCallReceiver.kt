@@ -27,37 +27,31 @@ class IncomingCallReceiver : BroadcastReceiver() {
 
             try {
                 val map = JSONObject(mapJson)
-                if (map.has(key)) {
-                    val info = map.getString(key)
-                    try {
-                        val infoObj = JSONObject(info)
-                        activeDataId = infoObj.optString("dataid", null)
-                    } catch (e: Exception) {
-                        activeDataId = null
-                    }
-                    // Match found, start the overlay service
-                    IncomingCallService.start(context, info)
+                val info = if (map.has(key)) {
+                    map.getString(key)
+                } else {
+                    val defaultObj = JSONObject()
+                    defaultObj.put("consumer_name", "Unknown Consumer")
+                    defaultObj.put("remarks", "inki complaint last 1 month main nhi mili")
+                    defaultObj.put("total_complaints", 0)
+                    defaultObj.toString()
                 }
+                
+                try {
+                    val infoObj = JSONObject(info)
+                    activeDataId = infoObj.optString("dataid", null)
+                } catch (e: Exception) {
+                    activeDataId = null
+                }
+                // Match found or default created, start the overlay service
+                IncomingCallService.start(context, info)
             } catch (e: Exception) {
                 // Ignore parsing errors
             }
         } else if (state == TelephonyManager.EXTRA_STATE_IDLE) {
-            // Call answered or missed/rejected, stop the overlay
-            IncomingCallService.stop(context)
-
-            if (activeDataId != null) {
-                // Call ended, save to SharedPreferences for Flutter to pick up
-                val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                prefs.edit().putString("flutter.pending_incoming_call_dataid", activeDataId).apply()
-                
-                // Launch the app
-                val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                if (launchIntent != null) {
-                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    context.startActivity(launchIntent)
-                }
-                activeDataId = null
-            }
+            // Call answered or missed/rejected, stop the overlay and launch app
+            IncomingCallService.stop(context, activeDataId)
+            activeDataId = null
         }
     }
 }
