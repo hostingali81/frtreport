@@ -246,7 +246,7 @@ class MainActivity : FlutterActivity() {
                 "${CallLog.Calls.TYPE} = ? AND ${CallLog.Calls.DATE} >= ?",
                 arrayOf(
                     CallLog.Calls.OUTGOING_TYPE.toString(),
-                    (System.currentTimeMillis() - 6 * 60 * 60 * 1000L).toString()
+                    (System.currentTimeMillis() - 30 * 60 * 1000L).toString()
                 ),
                 "${CallLog.Calls.DATE} DESC"
             )?.use { c ->

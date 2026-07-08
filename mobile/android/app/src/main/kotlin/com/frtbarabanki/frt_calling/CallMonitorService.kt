@@ -104,22 +104,31 @@ class CallMonitorService : Service() {
         if (finishing) return
         removeBubble()
         val durSec = if (offhookAt > 0) (System.currentTimeMillis() - offhookAt) / 1000 else 0
-        // Bring the app back on top. With "Display over other apps" granted the
-        // OS allows this from the background; otherwise it is silently dropped
-        // on Android 10+, so we also post a heads-up notification.
+
+        // On Android 10+ background Activity starts are blocked unless the app
+        // has "Display over other apps". Try it anyway (works when foregrounded
+        // or overlay granted), and always post a heads-up as the reliable path.
+        val canOverlay = try { Settings.canDrawOverlays(this) } catch (_: Exception) { false }
         try {
-            startActivity(Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-            })
-        } catch (_: Exception) {
-        }
-        if (!Settings.canDrawOverlays(this)) {
+            if (canOverlay) {
+                startActivity(Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                })
+            }
+        } catch (_: Exception) { /* background start blocked — notification is the fallback */ }
+
+        // Always post the call-ended notification so the operator is never
+        // stranded without a way back (MIUI kills background starts aggressively).
+        try {
             Notifications.callEnd(
                 this,
                 "Call ended · ${durSec / 60}:${(durSec % 60).toString().padStart(2, '0')}",
                 "Tap to log the result"
             )
-        }
+        } catch (_: Exception) {}
+
         finish()
     }
 
@@ -129,7 +138,14 @@ class CallMonitorService : Service() {
         handler.removeCallbacksAndMessages(null)
         stopListening()
         removeBubble()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Exception) {}
         stopSelf()
     }
 
