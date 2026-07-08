@@ -74,7 +74,7 @@ function buildRpcFilterParams(searchParams: URLSearchParams) {
     toDate = todayRange.to;
   }
 
-  const search = (searchParams.get('search') || '').trim();
+
 
   return {
     p_division: searchParams.get('division') || null,
@@ -83,8 +83,7 @@ function buildRpcFilterParams(searchParams: URLSearchParams) {
     p_status: searchParams.get('status') || null,
     p_closed_status: searchParams.get('closedStatus') || null,
     p_from: toISTTimestamp(fromDate, 'start'),
-    p_to: toISTTimestamp(toDate, 'end'),
-    p_search: search ? search.replace(/,/g, ' ') : null
+    p_to: toISTTimestamp(toDate, 'end')
   };
 }
 

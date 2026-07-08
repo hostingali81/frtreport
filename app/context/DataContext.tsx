@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 
 export interface ComplaintFilters {
-  search: string;
+
   division: string;
   subDivision: string;
   subStation: string;
@@ -145,7 +145,6 @@ export const getDefaultTodayFilters = (): ComplaintFilters => {
   const now = new Date();
 
   return {
-    search: '',
     division: '',
     subDivision: '',
     subStation: '',
@@ -158,7 +157,6 @@ export const getDefaultTodayFilters = (): ComplaintFilters => {
 };
 
 const areFiltersEqual = (left: ComplaintFilters, right: ComplaintFilters) =>
-  left.search === right.search &&
   left.division === right.division &&
   left.subDivision === right.subDivision &&
   left.subStation === right.subStation &&
@@ -246,7 +244,7 @@ export function buildFilterParams(filters: ComplaintFilters) {
   const resolved = resolveFilters(filters);
   const params = new URLSearchParams();
 
-  if (resolved.search.trim()) params.set('search', resolved.search.trim());
+
   if (resolved.division) params.set('division', resolved.division);
   if (resolved.subDivision) params.set('subDivision', resolved.subDivision);
   if (resolved.subStation) params.set('subStation', resolved.subStation);

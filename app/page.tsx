@@ -49,7 +49,7 @@ export default function Home() {
 
   const [error, setError] = useState('');
   const defaultFilters = currentFilters ?? getDefaultTodayFilters();
-  const [search, setSearch] = useState(defaultFilters.search);
+
   const [fromDT, setFromDT] = useState(defaultFilters.fromDT); // yyyy-mm-ddTHH:mm (datetime-local)
   const [toDT, setToDT] = useState(defaultFilters.toDT);   // yyyy-mm-ddTHH:mm (datetime-local)
   const [statusFilter, setStatusFilter] = useState(defaultFilters.status); // empty = all
@@ -64,7 +64,6 @@ export default function Home() {
   }, [contextLastUpdated]);
 
   useEffect(() => {
-    setSearch(currentFilters.search);
     setFromDT(currentFilters.fromDT);
     setToDT(currentFilters.toDT);
     setStatusFilter(currentFilters.status);
@@ -136,7 +135,6 @@ export default function Home() {
     try {
       // Stats only; the table fetches its own page when currentFilters change.
       await applyFilters({
-        search,
         division: divisionFilter,
         subDivision: subDivisionFilter,
         subStation: subStationFilter,
@@ -585,7 +583,6 @@ export default function Home() {
 
   const clearAllFilters = () => {
     const todayFilters = getDefaultTodayFilters();
-    setSearch(todayFilters.search);
     setDivisionFilter(todayFilters.division);
     setSubDivisionFilter(todayFilters.subDivision);
     setSubStationFilter(todayFilters.subStation);
@@ -3108,7 +3105,7 @@ export default function Home() {
     wsCover.getRow(4).font = { bold: true, size: 12 };
     wsCover.addRow(['Total Complaints (filtered)', rows.length]);
     wsCover.addRow([periodText]);
-    wsCover.addRow([`Filters: Search="${search || '—'}", Status="${statusApplied}"`]);
+    wsCover.addRow([`Filters: Status="${statusApplied}"`]);
     wsCover.addRow([]);
     wsCover.addRow(['Distinct Divisions', uniqueDivisions.length]);
     wsCover.addRow([uniqueDivisions.join(', ') || '—']);
@@ -5145,8 +5142,6 @@ export default function Home() {
           <>
             <div className="mb-6">
               <FilterBar
-                search={search}
-                setSearch={setSearch}
                 divisionFilter={divisionFilter}
                 setDivisionFilter={setDivisionFilter}
                 divisionOptions={divisionOptions}

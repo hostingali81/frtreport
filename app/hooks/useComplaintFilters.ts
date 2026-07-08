@@ -69,7 +69,6 @@ export function useComplaintFilters() {
 
     const defaultFilters = currentFilters ?? getDefaultTodayFilters();
 
-    const [search, setSearch] = useState(defaultFilters.search);
     const [fromDT, setFromDT] = useState(defaultFilters.fromDT);
     const [toDT, setToDT] = useState(defaultFilters.toDT);
     const [statusFilter, setStatusFilter] = useState(defaultFilters.status);
@@ -83,7 +82,6 @@ export function useComplaintFilters() {
     const [activePreset, setActivePreset] = useState('');
 
     useEffect(() => {
-        setSearch(currentFilters.search);
         setFromDT(currentFilters.fromDT);
         setToDT(currentFilters.toDT);
         setStatusFilter(currentFilters.status);
@@ -158,7 +156,6 @@ export function useComplaintFilters() {
 
     const clearAllFilters = () => {
         const todayFilters = getDefaultTodayFilters();
-        setSearch(todayFilters.search);
         setDivisionFilter(todayFilters.division);
         setSubDivisionFilter(todayFilters.subDivision);
         setSubStationFilter(todayFilters.subStation);
@@ -173,7 +170,6 @@ export function useComplaintFilters() {
     };
 
     const buildFilters = (): ComplaintFilters => ({
-        search,
         division: divisionFilter,
         subDivision: subDivisionFilter,
         subStation: subStationFilter,
@@ -185,7 +181,6 @@ export function useComplaintFilters() {
     });
 
     const filterBarProps = {
-        search, setSearch,
         divisionFilter, setDivisionFilter, divisionOptions: filterOptions.divisions,
         subDivisionFilter, setSubDivisionFilter, subDivisionOptions: filterOptions.subDivisions,
         subStationFilter, setSubStationFilter, subStationOptions: filterOptions.subStations,

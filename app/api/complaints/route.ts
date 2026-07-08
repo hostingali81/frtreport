@@ -12,8 +12,7 @@ const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE)
   : null;
 
-// Server-side search runs against the generated search_text column
-// (all searchable columns concatenated, with a trigram index).
+// Server-side search logic removed along with search_text column.
 
 // Table header labels -> sortable DB columns for the paged path.
 // 'Resolution Time' is computed client-side, so it sorts by closed_date.
@@ -133,7 +132,6 @@ function extractFilters(searchParams: URLSearchParams) {
   }
 
   return {
-    search: (searchParams.get('search') || '').trim(),
     division: searchParams.get('division') || '',
     subDivision: searchParams.get('subDivision') || '',
     subStation: searchParams.get('subStation') || '',
@@ -155,10 +153,6 @@ function applyCommonFilters(query: any, searchParams: URLSearchParams) {
   if (filters.fromDate) query = query.gte('complaint_date', filters.fromDate);
   if (filters.toDate) query = query.lte('complaint_date', filters.toDate);
 
-  if (filters.search) {
-    query = query.ilike('search_text', `%${filters.search.replace(/,/g, ' ')}%`);
-  }
-
   return query;
 }
 
@@ -172,8 +166,7 @@ function buildRpcFilterParams(searchParams: URLSearchParams) {
     p_status: filters.status || null,
     p_closed_status: filters.closedStatus || null,
     p_from: filters.fromDate,
-    p_to: filters.toDate,
-    p_search: filters.search ? filters.search.replace(/,/g, ' ') : null
+    p_to: filters.toDate
   };
 }
 
@@ -296,7 +289,7 @@ export async function GET(request: Request) {
 
   let query = supabase
     .from('complaints')
-    .select('raw_data', { count: 'exact' })
+    .select('complaint_number, division, sub_division, sub_station, consumer_name, consumer_mobile, consumer_address, complaint_type, complaint_sub_type, status, closed_status, closed_by, complaint_date, closed_date, closing_remarks, area_type, feeder, id', { count: 'exact' })
     .order(sortColumn, { ascending: sortAscending })
     .order('id', { ascending: false });
 
@@ -313,7 +306,35 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     success: true,
-    data: (data || []).map((row) => row.raw_data),
+    data: (data || []).map((row) => {
+      const formatDT = (dt: string | null) => {
+        if (!dt) return null;
+        return new Date(dt).toLocaleString('en-US', {
+          timeZone: 'Asia/Kolkata',
+          month: '2-digit', day: '2-digit', year: 'numeric',
+          hour: '2-digit', minute: '2-digit', hour12: true
+        }).replace(',', '');
+      };
+      return {
+        'Complaint Number': row.complaint_number,
+        'Division': row.division,
+        'Sub Division': row.sub_division,
+        'Sub Station': row.sub_station,
+        'Consumer Name': row.consumer_name,
+        'Consumer Mobile': row.consumer_mobile,
+        'Consumer Address': row.consumer_address,
+        'Complaint Type': row.complaint_type,
+        'Complaint Sub Type': row.complaint_sub_type,
+        'Status': row.status,
+        'Closed Status': row.closed_status,
+        'Closed By': row.closed_by,
+        'Complaint Date and Time': formatDT(row.complaint_date),
+        'Closed Date': formatDT(row.closed_date),
+        'Closing Remarks': row.closing_remarks,
+        'Area Type': row.area_type,
+        'Feeder': row.feeder
+      };
+    }),
     total: count || 0,
     page,
     limit: pageLimit,

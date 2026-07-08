@@ -35,7 +35,7 @@ export async function getComplaintsData() {
         : Math.min(from + batchSize - 1, maxRecords - 1);
       const { data, error } = await supabase
         .from('complaints')
-        .select('raw_data')
+        .select('complaint_number, division, sub_division, sub_station, consumer_name, consumer_mobile, consumer_address, complaint_type, complaint_sub_type, status, closed_status, closed_by, complaint_date, closed_date, closing_remarks, area_type, feeder')
         .order('complaint_date', { ascending: false })
         .range(from, to);
       
@@ -79,7 +79,34 @@ export async function getComplaintsData() {
         })
       : null;
 
-    const dataArray = allData.map(row => row.raw_data);
+    const formatDT = (dt: string | null) => {
+      if (!dt) return null;
+      return new Date(dt).toLocaleString('en-US', {
+        timeZone: 'Asia/Kolkata',
+        month: '2-digit', day: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', hour12: true
+      }).replace(',', '');
+    };
+    
+    const dataArray = allData.map(row => ({
+      'Complaint Number': row.complaint_number,
+      'Division': row.division,
+      'Sub Division': row.sub_division,
+      'Sub Station': row.sub_station,
+      'Consumer Name': row.consumer_name,
+      'Consumer Mobile': row.consumer_mobile,
+      'Consumer Address': row.consumer_address,
+      'Complaint Type': row.complaint_type,
+      'Complaint Sub Type': row.complaint_sub_type,
+      'Status': row.status,
+      'Closed Status': row.closed_status,
+      'Closed By': row.closed_by,
+      'Complaint Date and Time': formatDT(row.complaint_date),
+      'Closed Date': formatDT(row.closed_date),
+      'Closing Remarks': row.closing_remarks,
+      'Area Type': row.area_type,
+      'Feeder': row.feeder
+    }));
     
     console.log('✅ Data fetched successfully');
     return { data: dataArray, lastScrapedAt };

@@ -23,6 +23,7 @@ class ComplaintsScreen extends StatefulWidget {
 
 class _ComplaintsScreenState extends State<ComplaintsScreen> {
   List<Complaint> _all = [];
+  List<Complaint> _filtered = [];
   bool _loading = true;
   bool _syncing = false;
   bool _offline = false;
@@ -95,6 +96,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
         _offline = false;
         _loading = false;
       });
+      _updateFiltered();
       Store.cacheComplaints(raw);
       Alerts.check(list);
       _syncOutboxIfAny();
@@ -110,6 +112,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
           _error = null;
           _loading = false;
         });
+        _updateFiltered();
       } else {
         setState(() {
           _error = '$e';
@@ -122,6 +125,8 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   Future<void> _fetchCallerIdCache() async {
     try {
       final cache = await Api.callerIdCache();
+      final Map<String, String> itemsToSave = {};
+      
       for (final c in cache) {
         if (c['mobile'] != null && c['mobile'].isNotEmpty) {
           final baseInfo = {
@@ -134,8 +139,12 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
             'total_complaints': 0, // Simplified for cache
             'last_status': '',
           };
-          await Store.saveCallerId(c['mobile'], jsonEncode(baseInfo));
+          itemsToSave[c['mobile']] = jsonEncode(baseInfo);
         }
+      }
+      
+      if (itemsToSave.isNotEmpty) {
+        await Store.saveCallerIds(itemsToSave);
       }
     } catch (_) {
       // Ignore background fetch errors
@@ -172,7 +181,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   List<String> get _areas => _all.map((c) => c.area).whereType<String>().toSet().toList()..sort();
   List<String> get _statuses => _all.map((c) => c.actionStatus).whereType<String>().toSet().toList()..sort();
 
-  List<Complaint> get _filtered {
+  void _updateFiltered() {
     final q = _search.trim().toLowerCase();
     final list = _all.where((c) {
       if (_statusFilter != null && c.actionStatus != _statusFilter) {
@@ -193,12 +202,11 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
       return true;
     }).toList();
     list.sort(_sortBy == 'newest' ? compareNewest : compareUrgent);
-    return list;
+    setState(() => _filtered = list);
   }
 
   @override
   Widget build(BuildContext context) {
-    final filtered = _filtered;
     final pending = _all.where((c) => c.callCount == 0).length;
     final pendingLogs = Store.pendingCount();
     final viewPadding = MediaQuery.viewPaddingOf(context);
@@ -285,7 +293,10 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  onChanged: (v) => setState(() => _search = v),
+                  onChanged: (v) {
+                    _search = v;
+                    _updateFiltered();
+                  },
                   textInputAction: TextInputAction.search,
                   decoration: const InputDecoration(
                     hintText: 'Search complaint no, area, feeder…',
@@ -295,9 +306,15 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    Expanded(child: _dropdown('Status', _statusFilter, _statuses, (v) => setState(() => _statusFilter = v))),
+                    Expanded(child: _dropdown('Status', _statusFilter, _statuses, (v) {
+                      _statusFilter = v;
+                      _updateFiltered();
+                    })),
                     Gap.sm,
-                    Expanded(child: _dropdown('Substation', _areaFilter, _areas, (v) => setState(() => _areaFilter = v))),
+                    Expanded(child: _dropdown('Substation', _areaFilter, _areas, (v) {
+                      _areaFilter = v;
+                      _updateFiltered();
+                    })),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -307,7 +324,8 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                       borderRadius: BorderRadius.circular(8),
                       onTap: () {
                         Haptics.tap();
-                        setState(() => _hideCalled = !_hideCalled);
+                        _hideCalled = !_hideCalled;
+                        _updateFiltered();
                       },
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
@@ -328,7 +346,8 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                       selected: {_sortBy},
                       onSelectionChanged: (s) {
                         Haptics.tap();
-                        setState(() => _sortBy = s.first);
+                        _sortBy = s.first;
+                        _updateFiltered();
                       },
                     ),
                   ],
@@ -379,7 +398,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                               ),
                             )
                           ])
-                        : filtered.isEmpty
+                        : _filtered.isEmpty
                             ? ListView(children: [
                                 Padding(
                                   padding: const EdgeInsets.only(top: 60),
@@ -393,9 +412,9 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                               ])
                             : ListView.separated(
                                 padding: const EdgeInsets.all(12),
-                                itemCount: filtered.length,
+                                itemCount: _filtered.length,
                                 separatorBuilder: (_, _) => Gap.sm,
-                                itemBuilder: (_, i) => _card(filtered[i]),
+                                itemBuilder: (_, i) => _card(_filtered[i]),
                               ),
                   ),
           ),
@@ -499,15 +518,12 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
             border: Border.all(color: sla.overdue ? const Color(0xFFFECACA) : AppColors.border),
           ),
           clipBehavior: Clip.antiAlias,
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Container(width: 4, color: sla.fg),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-                    child: Column(
+          child: Stack(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.only(left: 17, right: 13, top: 10, bottom: 10),
+                child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
@@ -581,11 +597,16 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                           ],
                         ),
                       ],
-                    ),
-                  ),
                 ),
-              ],
-            ),
+              ),
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: 4,
+                child: Container(color: sla.fg),
+              ),
+            ],
           ),
         ),
       ),

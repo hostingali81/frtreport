@@ -178,6 +178,31 @@ class Store {
     }
   }
 
+  // Batch insert caller IDs. Decoding and encoding the JSON map is expensive,
+  // so doing it in a loop for 1000s of items causes the app to hang.
+  static Future<void> saveCallerIds(Map<String, String> items) async {
+    final raw = _p?.getString('caller_id_map') ?? '{}';
+    Map<String, dynamic> map = {};
+    try {
+      map = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      // Start fresh if corrupt
+    }
+
+    for (final entry in items.entries) {
+      final cleanMobile = entry.key.replaceAll(RegExp(r'\D'), '');
+      if (cleanMobile.isEmpty) continue;
+      final key = cleanMobile.length > 10 ? cleanMobile.substring(cleanMobile.length - 10) : cleanMobile;
+      map[key] = entry.value;
+    }
+
+    if (map.length > 1000) {
+      final keys = map.keys.toList();
+      for (var i = 0; i < map.length - 1000; i++) map.remove(keys[i]);
+    }
+    await _p?.setString('caller_id_map', jsonEncode(map));
+  }
+
   // --- Pending incoming call to automatically open ---
   static int? getPendingIncomingDataId() {
     final raw = _p?.getString('pending_incoming_call_dataid');

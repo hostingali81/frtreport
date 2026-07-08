@@ -8,9 +8,6 @@ import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 
 interface FilterBarProps {
-  // Search
-  search: string;
-  setSearch: (val: string) => void;
 
   // Dropdowns
   divisionFilter: string;
@@ -84,7 +81,7 @@ const buildDateTimeLocal = (date: Date, hours: number, minutes: number) => {
 };
 
 export default function FilterBar({
-  search, setSearch,
+
   divisionFilter, setDivisionFilter, divisionOptions,
   subDivisionFilter, setSubDivisionFilter, subDivisionOptions,
   subStationFilter, setSubStationFilter, subStationOptions,
@@ -121,7 +118,7 @@ export default function FilterBar({
 
   // Helper to count active filters
   const activeCount = [
-    search, divisionFilter, subDivisionFilter, subStationFilter, statusFilter, closedStatusFilter,
+    divisionFilter, subDivisionFilter, subStationFilter, statusFilter, closedStatusFilter,
     fromDT && fromDT !== defaultTodayRange.fromDT ? fromDT : null,
     toDT && toDT !== defaultTodayRange.toDT ? toDT : null,
     selectedShift,
@@ -201,15 +198,7 @@ export default function FilterBar({
 
         {/* Left: Search & Toggle */}
         <div className="flex items-center gap-3 w-full lg:w-auto flex-1 flex-wrap">
-          <div className="relative flex-1 max-w-xs group min-w-[200px]">
-            <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search complaints..."
-              className="pl-10 pr-4 py-2.5 w-full border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all shadow-sm group-hover:border-gray-300"
-            />
-          </div>
+
 
           <button
             onClick={() => setIsExpanded(!isExpanded)}
