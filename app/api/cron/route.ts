@@ -1,104 +1,160 @@
 import { NextResponse } from 'next/server';
 import {
-  scrapeFrtFast,
-  scrapeWithPuppeteer,
-  isFatalFrtLoginError,
-  saveToNewDb,
+  createFrtApiScraperSession,
+  insertOnlyNewDb,
+  logScrapeError,
+  logScrapeSuccess,
   checkNewTablesExist,
-  getLastSuccessfulScrape
 } from '../../lib/shared-scraper';
 
-export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // Extend to max allowed on Hobby (was 10, but cron might allow up to 60)
+// ---------------------------------------------------------------------------
+// Vercel Cron Route — /api/cron
+// ---------------------------------------------------------------------------
+// Triggered every 5 minutes by Vercel Cron (vercel.json).
+// Uses the same fast API-replay strategy as scripts/today-scrape.ts:
+//   1. Reuse cached FRT session (no browser unless session expired)
+//   2. Scrape today's date only
+//   3. Insert only NEW complaints (skip duplicates)
+//   4. Target runtime: < 60s per run, well within the 5-min window
+// ---------------------------------------------------------------------------
 
-function getISTDateParts(date: Date) {
+export const dynamic = 'force-dynamic';
+// Vercel Hobby cron functions can run up to 60s, Pro up to 300s.
+// Set to 60s (safe for Hobby). Upgrade to 300 on Pro if needed.
+export const maxDuration = 60;
+
+// Simple in-memory lock — prevents overlapping concurrent invocations
+// (Vercel can occasionally double-invoke a cron if the previous one is slow).
+let isRunning = false;
+
+function getTodayInIST(): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata',
     year: 'numeric',
     month: '2-digit',
-    day: '2-digit'
-  }).formatToParts(date);
+    day: '2-digit',
+  }).formatToParts(new Date());
 
   const partMap = Object.fromEntries(
     parts
-      .filter(part => part.type !== 'literal')
-      .map(part => [part.type, part.value])
+      .filter((p) => p.type !== 'literal')
+      .map((p) => [p.type, p.value])
   );
 
-  return {
-    year: Number(partMap.year),
-    month: Number(partMap.month),
-    day: Number(partMap.day)
-  };
+  return `${partMap.year}-${partMap.month}-${partMap.day}`;
 }
 
-function formatDateOnly(date: Date) {
-  const { year, month, day } = getISTDateParts(date);
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
-
-function subtractDaysFromDateOnly(dateOnly: string, days: number) {
-  const match = dateOnly.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return dateOnly;
-
-  const [, year, month, day] = match;
-  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
-  date.setUTCDate(date.getUTCDate() - days);
-
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  try { return JSON.stringify(error); } catch { return String(error); }
 }
 
 export async function GET(request: Request) {
   const startTime = Date.now();
+
+  // ── 1. Auth: only Vercel Cron or requests with the correct secret ──────────
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret) {
+    const authHeader = request.headers.get('authorization');
+    const isVercelCron = request.headers.get('x-vercel-cron') === '1';
+
+    if (!isVercelCron && authHeader !== `Bearer ${cronSecret}`) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  }
+
+  // ── 2. Concurrency guard ───────────────────────────────────────────────────
+  if (isRunning) {
+    console.log('[CRON] Previous run still in progress — skipping.');
+    return NextResponse.json({ skipped: true, reason: 'previous run in progress' });
+  }
+
+  // ── 3. Validate DB schema ──────────────────────────────────────────────────
+  const useNewSystem = await checkNewTablesExist();
+  if (!useNewSystem) {
+    return NextResponse.json(
+      { success: false, error: 'Optimized complaints table not found — new DB schema required.' },
+      { status: 500 }
+    );
+  }
+
+  // ── 4. Validate credentials ────────────────────────────────────────────────
+  const username = process.env.FRT_USERNAME;
+  const password = process.env.FRT_PASSWORD;
+  if (!username || !password) {
+    return NextResponse.json({ success: false, error: 'Missing FRT credentials' }, { status: 500 });
+  }
+
+  isRunning = true;
+  const todayIST = getTodayInIST();
+  console.log(`[CRON] Starting 5-min scrape for ${todayIST}…`);
+
   try {
-    const useNewSystem = await checkNewTablesExist();
-
-    const lastSuccessfulScrape = await getLastSuccessfulScrape();
-    const toDate = formatDateOnly(new Date());
-    const fromDate = lastSuccessfulScrape?.last_scrape_at
-      ? subtractDaysFromDateOnly(formatDateOnly(new Date(lastSuccessfulScrape.last_scrape_at)), 1)
-      : subtractDaysFromDateOnly(toDate, 1);
-
-    const username = process.env.FRT_USERNAME;
-    const password = process.env.FRT_PASSWORD;
-
-    if (!username || !password) {
-      throw new Error('Missing credentials');
-    }
-
-    console.log('[CRON] Starting Direct Scrape...', { fromDate, toDate });
-
-    // Fast path: replay the captured report API session (no browser unless the
-    // session needs refreshing). Falls back to the DOM scraper on failure.
-    let payload;
+    // ── 5. Open FRT session (cached — no browser unless token expired) ─────────
+    let session: Awaited<ReturnType<typeof createFrtApiScraperSession>>;
     try {
-      payload = await scrapeFrtFast(username, password, fromDate, toDate);
-    } catch (fastError: any) {
-      const message = fastError?.message || String(fastError);
-      if (isFatalFrtLoginError(message)) throw fastError;
-      console.warn('[CRON] Fast API scrape failed, falling back to browser scraper:', message);
-      payload = await scrapeWithPuppeteer(username, password, fromDate, toDate);
-    }
-    const scrapeDuration = Math.round((Date.now() - startTime) / 1000);
-
-    if (useNewSystem && payload.data && payload.data.length > 0) {
-      const saveResult = await saveToNewDb(payload.data, scrapeDuration, 'cron_last_update_minus_1_day');
-      return NextResponse.json({
-        success: true,
-        source: 'cron_direct',
-        stats: {
-          scraped: payload.data.length,
-          new: saveResult.new_rows,
-          updated: saveResult.updated_rows,
-          duration: scrapeDuration
-        }
-      });
+      session = await createFrtApiScraperSession(username, password);
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      console.error('[CRON] Session open failed:', msg);
+      await logScrapeError(err instanceof Error ? err : new Error(msg), Math.round((Date.now() - startTime) / 1000));
+      return NextResponse.json({ success: false, error: msg }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, message: 'Cron run (no data or old system)', payload });
+    // ── 6. Scrape today ────────────────────────────────────────────────────────
+    let scrapedRows: Record<string, string>[] = [];
+    try {
+      console.log(`[CRON] Scraping ${todayIST} → ${todayIST}…`);
+      const scrapeStart = Date.now();
+      const payload = await session.scrapeRange(todayIST, todayIST);
+      scrapedRows = (payload.data ?? []) as Record<string, string>[];
+      console.log(`[CRON] Scraped ${scrapedRows.length} rows in ${((Date.now() - scrapeStart) / 1000).toFixed(1)}s`);
+    } finally {
+      // Always release the FRT login immediately after scraping
+      await session.close();
+      console.log('[CRON] FRT session closed — login released.');
+    }
 
-  } catch (error: any) {
-    console.error('[CRON] Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    // ── 7. Insert only new complaints ──────────────────────────────────────────
+    const totalDuration = Math.round((Date.now() - startTime) / 1000);
+
+    if (!scrapedRows.length) {
+      console.log('[CRON] No rows for today — nothing to insert.');
+      await logScrapeSuccess(0, 0, 0, totalDuration);
+      return NextResponse.json({ success: true, message: 'No data for today', stats: { scraped: 0, new: 0, duration: totalDuration } });
+    }
+
+    const saveResult = await insertOnlyNewDb(scrapedRows, totalDuration, { recordMetadata: true });
+    const finalDuration = Math.round((Date.now() - startTime) / 1000);
+
+    console.log('[CRON] Done!', {
+      date: todayIST,
+      scraped: scrapedRows.length,
+      new_inserted: saveResult.new_rows,
+      already_existed: saveResult.skipped_rows,
+      duration: `${finalDuration}s`,
+    });
+
+    return NextResponse.json({
+      success: true,
+      stats: {
+        date: todayIST,
+        scraped: scrapedRows.length,
+        new: saveResult.new_rows,
+        skipped: saveResult.skipped_rows,
+        duration: finalDuration,
+      },
+    });
+
+  } catch (error: unknown) {
+    const errorDuration = Math.round((Date.now() - startTime) / 1000);
+    const msg = getErrorMessage(error);
+    console.error('[CRON] Fatal error:', msg);
+    await logScrapeError(error instanceof Error ? error : new Error(msg), errorDuration);
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
+
+  } finally {
+    isRunning = false;
   }
 }
