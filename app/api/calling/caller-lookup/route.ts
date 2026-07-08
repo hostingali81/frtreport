@@ -38,7 +38,7 @@ export async function GET(request: Request) {
         dataid,
         consumer_name,
         consumer_mobile,
-        closing_remarks,
+        consumer_remarks,
         complaint_number,
         complaint_type,
         complaint_sub_type,
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
         status,
         complaint_date
       `, { count: 'exact' })
-      .like('consumer_mobile', `%${key}`)
+      .in('consumer_mobile', [key, `91${key}`, `+91${key}`, `0${key}`])
       .gte('complaint_date', thirtyDaysAgo.toISOString())
       .order('complaint_date', { ascending: false })
       .limit(1);
@@ -59,7 +59,7 @@ export async function GET(request: Request) {
       dataid: c.dataid ?? 0,
       consumer_name: c.consumer_name ?? '',
       mobile: c.consumer_mobile ?? '',
-      remarks: c.closing_remarks ?? '',
+      remarks: c.consumer_remarks ?? '',
       complaint_number: c.complaint_number ?? null,
       complaint_type: c.complaint_type ?? null,
       complaint_sub_type: c.complaint_sub_type ?? null,

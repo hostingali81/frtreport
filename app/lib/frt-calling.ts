@@ -335,6 +335,7 @@ export async function saveContact(contact: ContactRecord): Promise<ContactRecord
             assigned_crew: contact.assigned_crew,
             crew_mobile: contact.crew_mobile,
             sub_station: contact.substation,
+            consumer_remarks: contact.remarks,
             status: lc.action_status,
             complaint_date: lc.complaint_date
         }, { onConflict: 'complaint_number' });
@@ -348,7 +349,7 @@ export async function getCachedContact(dataId: number): Promise<ContactRecord | 
     if (!supabase) return null;
     const { data, error } = await supabase
         .from('complaints')
-        .select('dataid, consumer_name, consumer_mobile, consumer_address, landmark, closing_remarks, sub_station, assigned_crew, crew_mobile')
+        .select('dataid, consumer_name, consumer_mobile, consumer_address, landmark, consumer_remarks, sub_station, assigned_crew, crew_mobile')
         .eq('dataid', dataId)
         .maybeSingle();
         
@@ -360,7 +361,7 @@ export async function getCachedContact(dataId: number): Promise<ContactRecord | 
         mobile: data.consumer_mobile,
         address: data.consumer_address,
         landmark: data.landmark,
-        remarks: data.closing_remarks,
+        remarks: data.consumer_remarks,
         substation: data.sub_station,
         assigned_crew: data.assigned_crew,
         crew_mobile: data.crew_mobile,
