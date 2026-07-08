@@ -310,16 +310,59 @@ export async function syncLiveComplaints(rows: ComplaintRecord[]): Promise<SyncR
 export async function saveContact(contact: ContactRecord): Promise<ContactRecord> {
     const supabase = getSupabaseClient();
     if (!supabase) throw new Error('Supabase is not configured');
+    
+    // Get the complaint_number associated with this dataid
+    const { data: lc, error: lcError } = await supabase
+        .from('live_complaints')
+        .select('*')
+        .eq('dataid', contact.dataid)
+        .maybeSingle();
+
+    if (!lc || lcError) {
+        throw new Error(`Cannot save contact: no live_complaint found for dataid ${contact.dataid}`);
+    }
+
+    // Upsert into main complaints table
     const { error } = await supabase
-        .from('complaint_contacts')
-        .upsert({ ...contact, fetched_at: new Date().toISOString() }, { onConflict: 'dataid' });
-    if (error) throw new Error(`complaint_contacts upsert failed: ${error.message}`);
+        .from('complaints')
+        .upsert({
+            complaint_number: lc.complaint_number,
+            dataid: contact.dataid,
+            consumer_name: contact.consumer_name,
+            consumer_mobile: contact.mobile,
+            consumer_address: contact.address,
+            landmark: contact.landmark,
+            assigned_crew: contact.assigned_crew,
+            crew_mobile: contact.crew_mobile,
+            sub_station: contact.substation,
+            status: lc.action_status,
+            complaint_date: lc.complaint_date
+        }, { onConflict: 'complaint_number' });
+
+    if (error) throw new Error(`complaints upsert failed: ${error.message}`);
     return contact;
 }
 
 export async function getCachedContact(dataId: number): Promise<ContactRecord | null> {
     const supabase = getSupabaseClient();
     if (!supabase) return null;
-    const { data } = await supabase.from('complaint_contacts').select('*').eq('dataid', dataId).maybeSingle();
-    return (data as ContactRecord) || null;
+    const { data, error } = await supabase
+        .from('complaints')
+        .select('dataid, consumer_name, consumer_mobile, consumer_address, landmark, closing_remarks, sub_station, assigned_crew, crew_mobile')
+        .eq('dataid', dataId)
+        .maybeSingle();
+        
+    if (error || !data) return null;
+    
+    return {
+        dataid: data.dataid,
+        consumer_name: data.consumer_name,
+        mobile: data.consumer_mobile,
+        address: data.consumer_address,
+        landmark: data.landmark,
+        remarks: data.closing_remarks,
+        substation: data.sub_station,
+        assigned_crew: data.assigned_crew,
+        crew_mobile: data.crew_mobile,
+    };
 }

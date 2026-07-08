@@ -28,65 +28,50 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: 'Invalid mobile number' }, { status: 400 });
     }
 
-    // Join complaint_contacts with live_complaints on dataid.
-    // Filter contacts whose mobile ends with the 10-digit key.
-    const { data, error } = await supabase
-      .from('complaint_contacts')
+    // Fetch complaints from the main complaints table for the last 30 days.
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const { data, count, error } = await supabase
+      .from('complaints')
       .select(`
         dataid,
         consumer_name,
-        mobile,
-        remarks,
-        live_complaints!inner (
-          complaint_number,
-          complaint_type,
-          complaint_sub_type,
-          area,
-          action_status,
-          complaint_date,
-          still_in_feed
-        )
-      `)
-      .like('mobile', `%${key}`)
-      .order('dataid', { ascending: false })
-      .limit(10);
+        consumer_mobile,
+        closing_remarks,
+        complaint_number,
+        complaint_type,
+        complaint_sub_type,
+        area_type,
+        status,
+        complaint_date
+      `, { count: 'exact' })
+      .like('consumer_mobile', `%${key}`)
+      .gte('complaint_date', thirtyDaysAgo.toISOString())
+      .order('complaint_date', { ascending: false })
+      .limit(1);
 
     if (error) throw new Error(error.message);
 
-    // Flatten the nested live_complaints object for easier mobile consumption.
-    const complaints = (data ?? []).flatMap(row => {
-      const lcArray = Array.isArray(row.live_complaints) 
-        ? row.live_complaints 
-        : (row.live_complaints ? [row.live_complaints] : [null]);
-        
-      return lcArray.map((lcRaw: any) => {
-        const lc = lcRaw as Record<string, unknown> | null;
-        return {
-          dataid: row.dataid,
-          consumer_name: row.consumer_name,
-          mobile: row.mobile,
-          remarks: row.remarks,
-          complaint_number: lc?.complaint_number ?? null,
-          complaint_type: lc?.complaint_type ?? null,
-          complaint_sub_type: lc?.complaint_sub_type ?? null,
-          area: lc?.area ?? null,
-          action_status: lc?.action_status ?? null,
-          complaint_date: lc?.complaint_date ?? null,
-          still_in_feed: lc?.still_in_feed ?? null,
-        };
-      });
-    });
-
-    // Sort by complaint_date descending (newest first).
-    complaints.sort((a, b) => {
-      const da = a.complaint_date ? new Date(a.complaint_date as string).getTime() : 0;
-      const db = b.complaint_date ? new Date(b.complaint_date as string).getTime() : 0;
-      return db - da;
-    });
+    // Format the response to exactly match what the mobile app expects.
+    // The mobile app checks `last['still_in_feed'] == true` to show 'Pending' vs 'Resolved'.
+    const complaints = (data ?? []).map((c: any) => ({
+      dataid: c.dataid ?? 0,
+      consumer_name: c.consumer_name ?? '',
+      mobile: c.consumer_mobile ?? '',
+      remarks: c.closing_remarks ?? '',
+      complaint_number: c.complaint_number ?? null,
+      complaint_type: c.complaint_type ?? null,
+      complaint_sub_type: c.complaint_sub_type ?? null,
+      area: c.area_type ?? null,
+      action_status: c.status ?? null,
+      complaint_date: c.complaint_date ?? null,
+      still_in_feed: c.status !== 'Closed',
+    }));
 
     return NextResponse.json({
       success: true,
-      total_complaints: complaints.length,
+      total_complaints: count ?? 0,
       complaints,
     });
   } catch (error) {

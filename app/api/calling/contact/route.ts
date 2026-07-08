@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 // Lazily fetch one complaint's consumer contact (FormId 13340) on tap, caching it
-// in complaint_contacts. Pass ?refresh=1 to bypass the cache.
+// in the main complaints table. Pass ?refresh=1 to bypass the cache.
 export async function GET(request: Request) {
   try {
     const session = await getSession();
