@@ -1,0 +1,65 @@
+name: Today Fast Scrape (Every 5 Min)
+
+on:
+  schedule:
+    # Runs every 5 minutes, all day
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      max_retries:
+        description: 'Max session open attempts (default: 3)'
+        required: false
+        default: '3'
+
+# Separate concurrency group from full-scrape so both can run in parallel.
+# cancel-in-progress: if the previous 5-min run hasn't finished yet, cancel it
+# and start fresh — we always want the latest data for today.
+concurrency:
+  group: today-scrape
+  cancel-in-progress: true
+
+jobs:
+  today-scrape:
+    runs-on: ubuntu-latest
+    # Hard limit: must complete well within the 5-minute window.
+    timeout-minutes: 4
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        env:
+          # The API-replay scraper needs no browser; Chrome is only used on
+          # cache-miss (rare). Skip Chromium download to keep install fast.
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+          PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: 'true'
+        run: npm ci
+
+      - name: Run Today Scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+          FRT_USERNAME: ${{ secrets.FRT_USERNAME }}
+          FRT_PASSWORD: ${{ secrets.FRT_PASSWORD }}
+          FRT_LOGIN_TYPE: ${{ secrets.FRT_LOGIN_TYPE || vars.FRT_LOGIN_TYPE || '' }}
+          # Retry policy: fewer retries, shorter delays to stay inside 4-min timeout
+          TODAY_SCRAPE_MAX_RETRIES: ${{ github.event.inputs.max_retries || '3' }}
+          TODAY_SCRAPE_RETRY_DELAY_MS: '10000'
+          TODAY_SCRAPE_SESSION_RETRY_DELAY_MS: '30000'
+          # Conservative concurrency: today is a single day — only ~1 chunk.
+          # 2 concurrent API requests is plenty; 1 worker for DB ops.
+          FRT_API_CONCURRENCY: '2'
+          FRT_API_CHUNK_DAYS: '1'
+          SUPABASE_LOOKUP_CONCURRENCY: '4'
+          SUPABASE_UPSERT_CONCURRENCY: '2'
+          SUPABASE_UPSERT_BATCH_SIZE: '250'
+          SCRAPER_PROTOCOL_TIMEOUT_MS: '120000'
+          SCRAPER_LOAD_TIMEOUT_MS: '60000'
+        run: npx tsx scripts/today-scrape.ts

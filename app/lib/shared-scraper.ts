@@ -418,6 +418,152 @@ export async function saveToNewDb(
     return { new_rows: newRowsCount, updated_rows: updatedRowsCount };
 }
 
+// Insert-only variant for the fast 5-minute today-scraper.
+// Unlike saveToNewDb(), this function:
+//   - Does NOT update any existing rows (no upsert on conflicts)
+//   - Does NOT check content_hash — if complaint_number exists, skip it entirely
+//   - Uses ignoreDuplicates:true as a DB-level safety net
+// This keeps the today-scraper lean: only new complaints hit the DB,
+// no index churn from re-writing unchanged rows.
+export async function insertOnlyNewDb(
+    rows: any[],
+    scrapeDuration: number,
+    options: { recordMetadata?: boolean } = {}
+) {
+    if (!supabase || !rows.length) return { new_rows: 0, skipped_rows: 0 };
+
+    // Deduplicate input rows by Complaint Number (last one wins within the batch)
+    const validRowsMap = new Map<string, any>();
+    for (const r of rows) {
+        const cn = r['Complaint Number']?.trim();
+        if (cn) validRowsMap.set(cn, r);
+    }
+    const validRows = Array.from(validRowsMap.values());
+    if (!validRows.length) return { new_rows: 0, skipped_rows: 0 };
+
+    const complaintNumbers = validRows.map(r => r['Complaint Number'] as string);
+
+    // Batch lookup: which complaint_numbers already exist in DB?
+    const lookupBatchSize = 500;
+    const lookupBatches: string[][] = [];
+    for (let i = 0; i < complaintNumbers.length; i += lookupBatchSize) {
+        lookupBatches.push(complaintNumbers.slice(i, i + lookupBatchSize));
+    }
+
+    const lookupConcurrency = parsePositiveInteger(
+        process.env.SUPABASE_LOOKUP_CONCURRENCY || process.env.SUPABASE_SAVE_CONCURRENCY,
+        4,
+        8
+    );
+    const existingNumberBatches: string[][] = new Array(lookupBatches.length);
+
+    await runWithConcurrency(lookupBatches, lookupConcurrency, async (batch, batchIndex) => {
+        const { data, error } = await supabase!
+            .from('complaints')
+            .select('complaint_number')
+            .in('complaint_number', batch);
+
+        if (error) {
+            const start = batchIndex * lookupBatchSize + 1;
+            throw new Error(
+                `Complaint existence check failed (${start}-${start + batch.length - 1}): ${describeError(error)}`
+            );
+        }
+        existingNumberBatches[batchIndex] = (data || []).map(r => r.complaint_number as string);
+    });
+
+    const existingSet = new Set(existingNumberBatches.flat());
+
+    // Keep only rows whose complaint_number is not yet in DB
+    const newRows = validRows.filter(r => !existingSet.has(r['Complaint Number']));
+    const skippedCount = validRows.length - newRows.length;
+
+    if (skippedCount > 0) {
+        console.log(`[DB] Skipping ${skippedCount} already-existing complaint(s); inserting ${newRows.length} new.`);
+    }
+
+    if (!newRows.length) {
+        if (options.recordMetadata !== false) {
+            await logScrapeSuccess(0, 0, 0, scrapeDuration);
+        }
+        return { new_rows: 0, skipped_rows: skippedCount };
+    }
+
+    // Build full records for insert
+    const records = newRows.map(row => {
+        const complaintDate = parseDate(row['Complaint Date and Time'] || '');
+        const closedDate = parseDate(row['Closed Date'] || '');
+
+        const record = {
+            complaint_number: row['Complaint Number'],
+            complaint_date: toISTISOString(complaintDate),
+            division: row['Division'],
+            sub_division: row['Sub Division'],
+            sub_station: row['Sub Station'],
+            consumer_name: row['Consumer Name'],
+            consumer_mobile: row['Consumer Mobile'],
+            consumer_address: row['Consumer Address'],
+            complaint_type: row['Complaint Type'],
+            complaint_sub_type: row['Complaint Sub Type'],
+            status: row['Status'],
+            closed_status: row['Closed Status'],
+            closed_by: row['Closed By'],
+            closed_date: toISTISOString(closedDate),
+            closing_remarks: row['Closing Remarks'],
+            area_type: row['Area Type'],
+            feeder: row['Feeder'] || null,
+            raw_data: row
+        };
+
+        return { ...record, content_hash: createHash('md5').update(JSON.stringify(record)).digest('hex') };
+    });
+
+    // Insert in batches; ignoreDuplicates:true is a safety net at DB level
+    const insertBatchSize = parsePositiveInteger(process.env.SUPABASE_UPSERT_BATCH_SIZE, 250, 1000);
+    const batches: typeof records[] = [];
+    for (let i = 0; i < records.length; i += insertBatchSize) {
+        batches.push(records.slice(i, i + insertBatchSize));
+    }
+
+    const insertConcurrency = parsePositiveInteger(
+        process.env.SUPABASE_UPSERT_CONCURRENCY || process.env.SUPABASE_SAVE_CONCURRENCY,
+        3,
+        6
+    );
+
+    await runWithConcurrency(batches, insertConcurrency, async (batch, batchIndex) => {
+        let attempt = 0;
+
+        while (true) {
+            attempt += 1;
+            const { error } = await supabase!
+                .from('complaints')
+                .upsert(batch, { onConflict: 'complaint_number', ignoreDuplicates: true });
+
+            if (!error) break;
+
+            const description = describeError(error);
+            if (attempt >= 3 || !isTransientDbError(error)) {
+                throw new Error(
+                    `Failed to insert complaint batch ${batchIndex + 1}/${batches.length}: ${description}`
+                );
+            }
+
+            const delay = Math.min(2000 * attempt, 10000);
+            console.warn(
+                `Insert batch ${batchIndex + 1}/${batches.length} failed on attempt ${attempt}/3: ${description}. Retrying in ${delay}ms.`
+            );
+            await sleep(delay);
+        }
+    });
+
+    if (options.recordMetadata !== false) {
+        await logScrapeSuccess(newRows.length, newRows.length, 0, scrapeDuration);
+    }
+
+    return { new_rows: newRows.length, skipped_rows: skippedCount };
+}
+
 export async function logScrapeSuccess(totalRows: number, newRows: number, updatedRows: number, duration: number) {
     if (supabase) {
         await supabase.from('scrape_metadata').insert({
