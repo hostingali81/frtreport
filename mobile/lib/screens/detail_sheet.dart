@@ -219,6 +219,7 @@ class _DetailSheetState extends State<DetailSheet> {
         // Foreground service: keeps tracking alive during the call, shows the
         // info bubble, and brings the app back when the call ends.
         final infoJson = jsonEncode({
+          'dataid': widget.complaint.dataid,
           'complaint_number': widget.complaint.complaintNumber,
           'consumer_name': _contact?.consumerName ?? 'Consumer',
           'substation': widget.complaint.area,
@@ -404,10 +405,9 @@ class _DetailSheetState extends State<DetailSheet> {
       setState(() => _saveError = 'Select a call outcome');
       return;
     }
-    // Logging without having called from the app: allowed (consumer may have
-    // called back, phone issues, ...) but confirmed and audit-marked, so a
-    // desk-filled "No Answer" can't pass as a real attempt.
-    if (!_callTracked) {
+    // Incoming calls: the consumer called us, so _callTracked will always be
+    // false (the operator didn't dial from the app). Skip the warning.
+    if (!_callTracked && !widget.isIncomingCall) {
       Haptics.warn();
       final ok = await showDialog<bool>(
         context: context,
@@ -433,7 +433,10 @@ class _DetailSheetState extends State<DetailSheet> {
     //  - tracked, no log    -> "Call ended after 0:41" (talk vs ring unknown)
     //  - no call from app   -> "⚠ No call from app" (spot desk-filled logs)
     final String prefix;
-    if (!_callTracked) {
+    if (widget.isIncomingCall) {
+      // Consumer called us — duration tracking is irrelevant here.
+      prefix = '📞 Incoming call';
+    } else if (!_callTracked) {
       prefix = '⚠ No call from app';
     } else if (_exact && !_connected) {
       prefix = 'Rang ${_fmtMs(_wallDuration ?? Duration.zero)} · not picked';

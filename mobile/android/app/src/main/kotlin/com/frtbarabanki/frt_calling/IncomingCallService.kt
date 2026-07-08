@@ -19,18 +19,26 @@ import androidx.core.app.NotificationCompat
 
 class IncomingCallService : Service() {
     companion object {
-        private const val EXTRA_INFO = "info"
-        private const val NOTIF_ID = 43
+        private const val EXTRA_INFO   = "info"
+        private const val EXTRA_LAUNCH = "launch_app"
+        private const val NOTIF_ID     = 43
 
         fun start(ctx: Context, info: String) {
             val i = Intent(ctx, IncomingCallService::class.java).putExtra(EXTRA_INFO, info)
             if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
         }
 
-        fun stop(ctx: Context, dataId: String?) {
+        /**
+         * Stop the overlay and, when [launchApp] is true, bring MainActivity
+         * to the foreground so the operator can log the call.
+         * The dataid is no longer passed here — it was already written to the
+         * PendingCallQueue (synchronously via .commit()) in IncomingCallReceiver
+         * before this method is called, so Flutter will see it on resume.
+         */
+        fun stop(ctx: Context, launchApp: Boolean = false) {
             val i = Intent(ctx, IncomingCallService::class.java)
             i.action = "STOP_AND_LAUNCH"
-            i.putExtra("dataid", dataId)
+            i.putExtra(EXTRA_LAUNCH, launchApp)
             try {
                 if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
             } catch (e: Exception) {
@@ -45,13 +53,15 @@ class IncomingCallService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "STOP_AND_LAUNCH") {
-            val dataId = intent.getStringExtra("dataid")
-            if (dataId != null) {
-                val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                prefs.edit().putString("flutter.pending_incoming_call_dataid", dataId).apply()
+            // The dataid was already written to PendingCallQueue (synchronously)
+            // in IncomingCallReceiver before this service was started, so we
+            // only need to bring the app to the foreground here.
+            if (intent.getBooleanExtra(EXTRA_LAUNCH, false)) {
                 try {
                     startActivity(Intent(this, MainActivity::class.java).apply {
-                        this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                        this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                     })
                 } catch (e: Exception) {}
             }

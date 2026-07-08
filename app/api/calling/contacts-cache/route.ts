@@ -14,25 +14,26 @@ export async function GET() {
     const supabase = getSupabaseClient();
     if (!supabase) return NextResponse.json({ success: false, error: 'Supabase not configured' }, { status: 500 });
 
-    // Fetch the most recent 1000 contacts, joining with live_complaints to get base info.
-    // This allows the mobile app to cache caller IDs for recent complaints, even if closed.
+    // Fetch the most recent 1000 contacts from the optimized complaints table.
+    // The mobile app caches these to show Caller ID for known complaints.
     const { data: contacts, error } = await supabase
-      .from('complaint_contacts')
-      .select('dataid, mobile, consumer_name, remarks, live_complaints ( complaint_number, complaint_sub_type, area )')
-      .order('fetched_at', { ascending: false })
+      .from('complaints')
+      .select('dataid, consumer_mobile, consumer_name, consumer_remarks, complaint_number, complaint_sub_type, sub_station')
+      .not('consumer_mobile', 'is', null)
+      .order('complaint_date', { ascending: false })
       .limit(1000);
 
     if (error) throw new Error(error.message);
 
-    // Flatten the joined data to make it easier for the mobile app to consume
+    // Flatten/map to the format expected by the mobile app
     const flattened = (contacts || []).map((c: any) => ({
       dataid: c.dataid,
-      mobile: c.mobile,
+      mobile: c.consumer_mobile,
       consumer_name: c.consumer_name,
-      remarks: c.remarks,
-      complaint_number: c.live_complaints?.complaint_number,
-      complaint_sub_type: c.live_complaints?.complaint_sub_type,
-      area: c.live_complaints?.area,
+      remarks: c.consumer_remarks,
+      complaint_number: c.complaint_number,
+      complaint_sub_type: c.complaint_sub_type,
+      area: c.sub_station,
     }));
 
     return NextResponse.json({ success: true, count: flattened.length, contacts: flattened });

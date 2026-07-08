@@ -99,41 +99,66 @@ class _HomeShellState extends State<_HomeShell> with WidgetsBindingObserver {
 
   Future<void> _checkPendingIncomingCall() async {
     if (_openingPending) return;
-    final dataid = Store.getPendingIncomingDataId();
-    if (dataid != null) {
-      _openingPending = true;
-      await Store.clearPendingIncomingDataId();
-      try {
-        final cached = Store.cachedComplaints().firstWhere((c) => c['dataid'] == dataid, orElse: () => <String, dynamic>{});
-        Complaint? c;
-        if (cached.isNotEmpty) {
-          c = Complaint.fromJson(cached);
-        } else {
-          final all = await Api.complaintsRaw();
-          final server = all.firstWhere((x) => x['dataid'] == dataid, orElse: () => <String, dynamic>{});
-          if (server.isNotEmpty) {
-            c = Complaint.fromJson(server);
-          } else {
-            final allResolved = await Api.complaintsRaw(includeResolved: true);
-            final serverResolved = allResolved.firstWhere((x) => x['dataid'] == dataid, orElse: () => <String, dynamic>{});
-            if (serverResolved.isNotEmpty) c = Complaint.fromJson(serverResolved);
-          }
-        }
-        if (c == null) throw Exception('Not found');
 
-        if (!mounted) return;
+    // Collect from the new queue AND the old single-key (backward compat).
+    final ids = await Store.getPendingDataIds();
+    final oldId = await Store.getPendingIncomingDataId();
+    if (oldId != null) ids.add(oldId);
+
+    if (ids.isEmpty) return;
+
+    // Clear immediately so a second resume event doesn't re-open the same forms.
+    await Store.clearPendingDataIds();
+    await Store.clearPendingIncomingDataId();
+
+    _openingPending = true;
+    try {
+      for (final dataid in ids) {
+        final c = await _fetchComplaint(dataid);
+        if (c == null || !mounted) continue;
+
+        // Show the form and WAIT for the operator to close it before opening
+        // the next one — avoids confusing stacked modals.
         await showModalBottomSheet(
           context: context,
           isScrollControlled: true,
           useSafeArea: true,
           backgroundColor: AppColors.surface,
-          builder: (ctx) => DetailSheet(complaint: c!, isIncomingCall: true),
+          builder: (ctx) => DetailSheet(complaint: c, isIncomingCall: true),
         );
-      } catch (_) {
-        // Just ignore if it fails to load
-      } finally {
-        if (mounted) setState(() => _openingPending = false);
+
+        // Brief pause between multiple forms so the transition feels intentional.
+        if (ids.length > 1 && dataid != ids.last && mounted) {
+          await Future.delayed(const Duration(milliseconds: 350));
+        }
       }
+    } catch (_) {
+      // Silently ignore — never crash the home screen over a pending call.
+    } finally {
+      if (mounted) setState(() => _openingPending = false);
+    }
+  }
+
+  /// Fetches a Complaint by [dataid]: tries local cache first, then the active
+  /// API list, then the resolved list as a last resort.
+  Future<Complaint?> _fetchComplaint(int dataid) async {
+    try {
+      final cached = Store.cachedComplaints()
+          .firstWhere((c) => c['dataid'] == dataid, orElse: () => <String, dynamic>{});
+      if (cached.isNotEmpty) return Complaint.fromJson(cached);
+
+      final all = await Api.complaintsRaw();
+      final server = all.firstWhere((x) => x['dataid'] == dataid, orElse: () => <String, dynamic>{});
+      if (server.isNotEmpty) return Complaint.fromJson(server);
+
+      // Resolved complaints are not in the normal list — try once more.
+      final allResolved = await Api.complaintsRaw(includeResolved: true);
+      final resolved = allResolved.firstWhere((x) => x['dataid'] == dataid, orElse: () => <String, dynamic>{});
+      if (resolved.isNotEmpty) return Complaint.fromJson(resolved);
+
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 

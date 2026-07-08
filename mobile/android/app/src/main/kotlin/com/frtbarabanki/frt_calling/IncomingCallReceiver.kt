@@ -8,11 +8,17 @@ import org.json.JSONObject
 
 class IncomingCallReceiver : BroadcastReceiver() {
     companion object {
-        var activeDataId: String? = null
         // Guard: only handle IDLE if we actually saw a RINGING event first.
         // Without this, every outgoing call's IDLE also triggers the receiver
         // and launches the app with no tracking context → "fake" blank log entry.
-        private var sawRinging = false
+        // We use a counter instead of a boolean so concurrent calls don't prematurely
+        // block subsequent IDLE events.
+        private var ringingCount = 0
+
+        // Stack of dataids for currently ringing/active incoming calls.
+        // Uses a list so that back-to-back concurrent calls (call waiting)
+        // don't overwrite each other.
+        private val activeDataIds = java.util.ArrayDeque<String>()
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -22,7 +28,7 @@ class IncomingCallReceiver : BroadcastReceiver() {
         val incomingNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
 
         if (state == TelephonyManager.EXTRA_STATE_RINGING && incomingNumber != null) {
-            sawRinging = true
+            ringingCount++
             val cleanNumber = incomingNumber.replace(Regex("\\D"), "")
             if (cleanNumber.isEmpty()) return
             val key = if (cleanNumber.length > 10) cleanNumber.substring(cleanNumber.length - 10) else cleanNumber
@@ -41,26 +47,43 @@ class IncomingCallReceiver : BroadcastReceiver() {
                     defaultObj.put("total_complaints", 0)
                     defaultObj.toString()
                 }
-                
+
                 try {
                     val infoObj = JSONObject(info)
-                    activeDataId = infoObj.optString("dataid", null)
+                    // optString can return the literal string "null" when the JSON
+                    // value is a JSON null — guard against that with takeIf.
+                    val parsedDataId = infoObj.optString("dataid", "")
+                        .takeIf { it.isNotEmpty() && it != "null" }
+                    if (parsedDataId != null) {
+                        activeDataIds.addLast(parsedDataId)
+                    }
                 } catch (e: Exception) {
-                    activeDataId = null
+                    // Ignore
                 }
                 // Match found or default created, start the overlay service
                 IncomingCallService.start(context, info)
             } catch (e: Exception) {
                 // Ignore parsing errors
             }
+
         } else if (state == TelephonyManager.EXTRA_STATE_IDLE) {
             // Only handle IDLE if we saw RINGING — this prevents outgoing-call
             // IDLE events from incorrectly launching the app with a blank form.
-            if (!sawRinging) return
-            sawRinging = false
-            // Call answered or missed/rejected, stop the overlay and launch app
-            IncomingCallService.stop(context, activeDataId)
-            activeDataId = null
+            if (ringingCount <= 0) return
+            ringingCount--
+
+            // Pop the most recent call's dataid from the stack
+            val dataId = if (activeDataIds.isNotEmpty()) activeDataIds.removeLast() else null
+
+            // Enqueue BEFORE stopping so the value is guaranteed on disk by the
+            // time Flutter's _checkPendingIncomingCall() runs on resume.
+            if (dataId != null) {
+                PendingCallQueue.enqueue(context, dataId)
+            }
+
+            // Stop the overlay bubble and, if we have a known consumer to log,
+            // bring the app to the foreground.
+            IncomingCallService.stop(context, launchApp = dataId != null)
         }
     }
 }

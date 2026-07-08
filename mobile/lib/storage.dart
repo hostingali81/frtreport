@@ -203,12 +203,38 @@ class Store {
     await _p?.setString('caller_id_map', jsonEncode(map));
   }
 
-  // --- Pending incoming call to automatically open ---
-  static int? getPendingIncomingDataId() {
+  // --- Pending incoming calls queue ---
+  //
+  // IncomingCallReceiver (Kotlin) appends dataid strings to
+  // "flutter.pending_call_queue" (a JSON array) via PendingCallQueue.enqueue().
+  // It uses .commit() (synchronous) so the value is on disk before the app
+  // is brought to the foreground. We call reload() here to make Flutter's
+  // in-memory cache pick up the natively-written value.
+
+  static Future<List<int>> getPendingDataIds() async {
+    await _p?.reload(); // flush native writes into Flutter's in-memory cache
+    final raw = _p?.getString('pending_call_queue') ?? '[]';
+    try {
+      final list = jsonDecode(raw) as List;
+      return list.map((e) => int.tryParse('$e')).whereType<int>().toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> clearPendingDataIds() async {
+    await _p?.remove('pending_call_queue');
+  }
+
+  // Backward-compat: old single-key written by pre-queue builds.
+  // Kept so the first launch after an update doesn't silently drop a pending
+  // call that was queued by the old Kotlin code before the APK was updated.
+  static Future<int?> getPendingIncomingDataId() async {
+    await _p?.reload();
     final raw = _p?.getString('pending_incoming_call_dataid');
     return raw != null ? int.tryParse(raw) : null;
   }
-  
+
   static Future<void> clearPendingIncomingDataId() async {
     await _p?.remove('pending_incoming_call_dataid');
   }

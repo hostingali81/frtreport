@@ -123,26 +123,31 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   }
 
   Future<void> _fetchCallerIdCache() async {
+    // NOTE: To show Caller ID for RESOLVED/OLD complaints, the backend
+    // /api/calling/contacts-cache endpoint must be updated to also return
+    // recently-resolved complaints (e.g., closed in the last 30 days).
+    // The complaintsRaw(includeResolved: true) list does not carry mobile
+    // numbers (Contact is a separate table), so Flutter alone cannot fix this.
     try {
       final cache = await Api.callerIdCache();
       final Map<String, String> itemsToSave = {};
-      
+
       for (final c in cache) {
-        if (c['mobile'] != null && c['mobile'].isNotEmpty) {
-          final baseInfo = {
-            'complaint_number': c['complaint_number'] ?? 'Complaint',
-            'consumer_name': c['consumer_name'] ?? 'Consumer',
-            'substation': c['area'] ?? 'Unknown',
-            'dataid': c['dataid'],
-            'complaint_sub_type': c['complaint_sub_type'] ?? '',
-            'remarks': c['remarks'] ?? '',
-            'total_complaints': 0, // Simplified for cache
-            'last_status': '',
-          };
-          itemsToSave[c['mobile']] = jsonEncode(baseInfo);
-        }
+        final mobile = (c['mobile'] ?? '').toString();
+        if (mobile.isEmpty) continue;
+        final baseInfo = {
+          'complaint_number': c['complaint_number'] ?? 'Complaint',
+          'consumer_name': c['consumer_name'] ?? 'Consumer',
+          'substation': c['area'] ?? 'Unknown',
+          'dataid': c['dataid'],
+          'complaint_sub_type': c['complaint_sub_type'] ?? '',
+          'remarks': c['remarks'] ?? '',
+          'total_complaints': 0,
+          'last_status': 'Pending', // contacts-cache only returns active ones
+        };
+        itemsToSave[mobile] = jsonEncode(baseInfo);
       }
-      
+
       if (itemsToSave.isNotEmpty) {
         await Store.saveCallerIds(itemsToSave);
       }
