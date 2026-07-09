@@ -87,6 +87,7 @@ class _DetailSheetState extends State<DetailSheet> {
 
   DateTime _now = DateTime.now();
   Timer? _tick;
+  Timer? _claimHeartbeat;
 
   String _fmtMs(Duration d) => '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
 
@@ -100,6 +101,12 @@ class _DetailSheetState extends State<DetailSheet> {
     });
     _fetchContact();
     _claim();
+    // Keep the claim fresh while this sheet is open so a long call doesn't let
+    // it expire (server treats a claim as stale after ~3 min) — otherwise other
+    // operators would stop seeing "on call" mid-conversation and might dial too.
+    _claimHeartbeat = Timer.periodic(const Duration(seconds: 90), (_) {
+      if (!_logged) Api.claim(widget.complaint.dataid);
+    });
     if (widget.complaint.callCount > 0) _fetchHistory();
     _setupIncomingCallDefault();
   }
@@ -116,6 +123,7 @@ class _DetailSheetState extends State<DetailSheet> {
   @override
   void dispose() {
     _tick?.cancel();
+    _claimHeartbeat?.cancel();
     _tracker.stop();
     _speech.cancel();
     _notes.dispose();

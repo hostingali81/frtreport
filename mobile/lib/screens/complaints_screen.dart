@@ -39,6 +39,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   Timer? _tick;
   Timer? _poll;
   bool _resyncing = false;
+  DateTime? _lastCallerIdFetch;
 
   @override
   void initState() {
@@ -50,7 +51,11 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
       // while there's nothing to count down.
       if (mounted && _all.isNotEmpty) setState(() => _now = DateTime.now());
     });
-    _poll = Timer.periodic(const Duration(minutes: 3), (_) => _load());
+    // Poll often so a colleague's "on call" claim (and new complaints) show up
+    // within seconds — the claim only lives ~3 min, so a 3-min poll used to miss
+    // it entirely. The heavy caller-ID cache fetch inside _load is throttled
+    // separately (see _fetchCallerIdCache), so this stays cheap.
+    _poll = Timer.periodic(const Duration(seconds: 30), (_) => _load());
   }
 
   @override
@@ -125,6 +130,12 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   }
 
   Future<void> _fetchCallerIdCache() async {
+    // This pulls 1000 rows, so throttle it — the 30s list poll must not refetch
+    // it every time. Fresh enough for caller ID at every few minutes.
+    if (_lastCallerIdFetch != null && DateTime.now().difference(_lastCallerIdFetch!) < const Duration(minutes: 5)) {
+      return;
+    }
+    _lastCallerIdFetch = DateTime.now();
     // contacts-cache returns the newest 1000 complaints with a mobile number
     // (active AND recently-closed) with their status + date, so the native
     // caller-ID banner can say "2 complaints · Resolved on 2026-07-08".
@@ -506,10 +517,11 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
     ).then((res) {
       if (!mounted) return;
       setState(() {}); // refresh the pending-logs banner
+      // Reload right away so the claim we just released (and any new log) is
+      // reflected without waiting for the next poll.
+      _load();
       if (res == 'logged') {
-        // Auto-refresh: reload the list right away, then run the same FRT
-        // sync as the Refresh button (spinner shows in the app bar).
-        _load();
+        // Also run the same FRT sync as the Refresh button (spinner in app bar).
         _fetchLatest();
       }
     });
@@ -540,6 +552,31 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                 child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // A colleague is on this consumer right now — prominent so
+                        // nobody dials a second time.
+                        if (c.activeClaim)
+                          Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: AppColors.warningBg,
+                              borderRadius: BorderRadius.circular(7),
+                              border: Border.all(color: const Color(0xFFFDE68A)),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Icon(Icons.phone_in_talk, size: 13, color: AppColors.warning),
+                              const SizedBox(width: 5),
+                              Flexible(
+                                child: Text(
+                                  '${c.claimedByName ?? 'Someone'} is on this call',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.warning),
+                                ),
+                              ),
+                            ]),
+                          ),
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -601,12 +638,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                                       Text('${c.callCount > 1 ? '${c.callCount}× · ' : ''}${c.lastCallStatus ?? 'Called'}', style: const TextStyle(fontSize: 11, color: AppColors.success, fontWeight: FontWeight.w600)),
                                     ]),
                                   ),
-                                if (c.activeClaim)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: Pill('On call · ${c.claimedByName}', fg: AppColors.warning, bg: AppColors.warningBg),
-                                  ),
-                              ],
+],
                             ),
                           ],
                         ),

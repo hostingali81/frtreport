@@ -219,6 +219,24 @@ class Store {
     await _p?.setString('caller_id_map', jsonEncode(map));
   }
 
+  // Find cached caller-ID info by dataid. The map is keyed by phone number, so
+  // we scan the values — used as an instant, offline fallback to open the
+  // incoming-call form (the overlay just showed this same info).
+  static Map<String, dynamic>? callerInfoForDataId(int dataid) {
+    final raw = _p?.getString('caller_id_map');
+    if (raw == null) return null;
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      for (final v in map.values) {
+        try {
+          final info = jsonDecode('$v') as Map<String, dynamic>;
+          if (int.tryParse('${info['dataid']}') == dataid) return info;
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return null;
+  }
+
   // --- Pending incoming calls queue ---
   //
   // IncomingCallReceiver (Kotlin) appends {"dataid": ..., "answered": ...}

@@ -147,25 +147,32 @@ class _HomeShellState extends State<_HomeShell> with WidgetsBindingObserver {
     }
   }
 
-  /// Fetches a Complaint by [dataid]: tries local cache first, then the active
-  /// API list, then the resolved list as a last resort.
+  /// Fetches a Complaint by [dataid] as fast as possible so the incoming-call
+  /// form opens without a lag: local cache (instant) → one single-row API
+  /// lookup (fast) → the caller-ID cache (instant, offline fallback). The old
+  /// path pulled the whole grid plus the 1000-row resolved list, which took
+  /// several seconds — long enough that the form felt late after the call.
   Future<Complaint?> _fetchComplaint(int dataid) async {
+    // 1. Local cache — instant.
+    final cached = Store.cachedComplaints()
+        .firstWhere((c) => c['dataid'] == dataid, orElse: () => <String, dynamic>{});
+    if (cached.isNotEmpty) return Complaint.fromJson(cached);
+
+    // 2. Single-row lookup — one indexed query (handles resolved complaints too).
     try {
-      final cached = Store.cachedComplaints()
-          .firstWhere((c) => c['dataid'] == dataid, orElse: () => <String, dynamic>{});
-      if (cached.isNotEmpty) return Complaint.fromJson(cached);
-
-      final all = await Api.complaintsRaw();
-      final server = all.firstWhere((x) => x['dataid'] == dataid, orElse: () => <String, dynamic>{});
-      if (server.isNotEmpty) return Complaint.fromJson(server);
-
-      // Resolved complaints are not in the normal list — try once more.
-      final allResolved = await Api.complaintsRaw(includeResolved: true);
-      final resolved = allResolved.firstWhere((x) => x['dataid'] == dataid, orElse: () => <String, dynamic>{});
-      if (resolved.isNotEmpty) return Complaint.fromJson(resolved);
-
-      return null;
+      return await Api.complaintById(dataid);
     } catch (_) {
+      // 3. Offline / not found — build a minimal complaint from the caller-ID
+      //    info the overlay just used, so the form still opens instantly.
+      final info = Store.callerInfoForDataId(dataid);
+      if (info != null) {
+        return Complaint.fromJson({
+          'dataid': dataid,
+          'complaint_number': info['complaint_number'],
+          'complaint_sub_type': info['complaint_sub_type'],
+          'area': info['substation'],
+        });
+      }
       return null;
     }
   }

@@ -116,6 +116,11 @@ class Api {
   static Future<Contact> contact(int dataid) async =>
       Contact.fromJson((await _get('/api/calling/contact?dataid=$dataid'))['contact']);
 
+  // One complaint by dataid — a single fast lookup for the incoming-call flow
+  // (vs pulling the whole grid). Works for resolved complaints too.
+  static Future<Complaint> complaintById(int dataid) async =>
+      Complaint.fromJson((await _get('/api/calling/complaint?dataid=$dataid'))['complaint']);
+
   static Future<void> log({
     required int dataid,
     String? complaintNumber,
