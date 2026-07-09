@@ -42,7 +42,7 @@ export async function GET(request: Request) {
         complaint_number,
         complaint_type,
         complaint_sub_type,
-        area_type,
+        sub_station,
         status,
         complaint_date
       `, { count: 'exact' })
@@ -55,6 +55,8 @@ export async function GET(request: Request) {
 
     // Format the response to exactly match what the mobile app expects.
     // The mobile app checks `last['still_in_feed'] == true` to show 'Pending' vs 'Resolved'.
+    // The scraper stores closed complaints as status = 'Complaint Closed'; match
+    // any "closed" wording so resolved history reads as Resolved.
     const complaints = (data ?? []).map((c: any) => ({
       dataid: c.dataid ?? 0,
       consumer_name: c.consumer_name ?? '',
@@ -63,10 +65,10 @@ export async function GET(request: Request) {
       complaint_number: c.complaint_number ?? null,
       complaint_type: c.complaint_type ?? null,
       complaint_sub_type: c.complaint_sub_type ?? null,
-      area: c.area_type ?? null,
+      area: c.sub_station ?? null,
       action_status: c.status ?? null,
       complaint_date: c.complaint_date ?? null,
-      still_in_feed: c.status !== 'Closed',
+      still_in_feed: !String(c.status ?? '').toLowerCase().includes('closed'),
     }));
 
     return NextResponse.json({

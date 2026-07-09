@@ -8,7 +8,15 @@ import 'models.dart';
 
 class ApiException implements Exception {
   final String message;
-  ApiException(this.message);
+  final int? statusCode;
+  ApiException(this.message, {this.statusCode});
+
+  // Worth retrying later: server-side hiccups (5xx), auth that may recover
+  // after a token refresh (401), timeouts and rate limits. Everything else
+  // (validation 4xx) is a permanent rejection.
+  bool get retryable =>
+      statusCode == null || statusCode! >= 500 || statusCode == 401 || statusCode == 408 || statusCode == 429;
+
   @override
   String toString() => message;
 }
@@ -17,20 +25,27 @@ class ApiException implements Exception {
 // access token as a Bearer header (the backend's getSession() accepts it).
 class Api {
   static SupabaseClient get _sb => Supabase.instance.client;
+  static DateTime? _lastRefreshAttempt;
 
   static Future<Map<String, String>> _headers() async {
     var session = _sb.auth.currentSession;
     // On a cold start the restored access token can already be expired while
     // the SDK is still refreshing it in the background; sending it as-is 401s
     // the first request (seen on the Reports tab, which loads immediately).
-    // Refresh proactively when it's expired or about to expire.
+    // Refresh proactively when it's expired or about to expire. Throttled to
+    // once per 30s so a device with a fast-running clock (token "always about
+    // to expire") doesn't hammer Supabase on every request.
     final exp = session?.expiresAt;
     if (session != null && exp != null && DateTime.now().millisecondsSinceEpoch ~/ 1000 >= exp - 30) {
-      try {
-        await _sb.auth.refreshSession();
-        session = _sb.auth.currentSession;
-      } catch (_) {
-        // Offline — send the stale token; the caller surfaces the error.
+      final last = _lastRefreshAttempt;
+      if (last == null || DateTime.now().difference(last) > const Duration(seconds: 30)) {
+        _lastRefreshAttempt = DateTime.now();
+        try {
+          await _sb.auth.refreshSession();
+          session = _sb.auth.currentSession;
+        } catch (_) {
+          // Offline — send the stale token; the caller surfaces the error.
+        }
       }
     }
     final token = session?.accessToken;
@@ -64,11 +79,13 @@ class Api {
     }
     if (body is Map<String, dynamic>) {
       if (body['success'] == false || r.statusCode >= 400) {
-        throw ApiException(body['error']?.toString() ?? 'HTTP ${r.statusCode}');
+        throw ApiException(body['error']?.toString() ?? 'HTTP ${r.statusCode}', statusCode: r.statusCode);
       }
       return body;
     }
-    throw ApiException('HTTP ${r.statusCode}');
+    // Non-JSON body (Vercel error page, proxy timeout, …) — keep the status so
+    // the offline outbox can tell a transient 5xx from a permanent rejection.
+    throw ApiException('HTTP ${r.statusCode}', statusCode: r.statusCode);
   }
 
   static Future<Map<String, dynamic>> _get(String path) =>

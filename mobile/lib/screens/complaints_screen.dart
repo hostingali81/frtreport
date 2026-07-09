@@ -46,7 +46,9 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
     _load();
     _onboard();
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _now = DateTime.now());
+      // The tick only feeds the SLA countdowns — skip the whole-screen rebuild
+      // while there's nothing to count down.
+      if (mounted && _all.isNotEmpty) setState(() => _now = DateTime.now());
     });
     _poll = Timer.periodic(const Duration(minutes: 3), (_) => _load());
   }
@@ -123,30 +125,37 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   }
 
   Future<void> _fetchCallerIdCache() async {
-    // NOTE: To show Caller ID for RESOLVED/OLD complaints, the backend
-    // /api/calling/contacts-cache endpoint must be updated to also return
-    // recently-resolved complaints (e.g., closed in the last 30 days).
-    // The complaintsRaw(includeResolved: true) list does not carry mobile
-    // numbers (Contact is a separate table), so Flutter alone cannot fix this.
+    // contacts-cache returns the newest 1000 complaints with a mobile number
+    // (active AND recently-closed) with their status + date, so the native
+    // caller-ID banner can say "2 complaints · Resolved on 2026-07-08".
     try {
       final cache = await Api.callerIdCache();
-      final Map<String, String> itemsToSave = {};
 
+      // Group by mobile: the newest complaint (endpoint is newest-first) is
+      // shown, the group size becomes the complaint count.
+      final Map<String, List<Map<String, dynamic>>> byMobile = {};
       for (final c in cache) {
         final mobile = (c['mobile'] ?? '').toString();
         if (mobile.isEmpty) continue;
-        final baseInfo = {
-          'complaint_number': c['complaint_number'] ?? 'Complaint',
-          'consumer_name': c['consumer_name'] ?? 'Consumer',
-          'substation': c['area'] ?? 'Unknown',
-          'dataid': c['dataid'],
-          'complaint_sub_type': c['complaint_sub_type'] ?? '',
-          'remarks': c['remarks'] ?? '',
-          'total_complaints': 0,
-          'last_status': 'Pending', // contacts-cache only returns active ones
-        };
-        itemsToSave[mobile] = jsonEncode(baseInfo);
+        byMobile.putIfAbsent(mobile, () => []).add(c);
       }
+
+      final Map<String, String> itemsToSave = {};
+      byMobile.forEach((mobile, rows) {
+        final latest = rows.first;
+        final closed = ('${latest['status'] ?? ''}').toLowerCase().contains('closed');
+        itemsToSave[mobile] = jsonEncode({
+          'complaint_number': latest['complaint_number'] ?? 'Complaint',
+          'consumer_name': latest['consumer_name'] ?? 'Consumer',
+          'substation': latest['area'] ?? 'Unknown',
+          'dataid': latest['dataid'],
+          'complaint_sub_type': latest['complaint_sub_type'] ?? '',
+          'remarks': latest['remarks'] ?? '',
+          'total_complaints': rows.length,
+          'last_status': closed ? 'Resolved' : 'Pending',
+          'last_date': latest['complaint_date'] ?? '',
+        });
+      });
 
       if (itemsToSave.isNotEmpty) {
         await Store.saveCallerIds(itemsToSave);

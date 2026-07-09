@@ -15,13 +15,17 @@ class ReportsScreen extends StatefulWidget {
   State<ReportsScreen> createState() => _ReportsScreenState();
 }
 
+// The backend interprets from/to as IST dates, so compute "today" in IST
+// regardless of the device timezone (wall-clock shift; only the y/m/d matter).
+DateTime _istNow() => DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+
 class _ReportsScreenState extends State<ReportsScreen> {
   Map<String, dynamic>? _data;
   bool _loading = true;
   String? _error;
   // Default range: today only (pick other dates from the two buttons).
-  DateTime _from = DateTime.now();
-  DateTime _to = DateTime.now();
+  DateTime _from = _istNow();
+  DateTime _to = _istNow();
   int _recentFilter = 0; // 0=All, 1=Outgoing, 2=Incoming
 
   final _fmt = DateFormat('yyyy-MM-dd');
@@ -56,7 +60,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Future<void> _pick(bool isFrom) async {
     Haptics.tap();
-    final picked = await showDatePicker(context: context, initialDate: isFrom ? _from : _to, firstDate: DateTime(2025), lastDate: DateTime.now());
+    final picked = await showDatePicker(context: context, initialDate: isFrom ? _from : _to, firstDate: DateTime(2025), lastDate: _istNow());
     if (picked == null) return;
     setState(() => isFrom ? _from = picked : _to = picked);
     _load();
@@ -105,7 +109,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     Expanded(
                       child: _stat('$total', 'Total calls', AppColors.ink, Icons.call,
                           sub: _fmt.format(_from) == _fmt.format(_to)
-                              ? (_fmt.format(_from) == _fmt.format(DateTime.now()) ? 'Today' : _fmtNice.format(_from))
+                              ? (_fmt.format(_from) == _fmt.format(_istNow()) ? 'Today' : _fmtNice.format(_from))
                               : '${_fmtNice.format(_from)} – ${_fmtNice.format(_to)}'),
                     ),
                     Gap.sm,

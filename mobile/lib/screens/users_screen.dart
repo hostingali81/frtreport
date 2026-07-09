@@ -23,6 +23,7 @@ class _UsersScreenState extends State<UsersScreen> {
   final _password = TextEditingController();
   String _role = 'operator';
   bool _creating = false;
+  bool _pwVisible = false;
 
   @override
   void initState() {
@@ -129,7 +130,18 @@ class _UsersScreenState extends State<UsersScreen> {
                   Gap.sm,
                   TextField(controller: _name, decoration: const InputDecoration(labelText: 'Display name', prefixIcon: Icon(Icons.badge_outlined, size: 20))),
                   Gap.sm,
-                  TextField(controller: _password, decoration: const InputDecoration(labelText: 'Password (min 6)', prefixIcon: Icon(Icons.lock_outline, size: 20))),
+                  TextField(
+                    controller: _password,
+                    obscureText: !_pwVisible,
+                    decoration: InputDecoration(
+                      labelText: 'Password (min 6)',
+                      prefixIcon: const Icon(Icons.lock_outline, size: 20),
+                      suffixIcon: IconButton(
+                        icon: Icon(_pwVisible ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 20, color: AppColors.muted),
+                        onPressed: () => setState(() => _pwVisible = !_pwVisible),
+                      ),
+                    ),
+                  ),
                   Gap.sm,
                   DropdownButtonFormField<String>(
                     initialValue: _role,

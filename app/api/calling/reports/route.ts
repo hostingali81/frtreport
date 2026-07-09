@@ -94,7 +94,7 @@ export async function GET(request: Request) {
     }
     if (firstCallByDataid.size) {
       const { data: comps } = await supabase
-        .from('live_complaints')
+        .from('complaints')
         .select('dataid, complaint_date')
         .in('dataid', Array.from(firstCallByDataid.keys()));
       const deltas: number[] = [];

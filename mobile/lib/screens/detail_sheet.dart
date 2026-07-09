@@ -44,7 +44,11 @@ class DetailSheet extends StatefulWidget {
   final Complaint complaint;
   final bool isIncomingCall;
 
-  const DetailSheet({super.key, required this.complaint, this.isIncomingCall = false});
+  /// For incoming calls: whether the native side saw the call get answered
+  /// (OFFHOOK). null = unknown (queued by an old app build).
+  final bool? incomingAnswered;
+
+  const DetailSheet({super.key, required this.complaint, this.isIncomingCall = false, this.incomingAnswered});
 
   @override
   State<DetailSheet> createState() => _DetailSheetState();
@@ -198,11 +202,15 @@ class _DetailSheetState extends State<DetailSheet> {
   }
 
   void _setupIncomingCallDefault() {
-    if (widget.isIncomingCall && mounted) {
-      setState(() {
-        _callStatus = 'Connected';
-        _connected = true;
-      });
+    if (!widget.isIncomingCall) return;
+    // Runs from initState (before the first build), so plain assignment is fine.
+    // A missed/declined incoming call must not default to "Connected".
+    if (widget.incomingAnswered == false) {
+      _callStatus = 'No Answer';
+      _connected = false;
+    } else {
+      _callStatus = 'Connected';
+      _connected = true;
     }
   }
 
@@ -435,7 +443,7 @@ class _DetailSheetState extends State<DetailSheet> {
     final String prefix;
     if (widget.isIncomingCall) {
       // Consumer called us — duration tracking is irrelevant here.
-      prefix = '📞 Incoming call';
+      prefix = widget.incomingAnswered == false ? '📞 Incoming call · missed' : '📞 Incoming call';
     } else if (!_callTracked) {
       prefix = '⚠ No call from app';
     } else if (_exact && !_connected) {
@@ -453,7 +461,12 @@ class _DetailSheetState extends State<DetailSheet> {
       'problem_category': _category,
       'notes': notes,
       'duration_seconds': _callTracked ? _callDuration?.inSeconds : null,
-      'connected': widget.isIncomingCall ? true : (_callTracked ? (_exact ? _connected : _callStatus == 'Connected') : (_callStatus == 'Connected')),
+      // Incoming: trust the native answered flag when we have it (a missed call
+      // is never "connected", whatever status the operator picks); otherwise
+      // fall back to the chosen status. Outgoing: exact call-log verdict wins.
+      'connected': widget.isIncomingCall
+          ? (widget.incomingAnswered ?? (_callStatus == 'Connected'))
+          : (_callTracked ? (_exact ? _connected : _callStatus == 'Connected') : (_callStatus == 'Connected')),
       'is_incoming': widget.isIncomingCall,
     };
     try {

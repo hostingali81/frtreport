@@ -72,6 +72,12 @@ async function main() {
   if (!m) throw new Error('Could not parse `version: X.Y.Z+N` from mobile/pubspec.yaml');
   const [, version, buildStr] = m;
   const build = Number(buildStr);
+  // Hard limit from `flutter build --split-per-abi` (versionCode = abiOffset*1000
+  // + build) AND the app's Updater.currentBuild() (`raw % 1000`). A build >= 1000
+  // would collide across ABIs and break update detection on installed devices.
+  if (build >= 1000) {
+    throw new Error(`Build number ${build} >= 1000 breaks the split-per-abi versionCode scheme — reset the build counter (bump the version instead).`);
+  }
 
   const urls: Record<string, string> = {};
   for (const abi of ABIS) {

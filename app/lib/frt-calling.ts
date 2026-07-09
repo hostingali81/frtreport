@@ -3,8 +3,9 @@
  *
  * Fetches the live complaints grid (FormId 13339) and complaint detail
  * (FormId 13340) over plain HTTP by replaying a captured session, and upserts
- * into Supabase (live_complaints / complaint_contacts). The browser is only used
- * to (re)capture the session when it expires. See PROJECT-PLAN.md.
+ * into Supabase (queue state -> live_complaints, descriptive/contact data ->
+ * complaints; the API reads the joined live_complaints_full view). The browser
+ * is only used to (re)capture the session when it expires. See PROJECT-PLAN.md.
  *
  * Request/response shapes were confirmed in Phase 0 (scripts/verify-calling-forms.ts):
  *   list   -> <Rowset><DATAID>..</DATAID><COMPLAINTS>..</COMPLAINTS>...</Rowset>
@@ -278,7 +279,38 @@ export async function syncLiveComplaints(rows: ComplaintRecord[]): Promise<SyncR
     // occurrence of each.
     const byDataid = new Map<number, ComplaintRecord>();
     for (const r of rows) byDataid.set(r.dataid, r);
-    const payload = Array.from(byDataid.values()).map(r => ({ ...r, last_synced_at: now, still_in_feed: true }));
+
+    // Descriptive data lives only in the main complaints table; the API joins it
+    // back via the live_complaints_full view. The RPC coalesces per column so a
+    // transiently blank grid cell never NULLs out scraper-written data.
+    const meta = Array.from(byDataid.values())
+        .filter(r => r.complaint_number)
+        .map(r => ({
+            complaint_number: r.complaint_number,
+            dataid: r.dataid,
+            complaint_type: r.complaint_type,
+            complaint_sub_type: r.complaint_sub_type,
+            sub_station: r.area,
+            area_type: r.area_type,
+            feeder: r.feeder,
+            complaint_date: r.complaint_date
+        }));
+    if (meta.length) {
+        const { error } = await supabase.rpc('upsert_live_complaint_meta', { rows: meta });
+        if (error) throw new Error(`complaints meta upsert failed: ${error.message}`);
+    }
+
+    // live_complaints keeps only queue state (+ district, which complaints
+    // doesn't have a column for).
+    const payload = Array.from(byDataid.values()).map(r => ({
+        dataid: r.dataid,
+        complaint_number: r.complaint_number,
+        fault_id: r.fault_id,
+        district: r.district,
+        action_status: r.action_status,
+        last_synced_at: now,
+        still_in_feed: true
+    }));
 
     if (payload.length) {
         for (let i = 0; i < payload.length; i += 500) {
@@ -314,7 +346,7 @@ export async function saveContact(contact: ContactRecord): Promise<ContactRecord
     // Get the complaint_number associated with this dataid
     const { data: lc, error: lcError } = await supabase
         .from('live_complaints')
-        .select('*')
+        .select('complaint_number')
         .eq('dataid', contact.dataid)
         .maybeSingle();
 
@@ -322,7 +354,8 @@ export async function saveContact(contact: ContactRecord): Promise<ContactRecord
         throw new Error(`Cannot save contact: no live_complaint found for dataid ${contact.dataid}`);
     }
 
-    // Upsert into main complaints table
+    // Upsert only the contact fields into the main complaints table; the
+    // descriptive/status columns are owned by the sync RPC and report scraper.
     const { error } = await supabase
         .from('complaints')
         .upsert({
@@ -335,9 +368,7 @@ export async function saveContact(contact: ContactRecord): Promise<ContactRecord
             assigned_crew: contact.assigned_crew,
             crew_mobile: contact.crew_mobile,
             sub_station: contact.substation,
-            consumer_remarks: contact.remarks,
-            status: lc.action_status,
-            complaint_date: lc.complaint_date
+            consumer_remarks: contact.remarks
         }, { onConflict: 'complaint_number' });
 
     if (error) throw new Error(`complaints upsert failed: ${error.message}`);

@@ -66,22 +66,29 @@ export async function POST(request: Request) {
     }
 
     const durationSeconds = Number(body.duration_seconds);
-    const { data, error } = await supabase
-      .from('call_logs')
-      .insert({
-        dataid,
-        complaint_number: body.complaint_number ?? null,
-        call_status: body.call_status,
-        problem_category: body.problem_category ?? null,
-        notes: body.notes ?? null,
-        duration_seconds: Number.isFinite(durationSeconds) && durationSeconds >= 0 ? Math.round(durationSeconds) : null,
-        connected: typeof body.connected === 'boolean' ? body.connected : null,
-        is_incoming: typeof body.is_incoming === 'boolean' ? body.is_incoming : false,
-        operator: session.displayName || session.email,
-        operator_id: session.id
-      })
-      .select('id, call_time')
-      .single();
+    const row = {
+      dataid,
+      complaint_number: body.complaint_number ?? null,
+      call_status: body.call_status,
+      problem_category: body.problem_category ?? null,
+      notes: body.notes ?? null,
+      duration_seconds: Number.isFinite(durationSeconds) && durationSeconds >= 0 ? Math.round(durationSeconds) : null,
+      connected: typeof body.connected === 'boolean' ? body.connected : null,
+      is_incoming: typeof body.is_incoming === 'boolean' ? body.is_incoming : false,
+      operator: session.displayName || session.email,
+      operator_id: session.id
+    };
+    let { data, error } = await supabase.from('call_logs').insert(row).select('id, call_time').single();
+    if (error && error.code === '23503' && row.complaint_number) {
+      // call_logs.complaint_number references complaints(complaint_number); a
+      // complaint the scraper hasn't stored yet must never lose the operator's
+      // log — keep it with the FK link dropped (dataid still identifies it).
+      ({ data, error } = await supabase
+        .from('call_logs')
+        .insert({ ...row, complaint_number: null })
+        .select('id, call_time')
+        .single());
+    }
     if (error) throw new Error(error.message);
 
     // Logging a call ends this operator's claim on the complaint.

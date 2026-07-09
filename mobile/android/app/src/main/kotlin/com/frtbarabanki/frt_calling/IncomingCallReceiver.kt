@@ -15,6 +15,11 @@ class IncomingCallReceiver : BroadcastReceiver() {
         // block subsequent IDLE events.
         private var ringingCount = 0
 
+        // OFFHOOK seen while an incoming call was ringing = it was answered.
+        // Without this a missed/declined call would open the log form with a
+        // misleading "Connected" default.
+        private var sawOffhook = false
+
         // Stack of dataids for currently ringing/active incoming calls.
         // Uses a list so that back-to-back concurrent calls (call waiting)
         // don't overwrite each other.
@@ -28,9 +33,13 @@ class IncomingCallReceiver : BroadcastReceiver() {
         val incomingNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
 
         if (state == TelephonyManager.EXTRA_STATE_RINGING && incomingNumber != null) {
-            ringingCount++
             val cleanNumber = incomingNumber.replace(Regex("\\D"), "")
+            // Increment only after the number checks pass: for a skipped ring the
+            // service is never started either, so the later IDLE must not try to
+            // stop a service that doesn't exist (startForegroundService on a dead
+            // service risks a RemoteServiceException).
             if (cleanNumber.isEmpty()) return
+            ringingCount++
             val key = if (cleanNumber.length > 10) cleanNumber.substring(cleanNumber.length - 10) else cleanNumber
 
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
@@ -66,11 +75,21 @@ class IncomingCallReceiver : BroadcastReceiver() {
                 // Ignore parsing errors
             }
 
+        } else if (state == TelephonyManager.EXTRA_STATE_OFFHOOK) {
+            // Only meaningful while an incoming call is ringing; OFFHOOK from a
+            // plain outgoing call (no ring first) is ignored.
+            if (ringingCount > 0) sawOffhook = true
+
         } else if (state == TelephonyManager.EXTRA_STATE_IDLE) {
             // Only handle IDLE if we saw RINGING — this prevents outgoing-call
             // IDLE events from incorrectly launching the app with a blank form.
             if (ringingCount <= 0) return
             ringingCount--
+
+            // Was this call answered? With concurrent calls (call waiting) this
+            // is an approximation — the flag is shared across the batch.
+            val answered = sawOffhook
+            if (ringingCount == 0) sawOffhook = false
 
             // Pop the most recent call's dataid from the stack
             val dataId = if (activeDataIds.isNotEmpty()) activeDataIds.removeLast() else null
@@ -78,7 +97,7 @@ class IncomingCallReceiver : BroadcastReceiver() {
             // Enqueue BEFORE stopping so the value is guaranteed on disk by the
             // time Flutter's _checkPendingIncomingCall() runs on resume.
             if (dataId != null) {
-                PendingCallQueue.enqueue(context, dataId)
+                PendingCallQueue.enqueue(context, dataId, answered)
             }
 
             // Stop the overlay bubble and, if we have a known consumer to log,

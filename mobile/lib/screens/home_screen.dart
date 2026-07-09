@@ -98,23 +98,27 @@ class _HomeShellState extends State<_HomeShell> with WidgetsBindingObserver {
   }
 
   Future<void> _checkPendingIncomingCall() async {
+    // Set the guard BEFORE the first await: on a cold start both initState's
+    // post-frame callback and the `resumed` lifecycle event land here, and an
+    // un-guarded await window would let both read the queue before either
+    // clears it — opening the same form twice.
     if (_openingPending) return;
-
-    // Collect from the new queue AND the old single-key (backward compat).
-    final ids = await Store.getPendingDataIds();
-    final oldId = await Store.getPendingIncomingDataId();
-    if (oldId != null) ids.add(oldId);
-
-    if (ids.isEmpty) return;
-
-    // Clear immediately so a second resume event doesn't re-open the same forms.
-    await Store.clearPendingDataIds();
-    await Store.clearPendingIncomingDataId();
-
     _openingPending = true;
     try {
-      for (final dataid in ids) {
-        final c = await _fetchComplaint(dataid);
+      // Collect from the new queue AND the old single-key (backward compat).
+      final calls = await Store.getPendingCalls();
+      final oldId = await Store.getPendingIncomingDataId();
+      if (oldId != null) calls.add(PendingCall(oldId, null));
+
+      if (calls.isEmpty) return;
+
+      // Clear immediately so a second resume event doesn't re-open the same forms.
+      await Store.clearPendingDataIds();
+      await Store.clearPendingIncomingDataId();
+
+      for (var i = 0; i < calls.length; i++) {
+        final call = calls[i];
+        final c = await _fetchComplaint(call.dataid);
         if (c == null || !mounted) continue;
 
         // Show the form and WAIT for the operator to close it before opening
@@ -124,18 +128,22 @@ class _HomeShellState extends State<_HomeShell> with WidgetsBindingObserver {
           isScrollControlled: true,
           useSafeArea: true,
           backgroundColor: AppColors.surface,
-          builder: (ctx) => DetailSheet(complaint: c, isIncomingCall: true),
+          builder: (ctx) => DetailSheet(complaint: c, isIncomingCall: true, incomingAnswered: call.answered),
         );
 
         // Brief pause between multiple forms so the transition feels intentional.
-        if (ids.length > 1 && dataid != ids.last && mounted) {
+        if (i < calls.length - 1 && mounted) {
           await Future.delayed(const Duration(milliseconds: 350));
         }
       }
     } catch (_) {
       // Silently ignore — never crash the home screen over a pending call.
     } finally {
-      if (mounted) setState(() => _openingPending = false);
+      if (mounted) {
+        setState(() => _openingPending = false);
+      } else {
+        _openingPending = false;
+      }
     }
   }
 

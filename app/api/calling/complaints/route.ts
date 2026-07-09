@@ -22,8 +22,10 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const includeResolved = searchParams.get('include_resolved') === '1';
 
+    // live_complaints_full = live_complaints (queue state) joined with the main
+    // complaints table (descriptive data) — see migration 20260709100000.
     let query = supabase
-      .from('live_complaints')
+      .from('live_complaints_full')
       .select('*')
       .order('complaint_date', { ascending: false, nullsFirst: false })
       .limit(1000);

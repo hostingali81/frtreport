@@ -18,11 +18,13 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- In-app self-update: open the system installer for the downloaded APK. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- Cleartext HTTP is only allowed in debug/profile builds (local dev
+         against http://10.0.2.2:3000 etc.) — see those manifests. Release
+         talks HTTPS to the deployed backend only. -->
     <application
         android:label="FRT Calling"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">
+        android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
             android:exported="true"

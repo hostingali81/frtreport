@@ -4,6 +4,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
 
+// An incoming call the native side queued for post-call logging.
+// [answered] is null when the entry came from an old-format queue (unknown).
+class PendingCall {
+  final int dataid;
+  final bool? answered;
+  PendingCall(this.dataid, this.answered);
+}
+
 // Local persistence: the offline outbox (complete logs waiting for network),
 // drafts (a call happened but no outcome was saved), a cached complaints list
 // for offline viewing, the preferred SIM, and alert bookkeeping.
@@ -51,9 +59,11 @@ class Store {
         final item = Map<String, dynamic>.from(list.first)..remove('_qid')..remove('_queued_at');
         try {
           await Api.logRaw(item);
-        } on ApiException {
-          // Server rejected it (bad payload / auth) — drop it rather than
-          // blocking the queue forever.
+        } on ApiException catch (e) {
+          // 5xx / 401 / timeout are transient (server hiccup, token mid-refresh)
+          // — keep the log queued and retry on the next sync. Only a permanent
+          // 4xx rejection (bad payload) drops it, so the queue can't jam forever.
+          if (e.retryable) break;
         } catch (_) {
           break; // network still down
         }
@@ -167,14 +177,23 @@ class Store {
     try {
       final map = jsonDecode(raw) as Map<String, dynamic>;
       map[key] = info;
-      // Cap the map size so it doesn't grow indefinitely. Remove oldest if > 1000.
-      if (map.length > 1000) {
-        final keys = map.keys.toList();
-        for (var i = 0; i < map.length - 1000; i++) map.remove(keys[i]);
-      }
+      _trimOldest(map, 1000);
       await _p?.setString('caller_id_map', jsonEncode(map));
     } catch (_) {
       await _p?.setString('caller_id_map', jsonEncode({key: info}));
+    }
+  }
+
+  // Cap the map size so it doesn't grow indefinitely: drop the oldest entries
+  // (insertion order) until at most [max] remain. The excess is computed up
+  // front — map.length shrinks while removing, so an inline loop condition
+  // would stop halfway.
+  static void _trimOldest(Map<String, dynamic> map, int max) {
+    final excess = map.length - max;
+    if (excess <= 0) return;
+    final keys = map.keys.take(excess).toList();
+    for (final k in keys) {
+      map.remove(k);
     }
   }
 
@@ -196,27 +215,35 @@ class Store {
       map[key] = entry.value;
     }
 
-    if (map.length > 1000) {
-      final keys = map.keys.toList();
-      for (var i = 0; i < map.length - 1000; i++) map.remove(keys[i]);
-    }
+    _trimOldest(map, 1000);
     await _p?.setString('caller_id_map', jsonEncode(map));
   }
 
   // --- Pending incoming calls queue ---
   //
-  // IncomingCallReceiver (Kotlin) appends dataid strings to
-  // "flutter.pending_call_queue" (a JSON array) via PendingCallQueue.enqueue().
-  // It uses .commit() (synchronous) so the value is on disk before the app
-  // is brought to the foreground. We call reload() here to make Flutter's
-  // in-memory cache pick up the natively-written value.
+  // IncomingCallReceiver (Kotlin) appends {"dataid": ..., "answered": ...}
+  // objects to "flutter.pending_call_queue" (a JSON array) via
+  // PendingCallQueue.enqueue(). It uses .commit() (synchronous) so the value
+  // is on disk before the app is brought to the foreground. We call reload()
+  // here to make Flutter's in-memory cache pick up the natively-written value.
 
-  static Future<List<int>> getPendingDataIds() async {
+  static Future<List<PendingCall>> getPendingCalls() async {
     await _p?.reload(); // flush native writes into Flutter's in-memory cache
     final raw = _p?.getString('pending_call_queue') ?? '[]';
     try {
       final list = jsonDecode(raw) as List;
-      return list.map((e) => int.tryParse('$e')).whereType<int>().toList();
+      final out = <PendingCall>[];
+      for (final e in list) {
+        if (e is Map) {
+          final id = int.tryParse('${e['dataid']}');
+          if (id != null) out.add(PendingCall(id, e['answered'] is bool ? e['answered'] as bool : null));
+        } else {
+          // Entry written by a pre-"answered" build (plain dataid string).
+          final id = int.tryParse('$e');
+          if (id != null) out.add(PendingCall(id, null));
+        }
+      }
+      return out;
     } catch (_) {
       return [];
     }

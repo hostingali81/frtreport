@@ -114,7 +114,8 @@ class Updater {
       final raw = await _ch.invokeMethod<int>('getBuildNumber') ?? 0;
       // `flutter build apk --split-per-abi` offsets the versionCode per ABI
       // (armeabi-v7a = 1000+N, arm64-v8a = 2000+N, x86_64 = 3000+N); strip the
-      // offset to get back the plain pubspec build number.
+      // offset to get back the plain pubspec build number. This requires the
+      // pubspec build to stay < 1000 — enforced by scripts/release-app.ts.
       return raw % 1000;
     } catch (_) {
       return 0;

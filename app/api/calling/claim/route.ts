@@ -37,16 +37,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, released: true });
     }
 
-    const { data: row, error: readError } = await supabase
+    // Atomic claim: the WHERE clause only matches when the row is unclaimed,
+    // already ours, or the previous claim has gone stale — so two operators
+    // claiming at once can't both win (no read-then-write race).
+    const staleCutoff = new Date(Date.now() - CLAIM_FRESH_MS).toISOString();
+    const { data: updated, error: updateError } = await supabase
       .from('live_complaints')
-      .select('claimed_by, claimed_by_name, claimed_at')
+      .update({
+        claimed_by: session.id,
+        claimed_by_name: session.displayName || session.email,
+        claimed_at: new Date().toISOString()
+      })
       .eq('dataid', dataid)
-      .maybeSingle();
-    if (readError) throw new Error(readError.message);
+      .or(`claimed_by.is.null,claimed_by.eq.${session.id},claimed_at.lt.${staleCutoff}`)
+      .select('dataid');
+    if (updateError) throw new Error(updateError.message);
 
-    const heldByOther = row?.claimed_by && row.claimed_by !== session.id
-      && row.claimed_at && Date.now() - new Date(row.claimed_at).getTime() < CLAIM_FRESH_MS;
-    if (heldByOther) {
+    if (!updated?.length) {
+      // Someone else holds a fresh claim (or the complaint left the live table).
+      const { data: row } = await supabase
+        .from('live_complaints')
+        .select('claimed_by_name, claimed_at')
+        .eq('dataid', dataid)
+        .maybeSingle();
+      if (!row) return NextResponse.json({ success: true, claimed: true });
       return NextResponse.json({
         success: true,
         claimed: false,
@@ -54,16 +68,6 @@ export async function POST(request: Request) {
         claimed_at: row.claimed_at
       });
     }
-
-    const { error: updateError } = await supabase
-      .from('live_complaints')
-      .update({
-        claimed_by: session.id,
-        claimed_by_name: session.displayName || session.email,
-        claimed_at: new Date().toISOString()
-      })
-      .eq('dataid', dataid);
-    if (updateError) throw new Error(updateError.message);
 
     return NextResponse.json({ success: true, claimed: true });
   } catch (error) {

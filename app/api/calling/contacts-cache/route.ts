@@ -14,11 +14,12 @@ export async function GET() {
     const supabase = getSupabaseClient();
     if (!supabase) return NextResponse.json({ success: false, error: 'Supabase not configured' }, { status: 500 });
 
-    // Fetch the most recent 1000 contacts from the optimized complaints table.
-    // The mobile app caches these to show Caller ID for known complaints.
+    // Fetch the most recent 1000 contacts from the optimized complaints table
+    // (active AND recently-closed, so caller ID also works for resolved cases).
+    // The mobile app caches these to show Caller ID for known numbers.
     const { data: contacts, error } = await supabase
       .from('complaints')
-      .select('dataid, consumer_mobile, consumer_name, consumer_remarks, complaint_number, complaint_sub_type, sub_station')
+      .select('dataid, consumer_mobile, consumer_name, consumer_remarks, complaint_number, complaint_sub_type, sub_station, status, complaint_date')
       .not('consumer_mobile', 'is', null)
       .order('complaint_date', { ascending: false })
       .limit(1000);
@@ -34,6 +35,8 @@ export async function GET() {
       complaint_number: c.complaint_number,
       complaint_sub_type: c.complaint_sub_type,
       area: c.sub_station,
+      status: c.status,
+      complaint_date: c.complaint_date,
     }));
 
     return NextResponse.json({ success: true, count: flattened.length, contacts: flattened });

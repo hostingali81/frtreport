@@ -53,6 +53,23 @@ class IncomingCallService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "STOP_AND_LAUNCH") {
+            // startForegroundService() contract: every start must be answered
+            // with a startForeground() call — even when this command only stops
+            // the service. Skipping it risks a RemoteServiceException
+            // ("did not then call Service.startForeground()") when the service
+            // wasn't already in the foreground.
+            Notifications.ensureChannels(this)
+            try {
+                startForeground(
+                    NOTIF_ID,
+                    NotificationCompat.Builder(this, Notifications.CH_ONGOING)
+                        .setSmallIcon(applicationInfo.icon)
+                        .setContentTitle("Call ended")
+                        .setOngoing(true)
+                        .build()
+                )
+            } catch (e: Exception) {}
+
             // The dataid was already written to PendingCallQueue (synchronously)
             // in IncomingCallReceiver before this service was started, so we
             // only need to bring the app to the foreground here.

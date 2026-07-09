@@ -28,6 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _submit() async {
+    if (_loading) return; // keyboard "done" can re-trigger while signing in
     FocusScope.of(context).unfocus();
     Haptics.light();
     setState(() {
