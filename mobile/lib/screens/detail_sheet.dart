@@ -792,6 +792,8 @@ class _DetailSheetState extends State<DetailSheet> {
   // problem chips, the complete remark (never truncated), and who called.
   Widget _historyTile(Map<String, dynamic> l, int attemptNo) {
     final connected = l['connected'] == true || l['call_status'] == 'Connected';
+    final isIncoming = l['is_incoming'] == true;
+    final glyph = callGlyph(isIncoming: isIncoming, connected: connected);
     final color = connected ? AppColors.success : AppColors.inkSoft;
     final secs = (l['duration_seconds'] as num?)?.toInt();
     final notesRaw = '${l['notes'] ?? ''}';
@@ -827,10 +829,10 @@ class _DetailSheetState extends State<DetailSheet> {
               child: Text('#$attemptNo', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.inkSoft)),
             ),
             const SizedBox(width: 7),
-            Icon(connected ? Icons.call_made : Icons.call_missed, size: 14, color: color),
+            Icon(glyph.icon, size: 15, color: glyph.color),
             const SizedBox(width: 4),
             Expanded(
-              child: Text('${l['call_status'] ?? '—'}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: color)),
+              child: Text('${isIncoming ? 'Incoming · ' : ''}${l['call_status'] ?? '—'}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: color)),
             ),
             Text(fmtDateTime(l['call_time']), style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
           ]),

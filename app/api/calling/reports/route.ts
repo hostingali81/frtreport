@@ -83,6 +83,10 @@ export async function GET(request: Request) {
     const connectedTotal = logs.filter(isConnected).length;
     const talkSeconds = logs.reduce((a, l) => a + (l.duration_seconds ?? 0), 0);
 
+    // Direction split — incoming (consumer called us) vs outgoing (we dialed).
+    const incomingLogs = logs.filter(l => l.is_incoming === true);
+    const outgoingLogs = logs.filter(l => l.is_incoming !== true);
+
     // Average time from complaint arrival to its FIRST call (responsiveness vs
     // the SLA clock). Only complaints we still know the complaint_date for.
     let avgFirstCallMinutes: number | null = null;
@@ -118,6 +122,10 @@ export async function GET(request: Request) {
         talkSeconds,
         avgTalkSeconds: connectedTotal ? Math.round(talkSeconds / connectedTotal) : null,
         avgFirstCallMinutes,
+        outgoing: outgoingLogs.length,
+        outgoingConnected: outgoingLogs.filter(isConnected).length,
+        incoming: incomingLogs.length,
+        incomingConnected: incomingLogs.filter(isConnected).length,
         byStatus: tally(logs, 'call_status'),
         byCategory: tally(logs, 'problem_category')
       },

@@ -2,6 +2,29 @@ import 'package:flutter/material.dart';
 
 import 'theme.dart';
 
+// Phone-app-style call direction/outcome icon, shared by the Reports "Recent
+// calls" list and the detail-sheet call history so they read the same:
+//   outgoing answered  -> call_made          (green)
+//   outgoing no-answer -> call_missed_outgoing (amber)
+//   incoming answered  -> call_received       (green)
+//   incoming missed    -> call_missed          (red)
+class CallGlyph {
+  final IconData icon;
+  final Color color;
+  const CallGlyph(this.icon, this.color);
+}
+
+CallGlyph callGlyph({required bool isIncoming, required bool connected}) {
+  if (isIncoming) {
+    return connected
+        ? const CallGlyph(Icons.call_received, AppColors.success)
+        : const CallGlyph(Icons.call_missed, AppColors.danger);
+  }
+  return connected
+      ? const CallGlyph(Icons.call_made, AppColors.success)
+      : const CallGlyph(Icons.call_missed_outgoing, AppColors.warning);
+}
+
 // A white, rounded, bordered surface used everywhere. Tappable variant adds ink
 // ripple + a light haptic.
 class AppCard extends StatelessWidget {

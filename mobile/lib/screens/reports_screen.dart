@@ -130,6 +130,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           sub: 'Complaint aane se pehli call tak'),
                     ),
                   ]),
+                  Gap.sm,
+                  Builder(builder: (context) {
+                    final outgoing = (totals?['outgoing'] as num?)?.toInt() ?? 0;
+                    final outConn = (totals?['outgoingConnected'] as num?)?.toInt() ?? 0;
+                    final incoming = (totals?['incoming'] as num?)?.toInt() ?? 0;
+                    final inConn = (totals?['incomingConnected'] as num?)?.toInt() ?? 0;
+                    return Row(children: [
+                      Expanded(
+                        child: _stat('$outgoing', 'Outgoing calls', AppColors.success, Icons.call_made,
+                            sub: outgoing == 0 ? 'None yet' : '$outConn connected'),
+                      ),
+                      Gap.sm,
+                      Expanded(
+                        child: _stat('$incoming', 'Incoming calls', AppColors.brand, Icons.call_received,
+                            sub: incoming == 0 ? 'None yet' : '$inConn answered'),
+                      ),
+                    ]);
+                  }),
                 ]);
               }),
               if (byStatus.isNotEmpty) ...[
@@ -270,6 +288,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Widget _recentTile(Map<String, dynamic> r, bool showOperator) {
     final connected = r['connected'] == true || r['call_status'] == 'Connected';
+    final isIncoming = r['is_incoming'] == true;
+    final glyph = callGlyph(isIncoming: isIncoming, connected: connected);
     final secs = (r['duration_seconds'] as num?)?.toInt();
     final dur = secs != null && secs > 0 ? '${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}' : null;
     // The app prefixes notes with "Call m:ss" — strip it here since the
@@ -283,9 +303,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              Icon(r['is_incoming'] == true ? Icons.arrow_downward : Icons.arrow_upward, 
-                   size: 14, 
-                   color: r['is_incoming'] == true ? AppColors.brand : (connected ? AppColors.success : AppColors.muted)),
+              Icon(glyph.icon, size: 15, color: glyph.color),
               const SizedBox(width: 6),
               Expanded(child: Text('${r['complaint_number'] ?? '—'}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5, color: AppColors.ink))),
               Text(fmtDateTime(r['call_time']), style: const TextStyle(fontSize: 11, color: AppColors.muted)),
