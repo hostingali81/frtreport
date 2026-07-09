@@ -450,12 +450,18 @@ export async function saveToNewDb(
 //   - Uses ignoreDuplicates:true as a DB-level safety net
 // This keeps the today-scraper lean: only new complaints hit the DB,
 // no index churn from re-writing unchanged rows.
+//
+// One exception: rows whose stored status is NULL are "slim" rows created by
+// the calling app's live sync (grid metadata only — no status/consumer data).
+// Those are upserted with the full report record so a complaint that reached
+// the live feed first doesn't sit status-less on the dashboard until the
+// nightly full scrape.
 export async function insertOnlyNewDb(
     rows: any[],
     scrapeDuration: number,
     options: { recordMetadata?: boolean } = {}
 ) {
-    if (!supabase || !rows.length) return { new_rows: 0, skipped_rows: 0 };
+    if (!supabase || !rows.length) return { new_rows: 0, skipped_rows: 0, enriched_rows: 0 };
 
     // Deduplicate input rows by Complaint Number (last one wins within the batch)
     const validRowsMap = new Map<string, any>();
@@ -464,7 +470,7 @@ export async function insertOnlyNewDb(
         if (cn) validRowsMap.set(cn, r);
     }
     const validRows = Array.from(validRowsMap.values());
-    if (!validRows.length) return { new_rows: 0, skipped_rows: 0 };
+    if (!validRows.length) return { new_rows: 0, skipped_rows: 0, enriched_rows: 0 };
 
     const complaintNumbers = validRows.map(r => r['Complaint Number'] as string);
 
@@ -480,12 +486,13 @@ export async function insertOnlyNewDb(
         4,
         8
     );
-    const existingNumberBatches: string[][] = new Array(lookupBatches.length);
+    const existingRecordBatches: Array<Array<{ complaint_number: string; status: string | null }>> =
+        new Array(lookupBatches.length);
 
     await runWithConcurrency(lookupBatches, lookupConcurrency, async (batch, batchIndex) => {
         const { data, error } = await supabase!
             .from('complaints')
-            .select('complaint_number')
+            .select('complaint_number, status')
             .in('complaint_number', batch);
 
         if (error) {
@@ -494,28 +501,31 @@ export async function insertOnlyNewDb(
                 `Complaint existence check failed (${start}-${start + batch.length - 1}): ${describeError(error)}`
             );
         }
-        existingNumberBatches[batchIndex] = (data || []).map(r => r.complaint_number as string);
+        existingRecordBatches[batchIndex] = data || [];
     });
 
-    const existingSet = new Set(existingNumberBatches.flat());
+    const existing = existingRecordBatches.flat();
+    const existingSet = new Set(existing.map(r => r.complaint_number));
+    // Slim rows from the calling app's live sync — status never set yet.
+    const needsEnrichSet = new Set(existing.filter(r => r.status == null).map(r => r.complaint_number));
 
-    // Keep only rows whose complaint_number is not yet in DB
     const newRows = validRows.filter(r => !existingSet.has(r['Complaint Number']));
-    const skippedCount = validRows.length - newRows.length;
+    const enrichRows = validRows.filter(r => needsEnrichSet.has(r['Complaint Number']));
+    const skippedCount = validRows.length - newRows.length - enrichRows.length;
 
     if (skippedCount > 0) {
-        console.log(`[DB] Skipping ${skippedCount} already-existing complaint(s); inserting ${newRows.length} new.`);
+        console.log(`[DB] Skipping ${skippedCount} already-existing complaint(s); inserting ${newRows.length} new, enriching ${enrichRows.length} slim.`);
     }
 
-    if (!newRows.length) {
+    if (!newRows.length && !enrichRows.length) {
         if (options.recordMetadata !== false) {
             await logScrapeSuccess(0, 0, 0, scrapeDuration);
         }
-        return { new_rows: 0, skipped_rows: skippedCount };
+        return { new_rows: 0, skipped_rows: skippedCount, enriched_rows: 0 };
     }
 
-    // Build full records for insert
-    const records = newRows.map(row => {
+    // Build a full record for insert/upsert
+    const toRecord = (row: any) => {
         const complaintDate = parseDate(row['Complaint Date and Time'] || '');
         const closedDate = parseDate(row['Closed Date'] || '');
 
@@ -540,7 +550,10 @@ export async function insertOnlyNewDb(
         };
 
         return { ...record, content_hash: createHash('md5').update(JSON.stringify(record)).digest('hex') };
-    });
+    };
+
+    const records = newRows.map(toRecord);
+    const enrichRecords = enrichRows.map(toRecord);
 
     // Insert in batches; ignoreDuplicates:true is a safety net at DB level
     const insertBatchSize = parsePositiveInteger(process.env.SUPABASE_UPSERT_BATCH_SIZE, 250, 1000);
@@ -581,11 +594,43 @@ export async function insertOnlyNewDb(
         }
     });
 
-    if (options.recordMetadata !== false) {
-        await logScrapeSuccess(newRows.length, newRows.length, 0, scrapeDuration);
+    // Enrich slim rows with a real upsert (ignoreDuplicates:false so the
+    // existing row IS updated). Usually 0-2 rows, so index churn stays minimal.
+    if (enrichRecords.length) {
+        const enrichBatches: typeof enrichRecords[] = [];
+        for (let i = 0; i < enrichRecords.length; i += insertBatchSize) {
+            enrichBatches.push(enrichRecords.slice(i, i + insertBatchSize));
+        }
+        await runWithConcurrency(enrichBatches, insertConcurrency, async (batch, batchIndex) => {
+            let attempt = 0;
+            while (true) {
+                attempt += 1;
+                const { error } = await supabase!
+                    .from('complaints')
+                    .upsert(batch, { onConflict: 'complaint_number', ignoreDuplicates: false });
+
+                if (!error) break;
+
+                const description = describeError(error);
+                if (attempt >= 3 || !isTransientDbError(error)) {
+                    throw new Error(
+                        `Failed to enrich complaint batch ${batchIndex + 1}/${enrichBatches.length}: ${description}`
+                    );
+                }
+                const delay = Math.min(2000 * attempt, 10000);
+                console.warn(
+                    `Enrich batch ${batchIndex + 1}/${enrichBatches.length} failed on attempt ${attempt}/3: ${description}. Retrying in ${delay}ms.`
+                );
+                await sleep(delay);
+            }
+        });
     }
 
-    return { new_rows: newRows.length, skipped_rows: skippedCount };
+    if (options.recordMetadata !== false) {
+        await logScrapeSuccess(newRows.length + enrichRecords.length, newRows.length, enrichRecords.length, scrapeDuration);
+    }
+
+    return { new_rows: newRows.length, skipped_rows: skippedCount, enriched_rows: enrichRecords.length };
 }
 
 export async function logScrapeSuccess(totalRows: number, newRows: number, updatedRows: number, duration: number) {

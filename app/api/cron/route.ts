@@ -133,6 +133,7 @@ export async function GET(request: Request) {
       scraped: scrapedRows.length,
       new_inserted: saveResult.new_rows,
       already_existed: saveResult.skipped_rows,
+      enriched: saveResult.enriched_rows,
       duration: `${finalDuration}s`,
     });
 
@@ -143,6 +144,7 @@ export async function GET(request: Request) {
         scraped: scrapedRows.length,
         new: saveResult.new_rows,
         skipped: saveResult.skipped_rows,
+        enriched: saveResult.enriched_rows,
         duration: finalDuration,
       },
     });
