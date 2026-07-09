@@ -1,0 +1,23 @@
+# CLI `vercel` deploys upload the working directory (unlike the Git integration,
+# which respects .gitignore). Without this, node_modules, local build output,
+# and the entire Flutter mobile app (APKs + build artifacts, ~900MB) get
+# uploaded and blow past Vercel's 100MB-per-file limit. The web build only
+# needs the Next.js source.
+
+# Dependencies & build output (Vercel installs/builds fresh)
+node_modules
+.next
+out
+
+# Flutter mobile app — not part of the web deploy at all
+mobile
+
+# Local capture/probe artifacts (screenshots, session dumps, large JSON)
+scripts/.capture
+
+# VCS / editor / misc
+.git
+.github
+*.apk
+*.keystore
+tsconfig.tsbuildinfo
