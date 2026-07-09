@@ -1,0 +1,61 @@
+name: Calling Live Sync (Every 5 Min)
+
+on:
+  schedule:
+    # Keep the calling app's live_complaints grid fresh and the FRT calling
+    # session (frt_calling_session) warm, so the Vercel /api/calling/sync path
+    # never has to do a browser recapture (which overruns Vercel's 60s limit).
+    # Offset by 2 min from today-scrape (*/5) so the two jobs don't contend for
+    # a fresh FRT browser login on the same tick (single-session account).
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      max_retries:
+        description: 'Max attempts (default: 3)'
+        required: false
+        default: '3'
+
+# Own concurrency group so it runs alongside the report scrapers. Cancel a
+# previous run still in progress — we always want the freshest grid.
+concurrency:
+  group: calling-sync
+  cancel-in-progress: true
+
+jobs:
+  calling-sync:
+    runs-on: ubuntu-latest
+    # Comfortably longer than the 30s-per-form browser capture; nowhere near
+    # Vercel's constraint since this runs on a real runner.
+    timeout-minutes: 4
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # supabase-js >= 2.110 needs Node 22+ (native WebSocket).
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        env:
+          # The API-replay path needs no browser; a session recapture uses the
+          # runner's preinstalled Google Chrome instead of downloading Chromium.
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+          PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: 'true'
+        run: npm ci
+
+      - name: Run Calling Sync
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+          FRT_USERNAME: ${{ secrets.FRT_USERNAME }}
+          FRT_PASSWORD: ${{ secrets.FRT_PASSWORD }}
+          FRT_LOGIN_TYPE: ${{ secrets.FRT_LOGIN_TYPE || vars.FRT_LOGIN_TYPE || '' }}
+          CALLING_SYNC_MAX_RETRIES: ${{ github.event.inputs.max_retries || '3' }}
+          CALLING_SYNC_RETRY_DELAY_MS: '15000'
+          SCRAPER_PROTOCOL_TIMEOUT_MS: '120000'
+          SCRAPER_LOAD_TIMEOUT_MS: '60000'
+        run: npx tsx scripts/calling-sync.ts
