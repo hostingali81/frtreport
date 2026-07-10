@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
+import { warmCallingStats } from '../../lib/calling-stats-cache';
 import { createFrtCallingClient, syncLiveComplaints } from '../../lib/frt-calling';
 import {
   createFrtApiScraperSession,
+  getSupabaseClient,
   insertOnlyNewDb,
   logScrapeError,
   logScrapeSuccess,
@@ -136,16 +138,35 @@ export async function GET(request: Request) {
       callingSync = { error: msg };
     }
 
+    // Precompute the Calling Report stats while the DB is warm (the grid sync
+    // above just touched complaints/live_complaints), storing each preset in
+    // `reports` so /api/calling/analytics serves the dashboard from one fast row
+    // read instead of the cold ~4-8s RPC. Runs AFTER the insert below so it can
+    // never eat into the critical scrape→insert path; non-fatal either way.
+    const warmCallingStatsCache = async () => {
+      try {
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          const warm = await warmCallingStats(supabase);
+          console.log('[CRON] Calling stats warmed:', warm);
+        }
+      } catch (err) {
+        console.warn('[CRON] Calling stats warm failed (non-fatal):', getErrorMessage(err));
+      }
+    };
+
     // ── 7. Insert only new complaints ──────────────────────────────────────────
     const totalDuration = Math.round((Date.now() - startTime) / 1000);
 
     if (!scrapedRows.length) {
       console.log('[CRON] No rows for today — nothing to insert.');
       await logScrapeSuccess(0, 0, 0, totalDuration);
+      await warmCallingStatsCache();
       return NextResponse.json({ success: true, message: 'No data for today', stats: { scraped: 0, new: 0, duration: totalDuration }, calling: callingSync });
     }
 
     const saveResult = await insertOnlyNewDb(scrapedRows, totalDuration, { recordMetadata: true });
+    await warmCallingStatsCache();
     const finalDuration = Math.round((Date.now() - startTime) / 1000);
 
     console.log('[CRON] Done!', {

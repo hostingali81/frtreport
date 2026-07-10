@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { matchPresetKey, readCachedCallingStats } from '../../../lib/calling-stats-cache';
 import { getSupabaseClient } from '../../../lib/shared-scraper';
 
 export const runtime = 'nodejs';
@@ -44,6 +45,19 @@ export async function GET(request: Request) {
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
       return NextResponse.json(cached.payload);
+    }
+
+    // Fast path: the preset buttons (Today / 7d / 30d / All) are precomputed by
+    // the cron into the `reports` table, so serve that single row instead of the
+    // cold ~4-8s RPC. Custom date ranges fall through to the live RPC below.
+    const presetKey = matchPresetKey({ allTime, from, to });
+    if (presetKey) {
+      const precomputed = await readCachedCallingStats(supabase, presetKey);
+      if (precomputed) {
+        const payload = { success: true, range: allTime ? null : { from, to }, stats: precomputed.stats, precomputedAt: precomputed.computedAt };
+        cache.set(cacheKey, { timestamp: Date.now(), payload });
+        return NextResponse.json(payload);
+      }
     }
 
     const { data, error } = await supabase.rpc('get_calling_stats', {
