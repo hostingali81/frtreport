@@ -175,19 +175,27 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   Future<void> _download() async {
     setState(() {
       _downloading = true;
+      _downloaded = false;
       _progress = null;
       _error = null;
     });
     final client = http.Client();
     _client = client;
+    File? file;
     try {
       final path = await Updater._ch.invokeMethod<String>('getUpdateApkPath');
       if (path == null) throw Exception('native side unavailable');
+      file = File(path);
+      // Start clean: a leftover partial/corrupt file from an earlier attempt
+      // must never reach the installer (that shows "problem parsing the package").
+      try {
+        if (await file.exists()) await file.delete();
+      } catch (_) {}
+
       final apkUrl = widget.info.urlForAbis(await Updater.supportedAbis());
       final resp = await client.send(http.Request('GET', Uri.parse(apkUrl)));
       if (resp.statusCode != 200) throw Exception('HTTP ${resp.statusCode}');
       final total = resp.contentLength ?? 0;
-      final file = File(path);
       final sink = file.openWrite();
       var received = 0;
       try {
@@ -197,22 +205,51 @@ class _UpdateDialogState extends State<_UpdateDialog> {
           if (total > 0 && mounted) setState(() => _progress = received / total);
         }
       } finally {
+        await sink.flush();
         await sink.close();
       }
-      if (total > 0 && received < total) throw Exception('download incomplete');
+      // Reject a partial or non-APK download BEFORE handing it to the system
+      // installer — otherwise it fails with the cryptic "There was a problem
+      // parsing the package". Exact-length + ZIP-magic catches truncated
+      // downloads and HTML error pages alike.
+      if (total > 0 && received != total) throw Exception('incomplete: $received/$total');
+      if (!await _isValidApk(file, total)) throw Exception('corrupt or invalid apk');
+
       _apkPath = path;
       if (mounted) setState(() => _downloaded = true);
       await _install();
     } catch (e) {
+      // Delete the bad file so the next Retry starts fresh.
+      try {
+        if (file != null && await file.exists()) await file.delete();
+      } catch (_) {}
       if (mounted) {
         setState(() {
           _downloading = false;
-          _error = 'Download failed. Check your internet and try again.';
+          _downloaded = false;
+          _error = 'Update download failed or was incomplete. Check your internet and tap Retry.';
         });
       }
     } finally {
       client.close();
       if (identical(_client, client)) _client = null;
+    }
+  }
+
+  // A real APK is a ZIP archive: reasonably large and starting with the local
+  // file-header magic "PK\x03\x04". Validating here (before install) turns a
+  // silent installer parse-error into a clear, retryable download failure.
+  Future<bool> _isValidApk(File file, int expectedLen) async {
+    try {
+      final len = await file.length();
+      if (len < 1024 * 1024) return false; // real APK is ~16–20 MB
+      if (expectedLen > 0 && len != expectedLen) return false;
+      final raf = await file.open();
+      final head = await raf.read(4);
+      await raf.close();
+      return head.length >= 4 && head[0] == 0x50 && head[1] == 0x4B && head[2] == 0x03 && head[3] == 0x04;
+    } catch (_) {
+      return false;
     }
   }
 
