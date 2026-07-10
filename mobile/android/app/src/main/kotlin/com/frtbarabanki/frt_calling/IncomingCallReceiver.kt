@@ -20,6 +20,14 @@ class IncomingCallReceiver : BroadcastReceiver() {
         // misleading "Connected" default.
         private var sawOffhook = false
 
+        // Wall-clock of the first OFFHOOK (pickup) while ringing. For an incoming
+        // call OFFHOOK→IDLE is exactly the talk time (there is no dial/ring phase
+        // once answered), so (IDLE − OFFHOOK) is the conversation duration the
+        // report screen shows. 0 = not answered yet. With concurrent calls (call
+        // waiting) this is an approximation, shared across the batch — same
+        // caveat the `sawOffhook` flag already carries.
+        private var offhookAtMs = 0L
+
         // Stack of dataids for currently ringing/active incoming calls.
         // Uses a list so that back-to-back concurrent calls (call waiting)
         // don't overwrite each other.
@@ -78,7 +86,10 @@ class IncomingCallReceiver : BroadcastReceiver() {
         } else if (state == TelephonyManager.EXTRA_STATE_OFFHOOK) {
             // Only meaningful while an incoming call is ringing; OFFHOOK from a
             // plain outgoing call (no ring first) is ignored.
-            if (ringingCount > 0) sawOffhook = true
+            if (ringingCount > 0) {
+                sawOffhook = true
+                if (offhookAtMs == 0L) offhookAtMs = System.currentTimeMillis()
+            }
 
         } else if (state == TelephonyManager.EXTRA_STATE_IDLE) {
             // Only handle IDLE if we saw RINGING — this prevents outgoing-call
@@ -89,7 +100,17 @@ class IncomingCallReceiver : BroadcastReceiver() {
             // Was this call answered? With concurrent calls (call waiting) this
             // is an approximation — the flag is shared across the batch.
             val answered = sawOffhook
-            if (ringingCount == 0) sawOffhook = false
+            // Talk time = OFFHOOK→IDLE. Only meaningful when answered; a missed
+            // call (no OFFHOOK) has no talk time, so send 0.
+            val durationSeconds = if (answered && offhookAtMs > 0L) {
+                ((System.currentTimeMillis() - offhookAtMs) / 1000L).toInt().coerceAtLeast(0)
+            } else {
+                0
+            }
+            if (ringingCount == 0) {
+                sawOffhook = false
+                offhookAtMs = 0L
+            }
 
             // Pop the most recent call's dataid from the stack
             val dataId = if (activeDataIds.isNotEmpty()) activeDataIds.removeLast() else null
@@ -97,7 +118,7 @@ class IncomingCallReceiver : BroadcastReceiver() {
             // Enqueue BEFORE stopping so the value is guaranteed on disk by the
             // time Flutter's _checkPendingIncomingCall() runs on resume.
             if (dataId != null) {
-                PendingCallQueue.enqueue(context, dataId, answered)
+                PendingCallQueue.enqueue(context, dataId, answered, durationSeconds)
             }
 
             // Stop the overlay bubble and, if we have a known consumer to log,

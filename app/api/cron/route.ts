@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createFrtCallingClient, syncLiveComplaints } from '../../lib/frt-calling';
 import {
   createFrtApiScraperSession,
   insertOnlyNewDb,
@@ -116,13 +117,32 @@ export async function GET(request: Request) {
       console.log('[CRON] FRT session closed — login released.');
     }
 
+    // ── 6b. Refresh the calling app's live grid too (best-effort) ──────────────
+    // One external ping to /api/cron then refreshes BOTH the report data and the
+    // calling grid (FormId 13339) — a warm session replay each, no browser. This
+    // is what lets an external pinger (cron-job.org / pg_cron) keep the calling
+    // app fresh like its manual Refresh button, without a GitHub runner cold
+    // start. A failure here must never fail the report scrape.
+    let callingSync: unknown = null;
+    try {
+      process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = '1';
+      const client = await createFrtCallingClient(username, password);
+      const rows = await client.fetchList();
+      callingSync = await syncLiveComplaints(rows);
+      console.log('[CRON] Calling grid synced:', callingSync);
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      console.warn('[CRON] Calling grid sync failed (non-fatal):', msg);
+      callingSync = { error: msg };
+    }
+
     // ── 7. Insert only new complaints ──────────────────────────────────────────
     const totalDuration = Math.round((Date.now() - startTime) / 1000);
 
     if (!scrapedRows.length) {
       console.log('[CRON] No rows for today — nothing to insert.');
       await logScrapeSuccess(0, 0, 0, totalDuration);
-      return NextResponse.json({ success: true, message: 'No data for today', stats: { scraped: 0, new: 0, duration: totalDuration } });
+      return NextResponse.json({ success: true, message: 'No data for today', stats: { scraped: 0, new: 0, duration: totalDuration }, calling: callingSync });
     }
 
     const saveResult = await insertOnlyNewDb(scrapedRows, totalDuration, { recordMetadata: true });
@@ -147,6 +167,7 @@ export async function GET(request: Request) {
         enriched: saveResult.enriched_rows,
         duration: finalDuration,
       },
+      calling: callingSync,
     });
 
   } catch (error: unknown) {

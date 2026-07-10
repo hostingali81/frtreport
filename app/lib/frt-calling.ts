@@ -14,8 +14,8 @@
 
 import {
     FrtApiAuthError,
-    createFrtScraperSession,
     getSupabaseClient,
+    refreshFrtSessions,
     type FrtCallingApiSession
 } from './shared-scraper';
 
@@ -195,15 +195,9 @@ async function loadCachedCallingSession(): Promise<FrtCallingApiSession | null> 
     }
 }
 
-async function saveCachedCallingSession(session: FrtCallingApiSession) {
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-    try {
-        await supabase.from('reports').upsert({ key: CALLING_SESSION_KEY, payload: session }, { onConflict: 'key' });
-    } catch {
-        /* best effort */
-    }
-}
+// Note: the cached calling session is WRITTEN by refreshFrtSessions() in
+// shared-scraper.ts (one login refreshes both the report and calling sessions);
+// this module only loads it for replay.
 
 export type FrtCallingClient = {
     fetchList: () => Promise<ComplaintRecord[]>;
@@ -219,16 +213,11 @@ export async function createFrtCallingClient(username: string, password: string)
     const captureFresh = () => {
         if (!capturePromise) {
             capturePromise = (async () => {
-                console.log('[CALLING] Capturing fresh session via browser login...');
-                const browser = await createFrtScraperSession(username, password);
-                try {
-                    const fresh = await browser.captureCallingSession!();
-                    session = fresh;
-                    await saveCachedCallingSession(fresh);
-                    return fresh;
-                } finally {
-                    await browser.close();
-                }
+                // Refresh BOTH sessions from one login so this recapture doesn't
+                // invalidate the report session (see refreshFrtSessions).
+                const { calling } = await refreshFrtSessions(username, password);
+                session = calling;
+                return calling;
             })().finally(() => { capturePromise = null; });
         }
         return capturePromise;

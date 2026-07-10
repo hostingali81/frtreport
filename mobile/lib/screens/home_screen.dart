@@ -128,7 +128,7 @@ class _HomeShellState extends State<_HomeShell> with WidgetsBindingObserver {
           isScrollControlled: true,
           useSafeArea: true,
           backgroundColor: AppColors.surface,
-          builder: (ctx) => DetailSheet(complaint: c, isIncomingCall: true, incomingAnswered: call.answered),
+          builder: (ctx) => DetailSheet(complaint: c, isIncomingCall: true, incomingAnswered: call.answered, incomingDurationSeconds: call.durationSeconds),
         );
 
         // Brief pause between multiple forms so the transition feels intentional.

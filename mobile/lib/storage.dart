@@ -6,10 +6,13 @@ import 'api.dart';
 
 // An incoming call the native side queued for post-call logging.
 // [answered] is null when the entry came from an old-format queue (unknown).
+// [durationSeconds] is the OFFHOOK→IDLE talk time (0 = missed, null = an old
+// build that didn't record it).
 class PendingCall {
   final int dataid;
   final bool? answered;
-  PendingCall(this.dataid, this.answered);
+  final int? durationSeconds;
+  PendingCall(this.dataid, this.answered, [this.durationSeconds]);
 }
 
 // Local persistence: the offline outbox (complete logs waiting for network),
@@ -254,7 +257,7 @@ class Store {
       for (final e in list) {
         if (e is Map) {
           final id = int.tryParse('${e['dataid']}');
-          if (id != null) out.add(PendingCall(id, e['answered'] is bool ? e['answered'] as bool : null));
+          if (id != null) out.add(PendingCall(id, e['answered'] is bool ? e['answered'] as bool : null, (e['duration'] as num?)?.toInt()));
         } else {
           // Entry written by a pre-"answered" build (plain dataid string).
           final id = int.tryParse('$e');

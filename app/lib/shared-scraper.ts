@@ -1740,6 +1740,49 @@ async function saveCachedFrtApiSession(session: FrtApiSession) {
     }
 }
 
+// Must match CALLING_SESSION_KEY in frt-calling.ts (same `reports` row).
+const FRT_CALLING_SESSION_KEY = 'frt_calling_session';
+
+async function saveCachedFrtCallingSession(session: FrtCallingApiSession) {
+    if (!supabase) return;
+    try {
+        await supabase
+            .from('reports')
+            .upsert({ key: FRT_CALLING_SESSION_KEY, payload: session }, { onConflict: 'key' });
+    } catch (error) {
+        console.warn('[SCRAPER] Failed to cache FRT calling session:', describeError(error));
+    }
+}
+
+// One FRT login that refreshes BOTH cached sessions (report + calling) at once.
+//
+// FRT permits a single active session per account. Capturing the report session
+// (`frt_api_session`) and the calling session (`frt_calling_session`) from
+// SEPARATE browser logins therefore made each new login silently invalidate the
+// other — so the two 5-minute crons (today-scrape + calling-sync) ended up doing
+// a fresh browser login on almost every run (a login "ping-pong"). Capturing
+// both from a SINGLE login means they share the same underlying FRT session and
+// stay valid together, so recaptures become rare and replays stay warm. Every
+// recapture entry point (createFrtApiScraperSession, createFrtCallingClient)
+// routes through here for that reason.
+export async function refreshFrtSessions(
+    username: string,
+    password: string
+): Promise<{ api: FrtApiSession; calling: FrtCallingApiSession }> {
+    console.log('[SCRAPER] Refreshing BOTH FRT sessions from a single browser login...');
+    const browserSession = await createFrtScraperSession(username, password);
+    try {
+        const api = await browserSession.captureApiSession!();
+        await saveCachedFrtApiSession(api);
+        const calling = await browserSession.captureCallingSession!();
+        await saveCachedFrtCallingSession(calling);
+        console.log('[SCRAPER] Both FRT sessions refreshed from one login.');
+        return { api, calling };
+    } finally {
+        await browserSession.close();
+    }
+}
+
 function getTodayDateOnlyIST() {
     const parts = new Intl.DateTimeFormat('en-CA', {
         timeZone: 'Asia/Kolkata',
@@ -1814,17 +1857,12 @@ export async function createFrtApiScraperSession(username: string, password: str
     const captureFreshSession = () => {
         if (!capturePromise) {
             capturePromise = (async () => {
-                console.log('[SCRAPER] Capturing fresh FRT API session via browser login...');
-                const browserSession = await createFrtScraperSession(username, password);
-                try {
-                    const fresh = await browserSession.captureApiSession!();
-                    apiSession = fresh;
-                    generation += 1;
-                    await saveCachedFrtApiSession(fresh);
-                    return fresh;
-                } finally {
-                    await browserSession.close();
-                }
+                // Refresh BOTH sessions from one login so this recapture doesn't
+                // invalidate the calling session (see refreshFrtSessions).
+                const { api } = await refreshFrtSessions(username, password);
+                apiSession = api;
+                generation += 1;
+                return api;
             })().finally(() => {
                 capturePromise = null;
             });

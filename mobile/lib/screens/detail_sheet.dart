@@ -48,7 +48,12 @@ class DetailSheet extends StatefulWidget {
   /// (OFFHOOK). null = unknown (queued by an old app build).
   final bool? incomingAnswered;
 
-  const DetailSheet({super.key, required this.complaint, this.isIncomingCall = false, this.incomingAnswered});
+  /// For incoming calls: OFFHOOK→IDLE talk time in seconds (0 = missed,
+  /// null = queued by a build that didn't record it). The operator didn't dial
+  /// from the app, so this is the only duration source for incoming calls.
+  final int? incomingDurationSeconds;
+
+  const DetailSheet({super.key, required this.complaint, this.isIncomingCall = false, this.incomingAnswered, this.incomingDurationSeconds});
 
   @override
   State<DetailSheet> createState() => _DetailSheetState();
@@ -448,9 +453,13 @@ class _DetailSheetState extends State<DetailSheet> {
     //  - rang, not picked   -> "Rang 0:27 · not picked" (how long it rang)
     //  - tracked, no log    -> "Call ended after 0:41" (talk vs ring unknown)
     //  - no call from app   -> "⚠ No call from app" (spot desk-filled logs)
+    // Incoming: the consumer dialed us, so the only talk-time we have is the
+    // OFFHOOK→IDLE duration the native side recorded (0/absent for a missed
+    // call). It rides in `duration_seconds` below and shows as a duration chip,
+    // so the note prefix stays clean.
+    final int? incomingDur = widget.incomingDurationSeconds;
     final String prefix;
     if (widget.isIncomingCall) {
-      // Consumer called us — duration tracking is irrelevant here.
       prefix = widget.incomingAnswered == false ? '📞 Incoming call · missed' : '📞 Incoming call';
     } else if (!_callTracked) {
       prefix = '⚠ No call from app';
@@ -468,7 +477,12 @@ class _DetailSheetState extends State<DetailSheet> {
       'call_status': _callStatus,
       'problem_category': _category,
       'notes': notes,
-      'duration_seconds': _callTracked ? _callDuration?.inSeconds : null,
+      // Incoming: talk time from the native OFFHOOK→IDLE timer (missed = null,
+      // so the report screen shows no duration chip). Outgoing: the exact
+      // call-log duration captured while the sheet was open.
+      'duration_seconds': widget.isIncomingCall
+          ? ((incomingDur != null && incomingDur > 0) ? incomingDur : null)
+          : (_callTracked ? _callDuration?.inSeconds : null),
       // Incoming: trust the native answered flag when we have it (a missed call
       // is never "connected", whatever status the operator picks); otherwise
       // fall back to the chosen status. Outgoing: exact call-log verdict wins.
