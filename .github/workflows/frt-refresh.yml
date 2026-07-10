@@ -1,0 +1,82 @@
+name: FRT Refresh (backstop, every 15 min)
+
+# Backstop + fallback for the fast path. The primary refresh is now an external
+# pinger (cron-job.org) hitting the Vercel /api/cron route every ~2 min, which
+# replays the warm FRT session (report data + calling grid) with no browser.
+#
+# This job exists for the two things Vercel cannot do reliably in its 60s limit:
+#   1. Browser (re)capture when the shared FRT session expires — refreshFrtSessions
+#      refreshes BOTH the report and calling sessions from ONE login (no ping-pong).
+#   2. A data fallback if the external pinger is ever down.
+# Runs today-scrape (report) then calling-sync (grid) in one runner; either one
+# recapturing keeps both sessions warm.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      max_retries:
+        description: 'Max session open attempts (default: 3)'
+        required: false
+        default: '3'
+
+concurrency:
+  group: frt-refresh
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        env:
+          # The API-replay path needs no browser; a session recapture uses the
+          # runner's preinstalled Google Chrome instead of downloading Chromium.
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+          PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: 'true'
+        run: npm ci
+
+      - name: Today Scrape (report data + keeps both sessions warm)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+          FRT_USERNAME: ${{ secrets.FRT_USERNAME }}
+          FRT_PASSWORD: ${{ secrets.FRT_PASSWORD }}
+          FRT_LOGIN_TYPE: ${{ secrets.FRT_LOGIN_TYPE || vars.FRT_LOGIN_TYPE || '' }}
+          TODAY_SCRAPE_MAX_RETRIES: ${{ github.event.inputs.max_retries || '3' }}
+          TODAY_SCRAPE_RETRY_DELAY_MS: '10000'
+          TODAY_SCRAPE_SESSION_RETRY_DELAY_MS: '30000'
+          FRT_API_CONCURRENCY: '2'
+          FRT_API_CHUNK_DAYS: '1'
+          SUPABASE_LOOKUP_CONCURRENCY: '4'
+          SUPABASE_UPSERT_CONCURRENCY: '2'
+          SUPABASE_UPSERT_BATCH_SIZE: '250'
+          SCRAPER_PROTOCOL_TIMEOUT_MS: '120000'
+          SCRAPER_LOAD_TIMEOUT_MS: '60000'
+        run: npx tsx scripts/today-scrape.ts
+
+      - name: Calling Sync (live grid fallback)
+        # Run even if the report scrape failed — the grid still needs refreshing.
+        if: ${{ always() }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+          FRT_USERNAME: ${{ secrets.FRT_USERNAME }}
+          FRT_PASSWORD: ${{ secrets.FRT_PASSWORD }}
+          FRT_LOGIN_TYPE: ${{ secrets.FRT_LOGIN_TYPE || vars.FRT_LOGIN_TYPE || '' }}
+          CALLING_SYNC_MAX_RETRIES: ${{ github.event.inputs.max_retries || '3' }}
+          CALLING_SYNC_RETRY_DELAY_MS: '15000'
+          SCRAPER_PROTOCOL_TIMEOUT_MS: '120000'
+          SCRAPER_LOAD_TIMEOUT_MS: '60000'
+        run: npx tsx scripts/calling-sync.ts
