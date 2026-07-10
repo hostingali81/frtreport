@@ -374,7 +374,15 @@ export async function getCachedContact(dataId: number): Promise<ContactRecord | 
         .maybeSingle();
         
     if (error || !data) return null;
-    
+
+    // The report scraper pre-creates the complaints row with consumer data but
+    // never writes crew — so a row existing does NOT mean the FRT detail was
+    // ever fetched. Treat a crew-less row as a cache MISS so the on-tap detail
+    // fetch (the only writer of assigned_crew/crew_mobile) actually runs and
+    // fills it in. Once crew is captured the row caches normally; this also
+    // self-heals when a crew is assigned after an early fetch.
+    if (!data.crew_mobile) return null;
+
     return {
         dataid: data.dataid,
         consumer_name: data.consumer_name,

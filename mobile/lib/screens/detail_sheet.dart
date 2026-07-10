@@ -255,6 +255,30 @@ class _DetailSheetState extends State<DetailSheet> {
       }
     }
 
+    // This is the consumer call — its outcome is what the complaint log records,
+    // so tear the tracker/monitor back down if the operator backs out of the
+    // SIM picker or the dialer won't open.
+    final ok = await _placeCall(mobile, perms);
+    if (!ok) {
+      _tracker.stop();
+      CallChannel.stopCallMonitor();
+    }
+  }
+
+  // Calls the field crew (FRT) linked to this complaint. Pure coordination
+  // call: it deliberately skips the call tracker, the info bubble and the
+  // auto call-outcome guess — those belong to the consumer call this sheet logs
+  // against, and reusing them here would mislabel the saved outcome.
+  Future<void> _callCrew(String mobile) async {
+    Haptics.medium();
+    final perms = await CallChannel.ensureCallPermissions();
+    await _placeCall(mobile, perms);
+  }
+
+  // Shared dialer: honours a remembered SIM (or prompts when the phone has two)
+  // and places a native direct call, falling back to the system dialer. Returns
+  // false if the operator dismissed the SIM picker or the dialer wouldn't open.
+  Future<bool> _placeCall(String mobile, CallPermissions perms) async {
     var placed = false;
     if (perms.callPhone) {
       String? accountId;
@@ -268,11 +292,7 @@ class _DetailSheetState extends State<DetailSheet> {
           (aborted, accountId) = await _chooseSim(accounts);
         }
       }
-      if (aborted) {
-        _tracker.stop();
-        CallChannel.stopCallMonitor();
-        return;
-      }
+      if (aborted) return false;
       placed = await CallChannel.directCall(mobile, accountId: accountId);
     }
 
@@ -280,11 +300,11 @@ class _DetailSheetState extends State<DetailSheet> {
       // No CALL_PHONE permission (or native dial failed) — classic dialer.
       final uri = Uri.parse('tel:$mobile');
       if (!await launchUrl(uri)) {
-        _tracker.stop();
-        CallChannel.stopCallMonitor();
         if (mounted) showSnack(context, 'Could not open the dialer', error: true);
+        return false;
       }
     }
+    return true;
   }
 
   Future<(bool aborted, String? accountId)> _chooseSim(List<PhoneAccount> accounts) async {
@@ -924,6 +944,28 @@ class _DetailSheetState extends State<DetailSheet> {
             decoration: BoxDecoration(color: AppColors.warningBg, borderRadius: BorderRadius.circular(kRadiusSm)),
             child: const Text('No mobile number on record', textAlign: TextAlign.center, style: TextStyle(color: AppColors.warning, fontWeight: FontWeight.w600)),
           ),
+        // Call the field crew (FRT) assigned to this complaint to coordinate the
+        // fix. Shown independently of the consumer number — the crew can still be
+        // reached even when the consumer's mobile is missing.
+        if (c.crewMobile != null && c.crewMobile!.isNotEmpty) ...[
+          Gap.sm,
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: () => _callCrew(c.crewMobile!),
+              icon: const Icon(Icons.engineering),
+              label: Text(
+                c.assignedCrew != null && c.assignedCrew!.isNotEmpty
+                    ? 'Call FRT · ${c.assignedCrew}'
+                    : 'Call FRT (crew)  ${c.crewMobile}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.brand, padding: const EdgeInsets.symmetric(vertical: 15)),
+            ),
+          ),
+        ],
       ],
     );
   }
