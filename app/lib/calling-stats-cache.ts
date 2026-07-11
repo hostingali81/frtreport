@@ -56,13 +56,47 @@ function rpcArgs(p: PresetRange) {
   };
 }
 
+// How stale a preset may get before this warmer recomputes it. The pinger hits
+// /api/cron every ~2 min to keep the live grid fresh, but each get_calling_stats
+// call scans a large slice of the 124k-row `complaints` table — and the wider
+// ranges ('30d', 'all') scan almost all of it through live_complaints_full.
+// Recomputing all four presets on every 2-min ping saturates the free-tier
+// disk-IO budget and throttles the whole database. So only 'today' (cheap, the
+// number people watch) is refreshed every cycle; the heavy ranges recompute at
+// most this often. All windows stay under CALLING_STATS_MAX_AGE_MS so cached
+// reads are never rejected as stale.
+const PRESET_MIN_INTERVAL_MS: Record<string, number> = {
+  today: 0,
+  '7d': 10 * 60 * 1000,
+  '30d': 15 * 60 * 1000,
+  all: 15 * 60 * 1000,
+};
+
 // Precompute + store every preset's stats. Best-effort per range so one failure
 // doesn't sink the rest. Called from the cron after the live grid is synced.
-export async function warmCallingStats(supabase: SupabaseClient): Promise<{ warmed: string[]; failed: string[] }> {
+// A preset whose cached row is still fresh (within PRESET_MIN_INTERVAL_MS) is
+// skipped, so the steady-state cost of a ping is just the cheap 'today' pass.
+export async function warmCallingStats(
+  supabase: SupabaseClient
+): Promise<{ warmed: string[]; skipped: string[]; failed: string[] }> {
   const warmed: string[] = [];
+  const skipped: string[] = [];
   const failed: string[] = [];
   for (const p of presetRanges()) {
     try {
+      const minInterval = PRESET_MIN_INTERVAL_MS[p.key] ?? 0;
+      if (minInterval > 0) {
+        const { data: existing } = await supabase
+          .from('reports')
+          .select('payload')
+          .eq('key', `${CALLING_STATS_KEY_PREFIX}${p.key}`)
+          .maybeSingle();
+        const computedAt = (existing?.payload as { computedAt?: string } | undefined)?.computedAt;
+        if (computedAt && Date.now() - new Date(computedAt).getTime() < minInterval) {
+          skipped.push(p.key);
+          continue;
+        }
+      }
       const { data, error } = await supabase.rpc('get_calling_stats', rpcArgs(p));
       if (error) throw new Error(error.message);
       const { error: upErr } = await supabase.from('reports').upsert(
@@ -75,7 +109,7 @@ export async function warmCallingStats(supabase: SupabaseClient): Promise<{ warm
       failed.push(p.key);
     }
   }
-  return { warmed, failed };
+  return { warmed, skipped, failed };
 }
 
 // Read a fresh precomputed preset, or null if missing/stale.
