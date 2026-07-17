@@ -52,20 +52,33 @@ export async function GET(request: Request) {
     const from = searchParams.get('from') || subtractDays(todayIst, 6);
     const to = searchParams.get('to') || todayIst;
 
-    let query = supabase
-      .from('call_logs')
-      .select('id, dataid, complaint_number, call_time, call_status, problem_category, notes, operator, operator_id, duration_seconds, connected, is_incoming')
-      .gte('call_time', `${from}T00:00:00+05:30`)
-      .lte('call_time', `${to}T23:59:59+05:30`)
-      .order('call_time', { ascending: false })
-      .limit(5000);
+    // call_logs in a range can exceed PostgREST's server-side max-rows cap
+    // (1000). A single .limit(5000) is silently clipped to that cap, which would
+    // make every total below (count, byStatus, per-operator, talk time…) top out
+    // at 1000. Page through the whole range in 1000-row batches so the KPIs
+    // reflect the real numbers.
+    const SELECT_COLS = 'id, dataid, complaint_number, call_time, call_status, problem_category, notes, operator, operator_id, duration_seconds, connected, is_incoming';
+    const BATCH = 1000;
+    const logs: Log[] = [];
+    for (let offset = 0; ; offset += BATCH) {
+      let query = supabase
+        .from('call_logs')
+        .select(SELECT_COLS)
+        .gte('call_time', `${from}T00:00:00+05:30`)
+        .lte('call_time', `${to}T23:59:59+05:30`)
+        .order('call_time', { ascending: false })
+        .order('id', { ascending: false }) // stable tiebreak so offset paging can't skip/dupe rows
+        .range(offset, offset + BATCH - 1);
 
-    // Operators only ever see their own calls.
-    if (session.role === 'operator') query = query.eq('operator_id', session.id);
+      // Operators only ever see their own calls.
+      if (session.role === 'operator') query = query.eq('operator_id', session.id);
 
-    const { data, error } = await query;
-    if (error) throw new Error(error.message);
-    const logs = (data as Log[]) || [];
+      const { data, error } = await query;
+      if (error) throw new Error(error.message);
+      const page = (data as Log[]) || [];
+      logs.push(...page);
+      if (page.length < BATCH) break;
+    }
 
     // Per-operator breakdown (for admin/super this is everyone; for an operator
     // it is just themselves).
@@ -97,12 +110,19 @@ export async function GET(request: Request) {
       if (!prev || l.call_time < prev) firstCallByDataid.set(l.dataid, l.call_time);
     }
     if (firstCallByDataid.size) {
-      const { data: comps } = await supabase
-        .from('complaints')
-        .select('dataid, complaint_date')
-        .in('dataid', Array.from(firstCallByDataid.keys()));
+      // .in() is capped by the same max-rows limit, so chunk the dataids to keep
+      // every matching complaint row (otherwise the average is biased to 1000).
+      const dataids = Array.from(firstCallByDataid.keys());
+      const comps: { dataid: number; complaint_date: string | null }[] = [];
+      for (let i = 0; i < dataids.length; i += 1000) {
+        const { data: chunk } = await supabase
+          .from('complaints')
+          .select('dataid, complaint_date')
+          .in('dataid', dataids.slice(i, i + 1000));
+        if (chunk) comps.push(...(chunk as { dataid: number; complaint_date: string | null }[]));
+      }
       const deltas: number[] = [];
-      for (const c of comps || []) {
+      for (const c of comps) {
         const first = firstCallByDataid.get(c.dataid);
         if (!first || !c.complaint_date) continue;
         const mins = (new Date(first).getTime() - new Date(c.complaint_date).getTime()) / 60000;
