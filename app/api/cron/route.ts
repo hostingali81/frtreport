@@ -55,13 +55,12 @@ function subtractDaysIST(dateOnly: string, days: number): string {
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
 }
 
-// How many days back the 2-min cron re-scrapes. Complaints filed a day or two
-// ago but only *closed* today won't reappear in a today-only pull, so their
-// status flip (Pending -> Complaint Closed) would be missed. A small rolling
-// window (re-checked with saveToNewDb, which only writes actually-changed rows)
-// keeps statuses fresh without heavy churn. The 15-min backstop uses a wider
-// window; long-open stragglers are caught by the periodic full scrape.
-const CRON_LOOKBACK_DAYS = Math.max(0, Number(process.env.CRON_STATUS_LOOKBACK_DAYS) || 3);
+// The cron only re-scrapes today + yesterday (LOOKBACK 1) so it stays fast.
+// A today-only pull would miss a complaint filed yesterday but closed today
+// (its complaint_date is yesterday); one extra day catches that across-midnight
+// flip. saveToNewDb still updates any status change in the window (writes only
+// changed rows). Everything older is corrected by the Daily Full Scrape (~3 AM IST).
+const CRON_LOOKBACK_DAYS = Math.max(0, Number(process.env.CRON_STATUS_LOOKBACK_DAYS) || 1);
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;

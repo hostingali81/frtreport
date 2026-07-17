@@ -116,13 +116,13 @@ async function main() {
             SESSION_RETRY_DELAY_MS
         );
 
-        // Re-scrape this many days back so a status flip on a complaint filed a
-        // few days ago (but only closed now) is captured. Bounded so the pull
-        // stays cheap; long-open stragglers are handled by the periodic full scrape.
-        const lookbackDays = parseIntegerEnv(process.env.TODAY_SCRAPE_LOOKBACK_DAYS, 30);
+        // Only re-scrape today + yesterday (LOOKBACK 1) so the run stays fast.
+        // saveToNewDb still updates any status change in that window; older status
+        // changes are picked up by the Daily Full Scrape (~3 AM IST).
+        const lookbackDays = parseIntegerEnv(process.env.TODAY_SCRAPE_LOOKBACK_DAYS, 1);
         const fromIST = subtractDaysIST(todayIST, lookbackDays);
 
-        console.log(`[TODAY-SCRAPE] Date: ${fromIST} → ${todayIST} (last ${lookbackDays}d, for status refresh)`);
+        console.log(`[TODAY-SCRAPE] Date: ${fromIST} → ${todayIST} (today+${lookbackDays}d back, for status refresh)`);
         console.log(`[TODAY-SCRAPE] Retry policy: max ${maxRetries} attempts`);
 
         // --- Login + Scrape ---

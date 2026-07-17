@@ -57,12 +57,12 @@ jobs:
           TODAY_SCRAPE_MAX_RETRIES: ${{ github.event.inputs.max_retries || '3' }}
           TODAY_SCRAPE_RETRY_DELAY_MS: '10000'
           TODAY_SCRAPE_SESSION_RETRY_DELAY_MS: '30000'
-          # Re-scrape the last 30 days each run so a Pending->Closed status flip on
-          # a complaint filed a few days ago is captured (saveToNewDb only writes
-          # rows that actually changed). Wider chunks keep it to a handful of calls.
-          TODAY_SCRAPE_LOOKBACK_DAYS: '30'
+          # Only today + yesterday each run (fast). saveToNewDb still writes any
+          # status change in that window; older data is handled by the Daily Full
+          # Scrape (full-scrape.yml, ~3 AM IST).
+          TODAY_SCRAPE_LOOKBACK_DAYS: '1'
           FRT_API_CONCURRENCY: '2'
-          FRT_API_CHUNK_DAYS: '7'
+          FRT_API_CHUNK_DAYS: '1'
           SUPABASE_LOOKUP_CONCURRENCY: '4'
           SUPABASE_UPSERT_CONCURRENCY: '2'
           SUPABASE_UPSERT_BATCH_SIZE: '250'

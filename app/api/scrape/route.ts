@@ -17,12 +17,11 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Incremental sync only; keep the date range small.
 
-// The incremental sync re-scrapes at least this many days back so a status flip
-// (Pending -> Complaint Closed) on a complaint filed a few days ago is captured
-// and updated — not just brand-new complaints. saveToNewDb skips unchanged rows
-// by content_hash, so a wider window stays cheap. Older stragglers are handled
-// by the periodic full scrape.
-const SYNC_LOOKBACK_DAYS = Math.max(1, Number(process.env.SYNC_LOOKBACK_DAYS) || 14);
+// The "Sync Latest" button re-scrapes today + yesterday (LOOKBACK 1) and upserts
+// via saveToNewDb, so a status flip (Pending -> Complaint Closed) on a very recent
+// complaint updates immediately — not just brand-new rows. Kept small so the
+// button stays fast; older complaints are handled by the Daily Full Scrape.
+const SYNC_LOOKBACK_DAYS = Math.max(1, Number(process.env.SYNC_LOOKBACK_DAYS) || 1);
 
 function getISTDateParts(date: Date) {
   const parts = new Intl.DateTimeFormat('en-CA', {
