@@ -57,10 +57,10 @@ jobs:
           TODAY_SCRAPE_MAX_RETRIES: ${{ github.event.inputs.max_retries || '3' }}
           TODAY_SCRAPE_RETRY_DELAY_MS: '10000'
           TODAY_SCRAPE_SESSION_RETRY_DELAY_MS: '30000'
-          # Only today + yesterday each run (fast). saveToNewDb still writes any
-          # status change in that window; older data is handled by the Daily Full
-          # Scrape (full-scrape.yml, ~3 AM IST).
-          TODAY_SCRAPE_LOOKBACK_DAYS: '1'
+          # Today only each run (fast) — this backstop just keeps today fresh and
+          # both sessions warm. saveToNewDb still writes any status change on today's
+          # complaints; older data is handled by the Daily Full Scrape (full-scrape.yml, ~3 AM IST).
+          TODAY_SCRAPE_LOOKBACK_DAYS: '0'
           FRT_API_CONCURRENCY: '2'
           FRT_API_CHUNK_DAYS: '1'
           SUPABASE_LOOKUP_CONCURRENCY: '4'

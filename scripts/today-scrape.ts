@@ -116,13 +116,13 @@ async function main() {
             SESSION_RETRY_DELAY_MS
         );
 
-        // Only re-scrape today + yesterday (LOOKBACK 1) so the run stays fast.
-        // saveToNewDb still updates any status change in that window; older status
-        // changes are picked up by the Daily Full Scrape (~3 AM IST).
-        const lookbackDays = parseIntegerEnv(process.env.TODAY_SCRAPE_LOOKBACK_DAYS, 1);
+        // Re-scrape today only (LOOKBACK 0) — today's midnight (IST) through now —
+        // so this 15-min backstop stays fast. saveToNewDb still updates any status
+        // change on today's complaints; older changes are handled by the Daily Full Scrape.
+        const lookbackDays = parseIntegerEnv(process.env.TODAY_SCRAPE_LOOKBACK_DAYS, 0);
         const fromIST = subtractDaysIST(todayIST, lookbackDays);
 
-        console.log(`[TODAY-SCRAPE] Date: ${fromIST} → ${todayIST} (today+${lookbackDays}d back, for status refresh)`);
+        console.log(`[TODAY-SCRAPE] Date: ${fromIST} → ${todayIST} (status refresh)`);
         console.log(`[TODAY-SCRAPE] Retry policy: max ${maxRetries} attempts`);
 
         // --- Login + Scrape ---
