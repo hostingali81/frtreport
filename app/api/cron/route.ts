@@ -4,7 +4,7 @@ import { createFrtCallingClient, syncLiveComplaints } from '../../lib/frt-callin
 import {
   createFrtApiScraperSession,
   getSupabaseClient,
-  insertOnlyNewDb,
+  saveToNewDb,
   logScrapeError,
   logScrapeSuccess,
   checkNewTablesExist,
@@ -16,8 +16,9 @@ import {
 // Triggered every 5 minutes by Vercel Cron (vercel.json).
 // Uses the same fast API-replay strategy as scripts/today-scrape.ts:
 //   1. Reuse cached FRT session (no browser unless session expired)
-//   2. Scrape today's date only
-//   3. Insert only NEW complaints (skip duplicates)
+//   2. Scrape a small recent window (today back CRON_LOOKBACK_DAYS)
+//   3. Upsert with change-detection — new complaints inserted, status changes
+//      on recent complaints updated, unchanged rows skipped by content_hash
 //   4. Target runtime: < 60s per run, well within the 5-min window
 // ---------------------------------------------------------------------------
 
@@ -46,6 +47,21 @@ function getTodayInIST(): string {
 
   return `${partMap.year}-${partMap.month}-${partMap.day}`;
 }
+
+function subtractDaysIST(dateOnly: string, days: number): string {
+  const [y, m, d] = dateOnly.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - days);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
+// How many days back the 2-min cron re-scrapes. Complaints filed a day or two
+// ago but only *closed* today won't reappear in a today-only pull, so their
+// status flip (Pending -> Complaint Closed) would be missed. A small rolling
+// window (re-checked with saveToNewDb, which only writes actually-changed rows)
+// keeps statuses fresh without heavy churn. The 15-min backstop uses a wider
+// window; long-open stragglers are caught by the periodic full scrape.
+const CRON_LOOKBACK_DAYS = Math.max(0, Number(process.env.CRON_STATUS_LOOKBACK_DAYS) || 3);
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -105,12 +121,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: msg }, { status: 500 });
     }
 
-    // ── 6. Scrape today ────────────────────────────────────────────────────────
+    // ── 6. Scrape the recent window (today back CRON_LOOKBACK_DAYS) ─────────────
+    const fromIST = subtractDaysIST(todayIST, CRON_LOOKBACK_DAYS);
     let scrapedRows: Record<string, string>[] = [];
     try {
-      console.log(`[CRON] Scraping ${todayIST} → ${todayIST}…`);
+      console.log(`[CRON] Scraping ${fromIST} → ${todayIST}…`);
       const scrapeStart = Date.now();
-      const payload = await session.scrapeRange(todayIST, todayIST);
+      const payload = await session.scrapeRange(fromIST, todayIST);
       scrapedRows = (payload.data ?? []) as Record<string, string>[];
       console.log(`[CRON] Scraped ${scrapedRows.length} rows in ${((Date.now() - scrapeStart) / 1000).toFixed(1)}s`);
     } finally {
@@ -159,33 +176,34 @@ export async function GET(request: Request) {
     const totalDuration = Math.round((Date.now() - startTime) / 1000);
 
     if (!scrapedRows.length) {
-      console.log('[CRON] No rows for today — nothing to insert.');
+      console.log('[CRON] No rows in window — nothing to write.');
       await logScrapeSuccess(0, 0, 0, totalDuration);
       await warmCallingStatsCache();
-      return NextResponse.json({ success: true, message: 'No data for today', stats: { scraped: 0, new: 0, duration: totalDuration }, calling: callingSync });
+      return NextResponse.json({ success: true, message: 'No data in window', stats: { scraped: 0, new: 0, updated: 0, duration: totalDuration }, calling: callingSync });
     }
 
-    const saveResult = await insertOnlyNewDb(scrapedRows, totalDuration, { recordMetadata: true });
+    // Upsert with change-detection: new complaints are inserted, and existing
+    // ones whose content changed (e.g. status flipped to Closed) are updated.
+    // Unchanged rows are skipped by content_hash, so re-scanning the window is cheap.
+    const saveResult = await saveToNewDb(scrapedRows, totalDuration, 'cron_status_refresh', { recordMetadata: true });
     await warmCallingStatsCache();
     const finalDuration = Math.round((Date.now() - startTime) / 1000);
 
     console.log('[CRON] Done!', {
-      date: todayIST,
+      range: `${fromIST}..${todayIST}`,
       scraped: scrapedRows.length,
-      new_inserted: saveResult.new_rows,
-      already_existed: saveResult.skipped_rows,
-      enriched: saveResult.enriched_rows,
+      new: saveResult.new_rows,
+      updated: saveResult.updated_rows,
       duration: `${finalDuration}s`,
     });
 
     return NextResponse.json({
       success: true,
       stats: {
-        date: todayIST,
+        range: `${fromIST}..${todayIST}`,
         scraped: scrapedRows.length,
         new: saveResult.new_rows,
-        skipped: saveResult.skipped_rows,
-        enriched: saveResult.enriched_rows,
+        updated: saveResult.updated_rows,
         duration: finalDuration,
       },
       calling: callingSync,

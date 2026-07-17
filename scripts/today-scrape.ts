@@ -1,7 +1,7 @@
 import {
     checkNewTablesExist,
     createFrtApiScraperSession,
-    insertOnlyNewDb,
+    saveToNewDb,
     logScrapeError,
     logScrapeSuccess
 } from '../app/lib/shared-scraper';
@@ -11,10 +11,13 @@ import {
 // ---------------------------------------------------------------------------
 // Strategy:
 //   1. Login to FRT via API session (cached session reused when valid — no browser needed)
-//   2. Scrape ONLY today's date range (IST)
+//   2. Scrape a rolling recent window (today back TODAY_SCRAPE_LOOKBACK_DAYS, IST)
+//      so complaints whose STATUS changed after they were filed are re-fetched,
+//      not just brand-new ones.
 //   3. Release login (session.close()) as fast as possible
-//   4. Insert only NEW complaints into Supabase — existing ones are skipped entirely
-//   5. Exit. Total target: < 60 seconds per run.
+//   4. Upsert with change-detection (saveToNewDb) — new complaints inserted,
+//      changed ones (e.g. status flipped to Closed) updated, unchanged skipped.
+//   5. Exit. Total target: well within the 8-min GitHub runner budget.
 // ---------------------------------------------------------------------------
 
 // Shorter delays than full-scrape because we must fit inside a 5-min window.
@@ -47,6 +50,13 @@ function getTodayInIST(): string {
     );
 
     return `${partMap.year}-${partMap.month}-${partMap.day}`;
+}
+
+function subtractDaysIST(dateOnly: string, days: number): string {
+    const [y, m, d] = dateOnly.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() - days);
+    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
 }
 
 function getErrorMessage(error: unknown) {
@@ -106,7 +116,13 @@ async function main() {
             SESSION_RETRY_DELAY_MS
         );
 
-        console.log(`[TODAY-SCRAPE] Date: ${todayIST} → ${todayIST} (today only)`);
+        // Re-scrape this many days back so a status flip on a complaint filed a
+        // few days ago (but only closed now) is captured. Bounded so the pull
+        // stays cheap; long-open stragglers are handled by the periodic full scrape.
+        const lookbackDays = parseIntegerEnv(process.env.TODAY_SCRAPE_LOOKBACK_DAYS, 30);
+        const fromIST = subtractDaysIST(todayIST, lookbackDays);
+
+        console.log(`[TODAY-SCRAPE] Date: ${fromIST} → ${todayIST} (last ${lookbackDays}d, for status refresh)`);
         console.log(`[TODAY-SCRAPE] Retry policy: max ${maxRetries} attempts`);
 
         // --- Login + Scrape ---
@@ -154,14 +170,14 @@ async function main() {
             );
         }
 
-        // --- Scrape today only ---
+        // --- Scrape the recent window ---
         let scrapedRows: Record<string, string>[] = [];
         let scrapeError: unknown;
 
         try {
-            console.log(`[TODAY-SCRAPE] Scraping ${todayIST}...`);
+            console.log(`[TODAY-SCRAPE] Scraping ${fromIST} → ${todayIST}...`);
             const scrapeStart = Date.now();
-            const payload = await scraperSession.scrapeRange(todayIST, todayIST);
+            const payload = await scraperSession.scrapeRange(fromIST, todayIST);
             const scrapeMs = Date.now() - scrapeStart;
 
             scrapedRows = (payload.data || []) as Record<string, string>[];
@@ -183,26 +199,25 @@ async function main() {
             throw scrapeError;
         }
 
-        // --- Insert only new rows into Supabase ---
+        // --- Upsert into Supabase (new + changed rows) ---
         const totalDuration = Math.round((Date.now() - startTime) / 1000);
 
         if (!scrapedRows.length) {
-            console.log('[TODAY-SCRAPE] No rows scraped for today — nothing to insert.');
+            console.log('[TODAY-SCRAPE] No rows scraped in window — nothing to write.');
             await logScrapeSuccess(0, 0, 0, totalDuration);
-            console.log(`[TODAY-SCRAPE] Done in ${totalDuration}s. (0 rows today)`);
+            console.log(`[TODAY-SCRAPE] Done in ${totalDuration}s. (0 rows)`);
             process.exit(0);
         }
 
-        console.log(`[TODAY-SCRAPE] Checking which complaints are new (insert-only)...`);
-        const saveResult = await insertOnlyNewDb(scrapedRows, totalDuration, { recordMetadata: true });
+        console.log(`[TODAY-SCRAPE] Upserting new + changed complaints (content_hash skips unchanged)...`);
+        const saveResult = await saveToNewDb(scrapedRows, totalDuration, 'today_scrape_status_refresh', { recordMetadata: true });
 
         const finalDuration = Math.round((Date.now() - startTime) / 1000);
         console.log('[TODAY-SCRAPE] Done!', {
-            date: todayIST,
+            range: `${fromIST}..${todayIST}`,
             scraped: scrapedRows.length,
-            new_inserted: saveResult.new_rows,
-            already_existed: saveResult.skipped_rows,
-            enriched: saveResult.enriched_rows,
+            new: saveResult.new_rows,
+            updated: saveResult.updated_rows,
             duration: `${finalDuration}s`
         });
 

@@ -17,6 +17,13 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Incremental sync only; keep the date range small.
 
+// The incremental sync re-scrapes at least this many days back so a status flip
+// (Pending -> Complaint Closed) on a complaint filed a few days ago is captured
+// and updated — not just brand-new complaints. saveToNewDb skips unchanged rows
+// by content_hash, so a wider window stays cheap. Older stragglers are handled
+// by the periodic full scrape.
+const SYNC_LOOKBACK_DAYS = Math.max(1, Number(process.env.SYNC_LOOKBACK_DAYS) || 14);
+
 function getISTDateParts(date: Date) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata',
@@ -118,6 +125,13 @@ export async function GET(request: Request) {
       scrapeType = 'manual_full_attempt';
       // Manual override - will likely timeout on Vercel if range is large
       // But useful if running locally
+    }
+
+    // Widen the incremental window back to at least SYNC_LOOKBACK_DAYS so status
+    // changes on recently-filed complaints are re-fetched, not just new rows.
+    if (fromDate && toDate && !forceFullScrape) {
+      const lookbackFloor = subtractDaysFromDateOnly(toDate, SYNC_LOOKBACK_DAYS);
+      if (lookbackFloor < fromDate) fromDate = lookbackFloor;
     }
 
     // Fast path: replay the captured report API session (no browser unless the
