@@ -18,11 +18,21 @@ function subtractDays(dateOnly: string, days: number): string {
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
 }
 
+// Attributes of the complaint a call belongs to, embedded via the call_logs ->
+// complaints relationship (dataid). Lets us filter/segment calls by complaint
+// geography, feeder, area, type and status without a second query.
+type ComplaintAttrs = {
+  division: string | null; sub_division: string | null; feeder: string | null;
+  area_type: string | null; complaint_type: string | null; status: string | null;
+  complaint_date: string | null;
+};
+
 type Log = {
   id: number; dataid: number | null; complaint_number: string | null; call_time: string;
   call_status: string | null; problem_category: string | null; notes: string | null;
   operator: string | null; operator_id: string | null;
   duration_seconds: number | null; connected: boolean | null; is_incoming?: boolean | null;
+  complaints: ComplaintAttrs | null;
 };
 
 // Old rows have connected=null; fall back to the recorded status.
@@ -39,6 +49,24 @@ function tally(logs: Log[], key: 'call_status' | 'problem_category'): Record<str
   return out;
 }
 
+// A filter param is a comma-separated allow-list; empty/absent means "no filter".
+function parseList(v: string | null): string[] {
+  return v ? v.split(',').map(s => s.trim()).filter(Boolean) : [];
+}
+// Sorted, de-duplicated non-empty values for a dropdown.
+function distinctSorted(values: (string | null | undefined)[]): string[] {
+  return Array.from(new Set(values.filter((v): v is string => !!v && v.trim() !== ''))).sort((a, b) => a.localeCompare(b));
+}
+
+// Talk-time buckets (seconds). Only connected calls have meaningful duration.
+function inDurationBucket(seconds: number | null, bucket: string): boolean {
+  const s = seconds ?? 0;
+  if (bucket === 'lt30') return s < 30;
+  if (bucket === '30to120') return s >= 30 && s <= 120;
+  if (bucket === 'gt120') return s > 120;
+  return true; // unknown bucket -> no restriction
+}
+
 export async function GET(request: Request) {
   try {
     const session = await getSession();
@@ -52,14 +80,27 @@ export async function GET(request: Request) {
     const from = searchParams.get('from') || subtractDays(todayIst, 6);
     const to = searchParams.get('to') || todayIst;
 
+    // ---- filters (Group A: call-level, Group B: complaint-level) ----
+    const fStatus = parseList(searchParams.get('status'));               // call_status
+    const fCategory = parseList(searchParams.get('category'));           // problem_category
+    const fOperator = parseList(searchParams.get('operator'));           // operator_id (managers only)
+    const fDirection = searchParams.get('direction');                    // 'incoming' | 'outgoing'
+    const fDuration = searchParams.get('duration') || '';                // 'lt30' | '30to120' | 'gt120'
+    const fDivision = parseList(searchParams.get('division'));
+    const fSubDivision = parseList(searchParams.get('subDivision'));
+    const fFeeder = parseList(searchParams.get('feeder'));
+    const fAreaType = parseList(searchParams.get('areaType'));
+    const fComplaintType = parseList(searchParams.get('complaintType'));
+    const fComplaintStatus = parseList(searchParams.get('complaintStatus')); // complaints.status
+
     // call_logs in a range can exceed PostgREST's server-side max-rows cap
-    // (1000). A single .limit(5000) is silently clipped to that cap, which would
-    // make every total below (count, byStatus, per-operator, talk time…) top out
-    // at 1000. Page through the whole range in 1000-row batches so the KPIs
-    // reflect the real numbers.
-    const SELECT_COLS = 'id, dataid, complaint_number, call_time, call_status, problem_category, notes, operator, operator_id, duration_seconds, connected, is_incoming';
+    // (1000). A single .limit() is silently clipped to that cap, which would make
+    // every total below (count, byStatus, per-operator, talk time…) top out at
+    // 1000. Page through the whole range in 1000-row batches. Each call also
+    // embeds its complaint's attributes so we can segment by them below.
+    const SELECT_COLS = 'id, dataid, complaint_number, call_time, call_status, problem_category, notes, operator, operator_id, duration_seconds, connected, is_incoming, complaints(division, sub_division, feeder, area_type, complaint_type, status, complaint_date)';
     const BATCH = 1000;
-    const logs: Log[] = [];
+    const allLogs: Log[] = [];
     for (let offset = 0; ; offset += BATCH) {
       let query = supabase
         .from('call_logs')
@@ -75,10 +116,50 @@ export async function GET(request: Request) {
 
       const { data, error } = await query;
       if (error) throw new Error(error.message);
-      const page = (data as Log[]) || [];
-      logs.push(...page);
+      const page = ((data as unknown) as Log[]) || [];
+      allLogs.push(...page);
       if (page.length < BATCH) break;
     }
+
+    // Filter dropdowns are built from the WHOLE range (before filtering) so a
+    // user always sees every value present in the range, not just what survived
+    // the current filters.
+    const availableFilters = {
+      callStatuses: distinctSorted(allLogs.map(l => l.call_status)),
+      categories: distinctSorted(allLogs.map(l => l.problem_category)),
+      operators: Array.from(
+        allLogs.reduce((m, l) => {
+          const id = l.operator_id ?? '';
+          if (id && !m.has(id)) m.set(id, l.operator || 'Unknown');
+          return m;
+        }, new Map<string, string>()),
+      ).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
+      divisions: distinctSorted(allLogs.map(l => l.complaints?.division)),
+      subDivisions: distinctSorted(allLogs.map(l => l.complaints?.sub_division)),
+      feeders: distinctSorted(allLogs.map(l => l.complaints?.feeder)),
+      areaTypes: distinctSorted(allLogs.map(l => l.complaints?.area_type)),
+      complaintTypes: distinctSorted(allLogs.map(l => l.complaints?.complaint_type)),
+      complaintStatuses: distinctSorted(allLogs.map(l => l.complaints?.status)),
+    };
+
+    // Apply the requested filters. Each dimension is AND-ed; within a dimension
+    // the allow-list is OR-ed.
+    const logs = allLogs.filter(l => {
+      if (fStatus.length && !fStatus.includes(l.call_status ?? '')) return false;
+      if (fCategory.length && !fCategory.includes(l.problem_category ?? '')) return false;
+      if (fOperator.length && !fOperator.includes(String(l.operator_id ?? ''))) return false;
+      if (fDirection === 'incoming' && l.is_incoming !== true) return false;
+      if (fDirection === 'outgoing' && l.is_incoming === true) return false;
+      if (fDuration && !inDurationBucket(l.duration_seconds, fDuration)) return false;
+      const c = l.complaints;
+      if (fDivision.length && !(c && fDivision.includes(c.division ?? ''))) return false;
+      if (fSubDivision.length && !(c && fSubDivision.includes(c.sub_division ?? ''))) return false;
+      if (fFeeder.length && !(c && fFeeder.includes(c.feeder ?? ''))) return false;
+      if (fAreaType.length && !(c && fAreaType.includes(c.area_type ?? ''))) return false;
+      if (fComplaintType.length && !(c && fComplaintType.includes(c.complaint_type ?? ''))) return false;
+      if (fComplaintStatus.length && !(c && fComplaintStatus.includes(c.status ?? ''))) return false;
+      return true;
+    });
 
     // Per-operator breakdown (for admin/super this is everyone; for an operator
     // it is just themselves).
@@ -101,31 +182,22 @@ export async function GET(request: Request) {
     const outgoingLogs = logs.filter(l => l.is_incoming !== true);
 
     // Average time from complaint arrival to its FIRST call (responsiveness vs
-    // the SLA clock). Only complaints we still know the complaint_date for.
+    // the SLA clock). complaint_date comes from the embedded complaint.
     let avgFirstCallMinutes: number | null = null;
     const firstCallByDataid = new Map<number, string>();
+    const complaintDateByDataid = new Map<number, string>();
     for (const l of logs) {
       if (l.dataid == null) continue;
       const prev = firstCallByDataid.get(l.dataid);
       if (!prev || l.call_time < prev) firstCallByDataid.set(l.dataid, l.call_time);
+      if (l.complaints?.complaint_date) complaintDateByDataid.set(l.dataid, l.complaints.complaint_date);
     }
     if (firstCallByDataid.size) {
-      // .in() is capped by the same max-rows limit, so chunk the dataids to keep
-      // every matching complaint row (otherwise the average is biased to 1000).
-      const dataids = Array.from(firstCallByDataid.keys());
-      const comps: { dataid: number; complaint_date: string | null }[] = [];
-      for (let i = 0; i < dataids.length; i += 1000) {
-        const { data: chunk } = await supabase
-          .from('complaints')
-          .select('dataid, complaint_date')
-          .in('dataid', dataids.slice(i, i + 1000));
-        if (chunk) comps.push(...(chunk as { dataid: number; complaint_date: string | null }[]));
-      }
       const deltas: number[] = [];
-      for (const c of comps) {
-        const first = firstCallByDataid.get(c.dataid);
-        if (!first || !c.complaint_date) continue;
-        const mins = (new Date(first).getTime() - new Date(c.complaint_date).getTime()) / 60000;
+      for (const [dataid, first] of firstCallByDataid) {
+        const cDate = complaintDateByDataid.get(dataid);
+        if (!cDate) continue;
+        const mins = (new Date(first).getTime() - new Date(cDate).getTime()) / 60000;
         if (mins >= 0 && mins < 24 * 60) deltas.push(mins);
       }
       if (deltas.length) avgFirstCallMinutes = Math.round(deltas.reduce((a, b) => a + b, 0) / deltas.length);
@@ -135,6 +207,7 @@ export async function GET(request: Request) {
       success: true,
       role: session.role,
       range: { from, to },
+      availableFilters,
       totals: {
         total: logs.length,
         connected: connectedTotal,

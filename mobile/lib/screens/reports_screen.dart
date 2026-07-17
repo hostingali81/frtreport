@@ -23,10 +23,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Map<String, dynamic>? _data;
   bool _loading = true;
   String? _error;
-  // Default range: today only (pick other dates from the two buttons).
+  // Default range: today only (or pick a preset / custom dates below).
   DateTime _from = _istNow();
   DateTime _to = _istNow();
+  String _preset = 'today'; // today | month | lastMonth | custom
   int _recentFilter = 0; // 0=All, 1=Outgoing, 2=Incoming
+
+  // Filter dropdown values for the current range (from the API response) and the
+  // filters the user has applied (query-param key -> selected value).
+  Map<String, dynamic>? _availableFilters;
+  final Map<String, String> _filters = {};
 
   final _fmt = DateFormat('yyyy-MM-dd');
   final _fmtNice = DateFormat('d MMM');
@@ -43,10 +49,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
       _error = null;
     });
     try {
-      final d = await Api.reports(from: _fmt.format(_from), to: _fmt.format(_to));
+      final d = await Api.reports(from: _fmt.format(_from), to: _fmt.format(_to), filters: _filters);
       if (!mounted) return;
       setState(() {
         _data = d;
+        _availableFilters = d['availableFilters'] as Map<String, dynamic>?;
         _loading = false;
       });
     } catch (e) {
@@ -62,7 +69,46 @@ class _ReportsScreenState extends State<ReportsScreen> {
     Haptics.tap();
     final picked = await showDatePicker(context: context, initialDate: isFrom ? _from : _to, firstDate: DateTime(2025), lastDate: _istNow());
     if (picked == null) return;
-    setState(() => isFrom ? _from = picked : _to = picked);
+    setState(() {
+      _preset = 'custom';
+      if (isFrom) {
+        _from = picked;
+      } else {
+        _to = picked;
+      }
+    });
+    _load();
+  }
+
+  // Midnight of "today" in IST (only y/m/d matter — the API reads these as IST).
+  DateTime _istToday() {
+    final n = _istNow();
+    return DateTime(n.year, n.month, n.day);
+  }
+
+  void _applyPreset(String p) {
+    Haptics.tap();
+    if (p == 'custom') {
+      setState(() => _preset = 'custom');
+      return;
+    }
+    final today = _istToday();
+    setState(() {
+      _preset = p;
+      if (p == 'today') {
+        _from = today;
+        _to = today;
+      } else if (p == 'month') {
+        // 1st of the current month → today.
+        _from = DateTime(today.year, today.month, 1);
+        _to = today;
+      } else if (p == 'lastMonth') {
+        // 1st → last day of the previous month (DateTime normalises rollovers).
+        final lastMonthEnd = DateTime(today.year, today.month, 1).subtract(const Duration(days: 1));
+        _from = DateTime(lastMonthEnd.year, lastMonthEnd.month, 1);
+        _to = lastMonthEnd;
+      }
+    });
     _load();
   }
 
@@ -84,13 +130,30 @@ class _ReportsScreenState extends State<ReportsScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                Expanded(child: OutlinedButton.icon(onPressed: () => _pick(true), icon: const Icon(Icons.calendar_today, size: 15), label: Text(_fmtNice.format(_from)))),
-                const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Icon(Icons.arrow_forward, size: 16, color: AppColors.muted)),
-                Expanded(child: OutlinedButton.icon(onPressed: () => _pick(false), icon: const Icon(Icons.calendar_today, size: 15), label: Text(_fmtNice.format(_to)))),
+                _presetChip('Today', 'today'),
+                _presetChip('This Month', 'month'),
+                _presetChip('Last Month', 'lastMonth'),
+                _presetChip('Custom', 'custom'),
               ],
             ),
+            if (_preset == 'custom') ...[
+              Gap.sm,
+              Row(
+                children: [
+                  Expanded(child: OutlinedButton.icon(onPressed: () => _pick(true), icon: const Icon(Icons.calendar_today, size: 15), label: Text(_fmtNice.format(_from)))),
+                  const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Icon(Icons.arrow_forward, size: 16, color: AppColors.muted)),
+                  Expanded(child: OutlinedButton.icon(onPressed: () => _pick(false), icon: const Icon(Icons.calendar_today, size: 15), label: Text(_fmtNice.format(_to)))),
+                ],
+              ),
+            ],
+            if (_availableFilters != null) ...[
+              Gap.sm,
+              _filterBar(),
+            ],
             Gap.md,
             if (_loading)
               const Padding(padding: EdgeInsets.only(top: 60), child: Center(child: CircularProgressIndicator()))
@@ -220,6 +283,273 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // 133 -> "2:13"
   String _fmtMmSs(int seconds) => '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
 
+  Widget _presetChip(String label, String value) {
+    final selected = _preset == value;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => _applyPreset(value),
+      showCheckmark: false,
+      backgroundColor: Colors.white,
+      selectedColor: AppColors.brand,
+      side: BorderSide(color: selected ? AppColors.brand : AppColors.border),
+      labelStyle: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: selected ? Colors.white : AppColors.inkSoft,
+      ),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+  }
+
+  // ---- filters ----
+
+  // Filter dimensions available for the current range. Fixed dimensions
+  // (direction, talk time) are always offered; data-driven ones only when the
+  // range actually has 2+ distinct values (a 0/1-value filter does nothing).
+  List<_FilterSpec> _buildSpecs(bool isManager) {
+    final af = _availableFilters ?? const {};
+    List<MapEntry<String, String>> strs(String k) =>
+        (((af[k] as List?) ?? const []).map((e) => MapEntry('$e', '$e'))).toList();
+
+    final specs = <_FilterSpec>[
+      const _FilterSpec('direction', 'Direction', [MapEntry('outgoing', 'Outgoing'), MapEntry('incoming', 'Incoming')]),
+      _FilterSpec('status', 'Call status', strs('callStatuses')),
+      _FilterSpec('category', 'Problem category', strs('categories')),
+      if (isManager)
+        _FilterSpec('operator', 'Operator',
+            (((af['operators'] as List?) ?? const []).map((o) => MapEntry('${o['id']}', '${o['name']}'))).toList()),
+      const _FilterSpec('duration', 'Talk time', [MapEntry('lt30', '< 30 sec'), MapEntry('30to120', '30 sec – 2 min'), MapEntry('gt120', '> 2 min')]),
+      _FilterSpec('division', 'Division', strs('divisions')),
+      _FilterSpec('subDivision', 'Sub-division', strs('subDivisions')),
+      _FilterSpec('feeder', 'Feeder', strs('feeders')),
+      _FilterSpec('areaType', 'Area type', strs('areaTypes')),
+      _FilterSpec('complaintType', 'Complaint type', strs('complaintTypes')),
+      _FilterSpec('complaintStatus', 'Complaint status', strs('complaintStatuses')),
+    ];
+    const fixed = {'direction', 'duration'};
+    return specs.where((s) => fixed.contains(s.key) || s.options.length >= 2).toList();
+  }
+
+  String _labelFor(String key, String value) {
+    for (final s in _buildSpecs(widget.user.isManager)) {
+      if (s.key != key) continue;
+      for (final o in s.options) {
+        if (o.key == value) return o.value;
+      }
+    }
+    return value;
+  }
+
+  Widget _filterBar() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            OutlinedButton.icon(
+              onPressed: _openFilterSheet,
+              icon: const Icon(Icons.tune, size: 16),
+              label: Text(_filters.isEmpty ? 'Filters' : 'Filters · ${_filters.length}'),
+            ),
+            if (_filters.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () {
+                  Haptics.tap();
+                  setState(_filters.clear);
+                  _load();
+                },
+                child: const Text('Clear'),
+              ),
+            ],
+          ],
+        ),
+        if (_filters.isNotEmpty) ...[
+          Gap.xs,
+          Wrap(spacing: 6, runSpacing: 6, children: _filters.entries.map((e) => _activeChip(e.key, e.value)).toList()),
+        ],
+      ],
+    );
+  }
+
+  Widget _activeChip(String key, String value) {
+    return InputChip(
+      label: Text(_labelFor(key, value), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+      onDeleted: () {
+        Haptics.tap();
+        setState(() => _filters.remove(key));
+        _load();
+      },
+      backgroundColor: AppColors.brand.withValues(alpha: 0.08),
+      side: BorderSide(color: AppColors.brand.withValues(alpha: 0.35)),
+      labelStyle: const TextStyle(color: AppColors.brand),
+      deleteIconColor: AppColors.brand,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+  }
+
+  void _openFilterSheet() {
+    Haptics.tap();
+    final specs = _buildSpecs(widget.user.isManager);
+    final local = Map<String, String>.from(_filters);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (sheetCtx, setSheet) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text('Filters', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink)),
+                        const Spacer(),
+                        if (local.isNotEmpty)
+                          TextButton(onPressed: () => setSheet(local.clear), child: const Text('Clear all')),
+                      ],
+                    ),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            for (final s in specs) _filterRow(sheetCtx, s, local, setSheet),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Gap.md,
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () {
+                          Navigator.pop(sheetCtx);
+                          setState(() {
+                            _filters
+                              ..clear()
+                              ..addAll(local);
+                          });
+                          _load();
+                        },
+                        child: const Text('Apply'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _filterRow(BuildContext sheetCtx, _FilterSpec s, Map<String, String> local, void Function(void Function()) setSheet) {
+    final current = local[s.key];
+    final currentLabel = current == null
+        ? 'All'
+        : s.options.firstWhere((o) => o.key == current, orElse: () => MapEntry(current, current)).value;
+    return InkWell(
+      onTap: () async {
+        final picked = await _pickValue(sheetCtx, s.label, s.options, current);
+        if (picked == null) return; // dismissed, no change
+        setSheet(() {
+          if (picked.isEmpty) {
+            local.remove(s.key);
+          } else {
+            local[s.key] = picked;
+          }
+        });
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        child: Row(
+          children: [
+            Expanded(child: Text(s.label, style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink))),
+            Flexible(
+              child: Text(currentLabel,
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: current == null ? AppColors.muted : AppColors.brand, fontWeight: FontWeight.w600)),
+            ),
+            const Icon(Icons.chevron_right, size: 18, color: AppColors.muted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Searchable single-select picker. Returns the chosen value, '' for "All"
+  // (clear), or null if dismissed.
+  Future<String?> _pickValue(BuildContext ctx, String title, List<MapEntry<String, String>> options, String? current) {
+    return showModalBottomSheet<String>(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (pickCtx) {
+        String q = '';
+        return StatefulBuilder(
+          builder: (pickCtx, setSheet) {
+            final ql = q.toLowerCase();
+            final filtered = options.where((o) => o.value.toLowerCase().contains(ql)).toList();
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(pickCtx).viewInsets.bottom),
+              child: SizedBox(
+                height: MediaQuery.of(pickCtx).size.height * 0.6,
+                child: Column(
+                  children: [
+                    const SizedBox(height: 14),
+                    Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink)),
+                    if (options.length > 8)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                        child: TextField(
+                          autofocus: true,
+                          decoration: const InputDecoration(hintText: 'Search…', prefixIcon: Icon(Icons.search, size: 18)),
+                          onChanged: (v) => setSheet(() => q = v),
+                        ),
+                      )
+                    else
+                      const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          ListTile(
+                            title: const Text('All'),
+                            trailing: current == null ? const Icon(Icons.check, color: AppColors.brand) : null,
+                            onTap: () => Navigator.pop(pickCtx, ''),
+                          ),
+                          const Divider(height: 1),
+                          for (final o in filtered)
+                            ListTile(
+                              title: Text(o.value),
+                              trailing: current == o.key ? const Icon(Icons.check, color: AppColors.brand) : null,
+                              onTap: () => Navigator.pop(pickCtx, o.key),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _stat(String value, String label, Color color, IconData icon, {String? sub}) {
     return AppCard(
       padding: const EdgeInsets.all(12),
@@ -342,4 +672,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
       ),
     );
   }
+}
+
+// A single filter dimension: its query-param key, display label, and the
+// available options as (queryValue -> displayLabel) pairs.
+class _FilterSpec {
+  final String key;
+  final String label;
+  final List<MapEntry<String, String>> options;
+  const _FilterSpec(this.key, this.label, this.options);
 }

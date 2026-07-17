@@ -169,8 +169,15 @@ class Api {
     }
   }
 
-  static Future<Map<String, dynamic>> reports({String? from, String? to}) {
-    final q = [if (from != null) 'from=$from', if (to != null) 'to=$to'];
+  static Future<Map<String, dynamic>> reports({String? from, String? to, Map<String, String>? filters}) {
+    final q = <String>[
+      if (from != null) 'from=$from',
+      if (to != null) 'to=$to',
+      if (filters != null)
+        ...filters.entries
+            .where((e) => e.value.isNotEmpty)
+            .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}'),
+    ];
     return _get('/api/calling/reports${q.isEmpty ? '' : '?${q.join('&')}'}');
   }
 
