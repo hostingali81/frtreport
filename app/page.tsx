@@ -82,7 +82,8 @@ const renderMonochromeChart = (opts: {
 
   const maxValue = Math.max(1, ...opts.series.flatMap((s) => s.values));
   const step = niceStep(maxValue / 4);
-  const top = Math.max(step, Math.ceil(maxValue / step) * step);
+  // Extra headroom so the value printed above the tallest bar/point still fits.
+  const top = Math.max(step, Math.ceil((maxValue * 1.12) / step) * step);
 
   ctx.font = `10px ${FONT}`;
   for (let v = 0; v <= top + 1e-6; v += step) {
@@ -125,6 +126,27 @@ const renderMonochromeChart = (opts: {
         ctx.strokeStyle = '#000000';
         ctx.lineWidth = 0.7;
         ctx.strokeRect(x, yBase - barH, barW - 1, barH);
+
+        if (value <= 0) return;
+        // Value above the column: printed flat when the bar is wide enough,
+        // otherwise turned on its side so neighbouring labels never collide.
+        const text = value.toLocaleString('en-IN');
+        ctx.font = `8px ${FONT}`;
+        ctx.fillStyle = '#000000';
+        const textW = ctx.measureText(text).width;
+        const centreX = x + (barW - 1) / 2;
+        if (textW <= barW - 2) {
+          ctx.textAlign = 'center';
+          ctx.fillText(text, centreX, yBase - barH - 6);
+        } else {
+          ctx.save();
+          ctx.translate(centreX, yBase - barH - 4);
+          ctx.rotate(-Math.PI / 2);
+          ctx.textAlign = 'left';
+          ctx.fillText(text, 0, 0);
+          ctx.restore();
+        }
+        ctx.font = `10px ${FONT}`;
       });
     });
   } else {
@@ -5240,7 +5262,8 @@ export default function Home() {
         const sheetTotal = Array.from(buckets.values()).reduce((acc, b) => acc + combined(b).total, 0);
 
         const ws = wb.addWorksheet(sheetName, {
-          views: [{ state: 'frozen', xSplit: labelCols, ySplit: 6, showGridLines: false }],
+          // No frozen panes - the sheet should open as a plain page.
+          views: [{ showGridLines: false }],
           pageSetup: {
             orientation: 'portrait',
             fitToPage: true,
