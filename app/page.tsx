@@ -40,8 +40,8 @@ export default function Home() {
   const [exportProgress, setExportProgress] = useState(0);
   const allRowsCacheRef = useRef<{ key: string; rows: any[] } | null>(null);
   const exportNeedsRefreshRef = useRef(false);
-  // Unfiltered slim dataset for the month-wise substation export; reused
-  // across clicks until the next data refresh.
+  // Unfiltered slim dataset shared by the month-wise exports (substation and
+  // circle/division); reused across clicks until the next data refresh.
   const monthwiseRowsCacheRef = useRef<any[] | null>(null);
   const monthwiseNeedsRefreshRef = useRef(false);
 
@@ -90,41 +90,42 @@ export default function Home() {
   const [selectedCellData, setSelectedCellData] = useState<{ title: string, content: string } | null>(null);
   const rowsPerPage = 100;
 
+  // Every date string the API hands back is MM/DD/YYYY hh:mm AM (Postgres
+  // to_char on the RPC path, en-US toLocaleString on the paged path). Reading
+  // the first part as the day pushed every date after the 12th into a later
+  // month - and past December, into a later year - which is what wrecked the
+  // month columns and the resolution-time maths.
   const parsePossibleDate = (value: string) => {
-    // Handles formats like: 01/11/2025 03:45 PM, 1-1-2025, etc.
-    // Returns Date or null
-    // Clean string first
     const clean = value.trim();
     if (!clean) return null;
 
-    // Attempt detecting dd/mm/yyyy or dd-mm-yyyy or similar
     const match = clean.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-    if (match) {
-      const day = match[1].padStart(2, '0');
-      const month = match[2].padStart(2, '0');
-      const year = match[3];
-      // Note: we're discarding time here for simple date check, 
-      // but if time is needed we could parse it. 
-      // The original code passed standard date string to new Date() which might fail for dd/mm
-      // Let's return a proper Date object from yyyy-mm-dd
+    if (!match) return null;
 
-      // If original string has time 'HH:MM AM/PM'
-      const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-      let hours = 0;
-      let minutes = 0;
-      if (timeMatch) {
-        hours = parseInt(timeMatch[1], 10);
-        minutes = parseInt(timeMatch[2], 10);
-        if (timeMatch[3]) {
-          const ampm = timeMatch[3].toUpperCase();
-          if (ampm === 'PM' && hours < 12) hours += 12;
-          if (ampm === 'AM' && hours === 12) hours = 0;
-        }
-      }
+    let month = parseInt(match[1], 10);
+    let day = parseInt(match[2], 10);
+    const year = parseInt(match[3], 10);
 
-      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hours, minutes);
+    // Tolerate a stray DD/MM string rather than dropping the row.
+    if (month > 12 && day <= 12) {
+      [month, day] = [day, month];
     }
-    return null;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+    const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+    let hours = 0;
+    let minutes = 0;
+    if (timeMatch) {
+      hours = parseInt(timeMatch[1], 10);
+      minutes = parseInt(timeMatch[2], 10);
+      if (timeMatch[3]) {
+        const ampm = timeMatch[3].toUpperCase();
+        if (ampm === 'PM' && hours < 12) hours += 12;
+        if (ampm === 'AM' && hours === 12) hours = 0;
+      }
+    }
+
+    return new Date(year, month - 1, day, hours, minutes);
   };
 
   const statusOptions = filterOptions.statuses;
@@ -4537,6 +4538,27 @@ export default function Home() {
     saveAs(new Blob([buf]), `repeat_complaints_consumer_${now.getTime()}.xlsx`);
   };
 
+  // Unfiltered slim dataset behind both month-wise exports: only the handful
+  // of fields they read, downloaded once and reused until the next refresh.
+  const ensureMonthwiseRows = async (): Promise<any[]> => {
+    const cached = monthwiseNeedsRefreshRef.current ? null : monthwiseRowsCacheRef.current;
+    if (cached) return cached;
+
+    setExportProgress(0);
+    const key = new URLSearchParams({
+      fetchAll: 'true',
+      fields: 'Division,Sub Station,Area Type,Complaint Date and Time'
+    }).toString();
+    const rows = await fetchAllRowsChunked(key, {
+      refresh: monthwiseNeedsRefreshRef.current,
+      onProgress: setExportProgress
+    });
+
+    monthwiseRowsCacheRef.current = rows;
+    monthwiseNeedsRefreshRef.current = false;
+    return rows;
+  };
+
   const exportSubstationMonthwiseExcel = async () => {
     setExportLoading(true);
     try {
@@ -4547,20 +4569,7 @@ export default function Home() {
       // 1. Fetch all data ignoring active filters. Only the fields this
       // report reads are requested (much smaller download), and the result
       // is reused across clicks until the next data refresh.
-      let rows = monthwiseNeedsRefreshRef.current ? null : monthwiseRowsCacheRef.current;
-      if (!rows) {
-        setExportProgress(0);
-        const key = new URLSearchParams({
-          fetchAll: 'true',
-          fields: 'Division,Sub Station,Substation,Complaint Date and Time,Complaint Date'
-        }).toString();
-        rows = await fetchAllRowsChunked(key, {
-          refresh: monthwiseNeedsRefreshRef.current,
-          onProgress: setExportProgress
-        });
-        monthwiseRowsCacheRef.current = rows;
-        monthwiseNeedsRefreshRef.current = false;
-      }
+      const rows = await ensureMonthwiseRows();
       if (rows.length === 0) {
         alert('No complaints data found to export.');
         return;
@@ -4630,31 +4639,21 @@ export default function Home() {
         lastModifiedBy: 'FRT Report Dashboard',
       };
 
-      // Define standard styling borders & colors
+      // Monochrome print styling: black rules and greys only, so the sheet
+      // reads the same on screen, in print and on a photocopy.
       const theme = {
-        border: { style: 'thin' as const, color: { argb: 'FFCBD5E1' } }, // slate-300 / light grey
-        headerFill: 'FF1F2937', // Slate-800 / Dark Grey for clear understanding
-        headerFontColor: 'FFFFFFFF', // White for clear text readability
+        border: { style: 'thin' as const, color: { argb: 'FF000000' } },
+        headerFill: 'FF000000',
+        headerFontColor: 'FFFFFFFF',
       };
 
-      // Distinct very light pastel colors (Tailwind 50 weights) for divisions
-      const pastelColors = [
-        'FFFEF2F2', // Rose-50 / Light Red
-        'FFF0FDF4', // Emerald-50 / Light Green
-        'FFF0F9FF', // Sky-50 / Light Blue
-        'FFF5F3FF', // Purple-50 / Light Purple
-        'FFFDF2F8', // Pink-50 / Light Pink
-        'FFFDFBE7', // Amber-50 / Light Yellow
-        'FFF0FDFA', // Teal-50 / Light Teal
-        'FFFDF4FF', // Fuchsia-50 / Light Fuchsia
-      ];
+      // Alternating grey bands mark the division blocks instead of colours.
+      const greyBands = ['FFFFFFFF', 'FFF2F2F2'];
 
-      // Get unique divisions to map colors
       const uniqueDivisions = Array.from(new Set(sortedRows.map(r => r.division))).sort();
       const divisionColorMap = new Map<string, string>();
       uniqueDivisions.forEach((divisionName, index) => {
-        const color = pastelColors[index % pastelColors.length];
-        divisionColorMap.set(divisionName, color);
+        divisionColorMap.set(divisionName, greyBands[index % greyBands.length]);
       });
 
       // Helper to style any sheet (headers & rows)
@@ -4701,8 +4700,8 @@ export default function Home() {
         };
         const totalColStyle = {
           border: bodyBorder,
-          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } }, // Slate-200 matching bottom total row
-          font: { bold: true, size: 11, color: { argb: 'FF111827' } }, // Bold totals
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } }, // matches the bottom total row
+          font: { bold: true, size: 11, color: { argb: 'FF000000' } }, // Bold totals
           alignment: { vertical: 'middle', horizontal: 'center' },
         };
         const bodyStyleCache = new Map<string, Record<string, unknown>>();
@@ -4740,13 +4739,13 @@ export default function Home() {
         // Grand Total row style (Row endRowNumber)
         const totalRowStyleCenter = {
           border: {
-            top: theme.border,
+            top: { style: 'double', color: { argb: 'FF000000' } },
             left: theme.border,
-            bottom: { style: 'double', color: { argb: 'FFCBD5E1' } },
+            bottom: { style: 'medium', color: { argb: 'FF000000' } },
             right: theme.border
           },
-          font: { bold: true, size: 11, color: { argb: 'FF111827' } },
-          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } }, // slate-200
+          font: { bold: true, size: 11, color: { argb: 'FF000000' } },
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } },
           alignment: { vertical: 'middle', horizontal: 'center' },
         };
         const totalRowStyleLeft = { ...totalRowStyleCenter, alignment: { vertical: 'middle', horizontal: 'left' } };
@@ -4896,6 +4895,403 @@ export default function Home() {
       });
       saveAs(blob, fileName);
 
+    } catch (err: any) {
+      alert(`Export failed: ${err.message || 'unknown error'}`);
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  // Month x field-shift distribution: one circle-level sheet followed by one
+  // sheet per division (division sheets also split Rural/Urban).
+  const exportCircleDivisionShiftExcel = async () => {
+    setExportLoading(true);
+    try {
+      const excelLibPromise = loadExcelJS();
+      excelLibPromise.catch(() => { /* surfaced at the await below */ });
+
+      const rows = await ensureMonthwiseRows();
+      if (rows.length === 0) {
+        alert('No complaints data found to export.');
+        return;
+      }
+
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+
+      type ShiftKey = 'A' | 'B' | 'C';
+      // Same windows as the dashboard's Field Shift presets.
+      const shiftOf = (hour: number): ShiftKey => {
+        if (hour >= 8 && hour < 16) return 'A';
+        if (hour >= 16) return 'B';
+        return 'C';
+      };
+
+      // Per month the counts are kept split by area type, so a division sheet
+      // can print a Rural row and an Urban row under every month.
+      type ShiftCount = { A: number; B: number; C: number; total: number };
+      type Bucket = { rural: ShiftCount; urban: ShiftCount };
+      const newShiftCount = (): ShiftCount => ({ A: 0, B: 0, C: 0, total: 0 });
+      const newBucket = (): Bucket => ({ rural: newShiftCount(), urban: newShiftCount() });
+      const addShiftCount = (target: ShiftCount, source: ShiftCount) => {
+        target.A += source.A;
+        target.B += source.B;
+        target.C += source.C;
+        target.total += source.total;
+      };
+      const combined = (bucket: Bucket): ShiftCount => {
+        const out = newShiftCount();
+        addShiftCount(out, bucket.rural);
+        addShiftCount(out, bucket.urban);
+        return out;
+      };
+
+      const monthMeta = new Map<string, { label: string; sort: number }>();
+      const circleBuckets = new Map<string, Bucket>();
+      const divisionBuckets = new Map<string, Map<string, Bucket>>();
+
+      let minDate: Date | null = null;
+      let maxDate: Date | null = null;
+      let skipped = 0;
+
+      rows.forEach((r: any) => {
+        const parsed = parsePossibleDate(String(r['Complaint Date and Time'] || ''));
+        if (!parsed) {
+          skipped++;
+          return;
+        }
+
+        if (!minDate || parsed < minDate) minDate = parsed;
+        if (!maxDate || parsed > maxDate) maxDate = parsed;
+
+        const y = parsed.getFullYear();
+        const m = parsed.getMonth();
+        const monthKey = `${monthNames[m]}-${y}`;
+        monthMeta.set(monthKey, { label: `${monthNames[m]} ${y}`, sort: y * 12 + m });
+
+        const division = String(r['Division'] || '').trim() || 'Unknown';
+        const areaType = String(r['Area Type'] || '').trim().toLowerCase();
+        const shift = shiftOf(parsed.getHours());
+
+        const bump = (bucket: Bucket) => {
+          // Only Urban is reported separately; everything else (Rural plus the
+          // handful of Class1/Industrial/blank rows) counts as Rural so that
+          // Rural + Urban always reconciles with Total.
+          const target = areaType === 'urban' ? bucket.urban : bucket.rural;
+          target[shift]++;
+          target.total++;
+        };
+
+        let circleBucket = circleBuckets.get(monthKey);
+        if (!circleBucket) {
+          circleBucket = newBucket();
+          circleBuckets.set(monthKey, circleBucket);
+        }
+        bump(circleBucket);
+
+        let divisionMonths = divisionBuckets.get(division);
+        if (!divisionMonths) {
+          divisionMonths = new Map<string, Bucket>();
+          divisionBuckets.set(division, divisionMonths);
+        }
+        let divisionBucket = divisionMonths.get(monthKey);
+        if (!divisionBucket) {
+          divisionBucket = newBucket();
+          divisionMonths.set(monthKey, divisionBucket);
+        }
+        bump(divisionBucket);
+      });
+
+      const sortedMonthKeys = Array.from(monthMeta.entries())
+        .sort((a, b) => a[1].sort - b[1].sort)
+        .map(([key]) => key);
+      const sortedDivisions = Array.from(divisionBuckets.keys()).sort((a, b) => a.localeCompare(b));
+
+      const circleTotal = Array.from(circleBuckets.values()).reduce((acc, b) => acc + combined(b).total, 0);
+
+      const { ExcelJS, saveAs } = await excelLibPromise;
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'FRT Report Dashboard';
+      wb.created = new Date();
+      wb.modified = new Date();
+      wb.properties = {
+        title: 'Monthly Complaint Distribution by Field Shift',
+        subject: 'Circle and Division-wise monthly complaint counts split by field shift',
+        category: 'Report',
+        description: 'Barabanki circle summary followed by one sheet per division',
+        lastModifiedBy: 'FRT Report Dashboard',
+      };
+
+      const generatedOn = new Date();
+      const formatLongDate = (d: Date) => `${String(d.getDate()).padStart(2, '0')} ${monthNames[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
+      const formatLongDateTime = (d: Date) => {
+        const hours24 = d.getHours();
+        const hours12 = hours24 % 12 || 12;
+        const period = hours24 >= 12 ? 'PM' : 'AM';
+        return `${formatLongDate(d)}, ${hours12}:${String(d.getMinutes()).padStart(2, '0')} ${period}`;
+      };
+      const periodText = minDate && maxDate
+        ? `${formatLongDate(minDate)} to ${formatLongDate(maxDate)}`
+        : 'All available data';
+
+      // Monochrome print palette: black rules, white body, two greys. Nothing
+      // in this workbook relies on colour to be readable on a photocopy.
+      const ink = {
+        black: 'FF000000',
+        white: 'FFFFFFFF',
+        zebra: 'FFF2F2F2',
+        total: 'FFD9D9D9',
+      };
+      const FONT = 'Calibri';
+      const thin = { style: 'thin' as const, color: { argb: ink.black } };
+      const medium = { style: 'medium' as const, color: { argb: ink.black } };
+      const cellBorder = { top: thin, left: thin, bottom: thin, right: thin };
+
+      // One sheet builder for both scopes: the circle sheet is the same table
+      // without the Rural/Urban split.
+      const buildSheet = (options: {
+        sheetName: string;
+        scopeLine: string;
+        buckets: Map<string, Bucket>;
+        withAreaType: boolean;
+        extraMeta?: [string, string];
+      }) => {
+        const { sheetName, scopeLine, buckets, withAreaType } = options;
+        const columns = [
+          'MONTH',
+          ...(withAreaType ? ['AREA TYPE'] : []),
+          'SHIFT A\n08:00 AM - 04:00 PM',
+          'SHIFT B\n04:00 PM - 12:00 AM',
+          'SHIFT C\n12:00 AM - 08:00 AM',
+          'TOTAL'
+        ];
+        const lastCol = columns.length;
+        const labelCols = withAreaType ? 2 : 1; // leading text columns
+        const sheetTotal = Array.from(buckets.values()).reduce((acc, b) => acc + combined(b).total, 0);
+
+        const ws = wb.addWorksheet(sheetName, {
+          views: [{ state: 'frozen', xSplit: labelCols, ySplit: 9, showGridLines: false }],
+          pageSetup: {
+            orientation: 'portrait',
+            fitToPage: true,
+            fitToWidth: 1,
+            fitToHeight: 0,
+            horizontalCentered: true,
+            margins: { left: 0.5, right: 0.5, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 }
+          }
+        });
+        ws.headerFooter = {
+          oddFooter: '&L&"Calibri,Italic"&9FRT Barabanki - Monthly Complaint Distribution by Field Shift&R&"Calibri,Italic"&9Page &P of &N'
+        };
+
+        const mergedRow = (height: number) => {
+          const row = ws.addRow(['']);
+          ws.mergeCells(row.number, 1, row.number, lastCol);
+          row.height = height;
+          return row.getCell(1);
+        };
+        const label = (text: string, value: string) => ({
+          richText: [
+            { font: { name: FONT, bold: true, size: 10, color: { argb: ink.black } }, text },
+            { font: { name: FONT, size: 10, color: { argb: ink.black } }, text: value }
+          ]
+        });
+
+        // --- Report header block ---------------------------------------
+        const titleCell = mergedRow(24);
+        titleCell.value = 'FRT BARABANKI - SUPPLY COMPLAINT MONITORING';
+        titleCell.font = { name: FONT, bold: true, size: 12, color: { argb: ink.black } };
+        titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+        const subtitleCell = mergedRow(28);
+        subtitleCell.value = 'MONTHLY COMPLAINT DISTRIBUTION BY FIELD SHIFT';
+        subtitleCell.font = { name: FONT, bold: true, size: 15, color: { argb: ink.black }, underline: 'single' };
+        subtitleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+        const scopeCell = mergedRow(22);
+        scopeCell.value = scopeLine.toUpperCase();
+        scopeCell.font = { name: FONT, bold: true, size: 11, color: { argb: ink.black } };
+        scopeCell.alignment = { vertical: 'middle', horizontal: 'center' };
+        scopeCell.border = { bottom: medium };
+
+        const metaCell1 = mergedRow(17);
+        metaCell1.value = label('Reporting Period:  ', `${periodText}   (by complaint registration date & time, IST)`);
+        metaCell1.alignment = { vertical: 'middle', horizontal: 'left' };
+
+        const metaCell2 = mergedRow(17);
+        metaCell2.value = label('Field Shifts:  ', 'A = 08:00-16:00 hrs   |   B = 16:00-24:00 hrs   |   C = 00:00-08:00 hrs'
+          + (withAreaType ? '        Area Type:  Urban as reported; all other area types grouped under Rural' : ''));
+        metaCell2.alignment = { vertical: 'middle', horizontal: 'left' };
+
+        const metaCell3 = mergedRow(17);
+        metaCell3.value = label(
+          `${options.extraMeta ? `${options.extraMeta[0]}  ` : 'Total Complaints:  '}`,
+          options.extraMeta
+            ? `${options.extraMeta[1]}        Total Complaints:  ${sheetTotal.toLocaleString('en-IN')}`
+            : sheetTotal.toLocaleString('en-IN')
+        );
+        metaCell3.alignment = { vertical: 'middle', horizontal: 'left' };
+
+        const metaCell4 = mergedRow(17);
+        metaCell4.value = label('Data Last Synced:  ', `${lastUpdated || 'not available'}        Report Generated:  ${formatLongDateTime(generatedOn)}`);
+        metaCell4.alignment = { vertical: 'middle', horizontal: 'left' };
+
+        ws.addRow([]).height = 8; // breathing room above the table
+
+        // --- Table -----------------------------------------------------
+        const headerRow = ws.addRow(columns);
+        headerRow.height = 32;
+        headerRow.eachCell((cell: any, colNum: number) => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ink.black } };
+          cell.font = { name: FONT, bold: true, size: 10, color: { argb: ink.white } };
+          cell.border = { top: medium, left: thin, bottom: medium, right: thin };
+          cell.alignment = { vertical: 'middle', horizontal: colNum <= labelCols ? 'left' : 'center', wrapText: true };
+        });
+        const headerRowNumber = headerRow.number;
+        ws.pageSetup.printTitlesRow = `${headerRowNumber}:${headerRowNumber}`;
+
+        const addDataRow = (values: any[], style: {
+          bold?: boolean;
+          fill?: string;
+          topBorder?: any;
+          bottomBorder?: any;
+        } = {}) => {
+          const row = ws.addRow(values);
+          row.height = style.bold ? 21 : 19;
+          row.eachCell({ includeEmpty: true }, (cell: any, colNum: number) => {
+            const isLabel = colNum <= labelCols;
+            cell.border = {
+              top: style.topBorder || thin,
+              left: thin,
+              bottom: style.bottomBorder || thin,
+              right: thin
+            };
+            cell.alignment = { vertical: 'middle', horizontal: isLabel ? 'left' : 'center' };
+            cell.font = {
+              name: FONT,
+              size: style.bold ? 10.5 : 10,
+              bold: !!style.bold || colNum === 1 || colNum === lastCol,
+              color: { argb: ink.black }
+            };
+            if (!isLabel) cell.numFmt = '#,##0';
+            if (style.fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: style.fill } };
+          });
+          return row;
+        };
+
+        const totals = newBucket();
+        const doubleTop = { style: 'double' as const, color: { argb: ink.black } };
+
+        sortedMonthKeys.forEach((monthKey, index) => {
+          const bucket = buckets.get(monthKey) || newBucket();
+          const monthLabel = monthMeta.get(monthKey)?.label || monthKey;
+          const monthTotal = combined(bucket);
+          addShiftCount(totals.rural, bucket.rural);
+          addShiftCount(totals.urban, bucket.urban);
+
+          if (!withAreaType) {
+            addDataRow(
+              [monthLabel, monthTotal.A, monthTotal.B, monthTotal.C, monthTotal.total],
+              { fill: index % 2 === 1 ? ink.zebra : undefined }
+            );
+            return;
+          }
+
+          // Division sheets: one row per area type, then the month's own total.
+          const first = addDataRow([monthLabel, 'Rural', bucket.rural.A, bucket.rural.B, bucket.rural.C, bucket.rural.total]);
+          addDataRow(['', 'Urban', bucket.urban.A, bucket.urban.B, bucket.urban.C, bucket.urban.total]);
+          const last = addDataRow(
+            ['', 'Month Total', monthTotal.A, monthTotal.B, monthTotal.C, monthTotal.total],
+            { bold: true, fill: ink.zebra, bottomBorder: medium }
+          );
+          ws.mergeCells(first.number, 1, last.number, 1);
+          ws.getCell(first.number, 1).alignment = { vertical: 'middle', horizontal: 'left' };
+        });
+
+        const grandTotal = combined(totals);
+        if (withAreaType) {
+          const g1 = addDataRow(
+            ['GRAND TOTAL', 'Rural', totals.rural.A, totals.rural.B, totals.rural.C, totals.rural.total],
+            { bold: true, fill: ink.total, topBorder: doubleTop }
+          );
+          addDataRow(
+            ['', 'Urban', totals.urban.A, totals.urban.B, totals.urban.C, totals.urban.total],
+            { bold: true, fill: ink.total }
+          );
+          const g3 = addDataRow(
+            ['', 'Total', grandTotal.A, grandTotal.B, grandTotal.C, grandTotal.total],
+            { bold: true, fill: ink.total, bottomBorder: medium }
+          );
+          ws.mergeCells(g1.number, 1, g3.number, 1);
+          ws.getCell(g1.number, 1).alignment = { vertical: 'middle', horizontal: 'left' };
+        } else {
+          addDataRow(
+            ['GRAND TOTAL', grandTotal.A, grandTotal.B, grandTotal.C, grandTotal.total],
+            { bold: true, fill: ink.total, topBorder: doubleTop, bottomBorder: medium }
+          );
+        }
+
+        ws.getColumn(1).width = 20;
+        if (withAreaType) ws.getColumn(2).width = 15;
+        for (let c = labelCols + 1; c <= lastCol; c++) {
+          ws.getColumn(c).width = c === lastCol ? 14 : 16;
+        }
+
+        return ws;
+      };
+
+      buildSheet({
+        sheetName: 'Barabanki Circle',
+        scopeLine: 'Circle: Barabanki  (all divisions consolidated)',
+        buckets: circleBuckets,
+        withAreaType: false,
+        extraMeta: ['Divisions Covered:', String(sortedDivisions.length)]
+      });
+
+      // Excel caps sheet names at 31 chars and rejects []:*?/\
+      const usedSheetNames = new Set<string>(['Barabanki Circle']);
+      const toSheetName = (division: string) => {
+        const base = division.replace(/[\[\]:*?\/\\]/g, ' ').trim().slice(0, 31) || 'Division';
+        let name = base;
+        let suffix = 2;
+        while (usedSheetNames.has(name)) {
+          name = `${base.slice(0, 28)} ${suffix++}`;
+        }
+        usedSheetNames.add(name);
+        return name;
+      };
+
+      sortedDivisions.forEach((division) => {
+        const buckets = divisionBuckets.get(division)!;
+        const divisionTotal = Array.from(buckets.values()).reduce((acc, b) => acc + combined(b).total, 0);
+        const share = circleTotal > 0 ? ((divisionTotal / circleTotal) * 100).toFixed(1) : '0.0';
+        buildSheet({
+          sheetName: toSheetName(division),
+          scopeLine: `Division: ${division}  |  Barabanki Circle`,
+          buckets,
+          withAreaType: true,
+          extraMeta: ['Share of Circle:', `${share}%`]
+        });
+      });
+
+      if (skipped > 0) {
+        console.warn(`Circle/division shift export: ${skipped} rows skipped (unreadable complaint date).`);
+      }
+
+      const yyyy = generatedOn.getFullYear();
+      const mm = String(generatedOn.getMonth() + 1).padStart(2, '0');
+      const dd = String(generatedOn.getDate()).padStart(2, '0');
+      const hh = String(generatedOn.getHours()).padStart(2, '0');
+      const mi = String(generatedOn.getMinutes()).padStart(2, '0');
+      const fileName = `circle-division-monthwise-shift-${yyyy}${mm}${dd}-${hh}${mi}.xlsx`;
+
+      const buf = await wb.xlsx.writeBuffer({ zip: { compressionOptions: { level: 1 } } });
+      const blob = new Blob([buf], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      saveAs(blob, fileName);
     } catch (err: any) {
       alert(`Export failed: ${err.message || 'unknown error'}`);
     } finally {
@@ -5347,6 +5743,16 @@ export default function Home() {
                             role="menuitem"
                           >
                             <FiCalendar className="text-base" /> <span>Month-wise Substation</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setShowExcelMenu(false);
+                              exportCircleDivisionShiftExcel();
+                            }}
+                            className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-800"
+                            role="menuitem"
+                          >
+                            <FiLayers className="text-base" /> <span>Circle &amp; Division (Month × Shift)</span>
                           </button>
                         </div>
                       )}
