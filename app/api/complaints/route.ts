@@ -114,6 +114,18 @@ function projectRows(rows: any[], fields: string[] | null) {
   });
 }
 
+// Chunked export mode: ?pageSize=N makes one RPC round trip and hands the
+// client a keyset cursor for the next slice. Assembling 100k+ rows inside a
+// single invocation blew the function's memory/time budget, and the platform
+// answered with its plain-text error page instead of JSON.
+function parseChunkSize(searchParams: URLSearchParams) {
+  const raw = searchParams.get('pageSize');
+  if (!raw) return null;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.min(parsed, 20000);
+}
+
 function getFetchAllMaxRecords() {
   const value = process.env.COMPLAINTS_FETCH_ALL_MAX_RECORDS;
   const parsed = Number.parseInt(value || '', 10);
@@ -204,6 +216,49 @@ export async function GET(request: Request) {
 
   if (fetchAll) {
     const fields = parseFieldsParam(searchParams);
+    const chunkSize = parseChunkSize(searchParams);
+
+    if (chunkSize !== null) {
+      try {
+        const afterDate = searchParams.get('afterDate');
+        const afterId = searchParams.get('afterId');
+        const cursor = afterDate && afterId
+          ? { p_after_date: afterDate, p_after_id: Number.parseInt(afterId, 10) }
+          : {};
+
+        const { data: page, error } = await supabase.rpc('get_complaints_page', {
+          ...buildRpcFilterParams(searchParams),
+          ...cursor,
+          p_limit: chunkSize
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        const rows = page?.rows || [];
+        const hasMore = rows.length >= chunkSize && !!page?.next_date;
+
+        return NextResponse.json({
+          success: true,
+          data: projectRows(rows, fields),
+          fetched: rows.length,
+          nextCursor: hasMore ? { date: page.next_date, id: page.next_id } : null,
+          // Only the first slice pays for the metadata lookup.
+          lastScrapedAt: afterDate ? null : await getLastScrapedAt()
+        }, {
+          headers: {
+            'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300'
+          }
+        });
+      } catch (err: any) {
+        return NextResponse.json({
+          success: false,
+          error: err.message || 'Failed to fetch export chunk'
+        }, { status: 500 });
+      }
+    }
+
     if (!forceRefresh) {
       const cached = getCachedData(cacheKey);
       if (cached) {

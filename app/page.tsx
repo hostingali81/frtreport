@@ -14,6 +14,10 @@ const FilterBar = dynamic(() => import('./components/FilterBar'), { ssr: false }
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+// Rows per export round trip. A mapped row is ~580 bytes, so 5k slices stay
+// under the serverless response size limit and well inside the time budget.
+const EXPORT_CHUNK_SIZE = 5000;
+
 export default function Home() {
   const {
     stats,
@@ -33,6 +37,7 @@ export default function Home() {
   const [totalCount, setTotalCount] = useState(0);
   const [tableLoading, setTableLoading] = useState(true);
   const [exportLoading, setExportLoading] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
   const allRowsCacheRef = useRef<{ key: string; rows: any[] } | null>(null);
   const exportNeedsRefreshRef = useRef(false);
   // Unfiltered slim dataset for the month-wise substation export; reused
@@ -327,6 +332,52 @@ export default function Home() {
 
   const totalPages = Math.ceil(totalCount / rowsPerPage);
 
+  // Walks the export dataset in keyset-paginated slices. One giant fetchAll
+  // response used to die on the server (memory/60s budget) for wide filters
+  // like Nov-to-now, and the client saw the platform's HTML error page as
+  // "Unexpected token 'A'".
+  const fetchAllRowsChunked = async (
+    key: string,
+    options: { refresh?: boolean; onProgress?: (fetched: number) => void } = {}
+  ): Promise<any[]> => {
+    const rows: any[] = [];
+    let cursor: { date: string; id: number } | null = null;
+
+    for (;;) {
+      const params = new URLSearchParams(key);
+      params.set('pageSize', String(EXPORT_CHUNK_SIZE));
+      if (options.refresh) params.set('refresh', '1');
+      if (cursor) {
+        params.set('afterDate', cursor.date);
+        params.set('afterId', String(cursor.id));
+      }
+
+      const response = await fetch(`/api/complaints?${params.toString()}`);
+      const body = await response.text();
+
+      let result: any;
+      try {
+        result = JSON.parse(body);
+      } catch {
+        throw new Error(
+          `Server returned a non-JSON response (HTTP ${response.status}) after ${rows.length} rows: ${body.slice(0, 120)}`
+        );
+      }
+
+      if (!response.ok || !result.success) {
+        throw new Error(result?.error || `Failed to fetch rows for export (HTTP ${response.status})`);
+      }
+
+      for (const row of result.data || []) rows.push(row);
+      options.onProgress?.(rows.length);
+
+      if (!result.nextCursor) break;
+      cursor = result.nextCursor;
+    }
+
+    return rows;
+  };
+
   // Exports and detailed reports still need every matching row; fetch them
   // only when the user actually asks, and reuse across exports of the same
   // filter set.
@@ -340,16 +391,13 @@ export default function Home() {
     }
 
     setExportLoading(true);
+    setExportProgress(0);
     try {
-      const url = `/api/complaints?${key}${exportNeedsRefreshRef.current ? '&refresh=1' : ''}`;
-      const response = await fetch(url);
-      const result = await response.json();
+      const rows = await fetchAllRowsChunked(key, {
+        refresh: exportNeedsRefreshRef.current,
+        onProgress: setExportProgress
+      });
 
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to fetch rows for export');
-      }
-
-      const rows = result.data || [];
       allRowsCacheRef.current = { key, rows };
       exportNeedsRefreshRef.current = false;
       return rows;
@@ -4501,14 +4549,15 @@ export default function Home() {
       // is reused across clicks until the next data refresh.
       let rows = monthwiseNeedsRefreshRef.current ? null : monthwiseRowsCacheRef.current;
       if (!rows) {
-        const fields = encodeURIComponent('Division,Sub Station,Substation,Complaint Date and Time,Complaint Date');
-        const refresh = monthwiseNeedsRefreshRef.current ? '&refresh=1' : '';
-        const response = await fetch(`/api/complaints?fetchAll=true&fields=${fields}${refresh}`);
-        const result = await response.json();
-        if (!result.success) {
-          throw new Error(result.error || 'Failed to fetch rows for export');
-        }
-        rows = (result.data || []) as unknown[];
+        setExportProgress(0);
+        const key = new URLSearchParams({
+          fetchAll: 'true',
+          fields: 'Division,Sub Station,Substation,Complaint Date and Time,Complaint Date'
+        }).toString();
+        rows = await fetchAllRowsChunked(key, {
+          refresh: monthwiseNeedsRefreshRef.current,
+          onProgress: setExportProgress
+        });
         monthwiseRowsCacheRef.current = rows;
         monthwiseNeedsRefreshRef.current = false;
       }
@@ -4947,6 +4996,7 @@ export default function Home() {
           <span className="inline-flex items-center gap-2 font-semibold">
             <span className="h-4 w-4 animate-spin rounded-full border-b-2 border-white"></span>
             Preparing export... fetching all matching complaints
+            {exportProgress > 0 && ` (${exportProgress.toLocaleString('en-IN')} rows)`}
           </span>
         </div>
       )}
