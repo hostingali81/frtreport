@@ -18,6 +18,176 @@ import autoTable from 'jspdf-autotable';
 // under the serverless response size limit and well inside the time budget.
 const EXPORT_CHUNK_SIZE = 5000;
 
+// Excel has no native chart API in ExcelJS, so report charts are painted on a
+// canvas and embedded as images. Greys + black outlines only, to match the
+// monochrome print styling of the sheets they sit under.
+type ChartSeries = { name: string; values: number[]; shade: string };
+
+const niceStep = (rough: number) => {
+  const magnitude = Math.pow(10, Math.floor(Math.log10(Math.max(rough, 1))));
+  const normalised = rough / magnitude;
+  const step = normalised <= 1 ? 1 : normalised <= 2 ? 2 : normalised <= 2.5 ? 2.5 : normalised <= 5 ? 5 : 10;
+  return step * magnitude;
+};
+
+const compactNumber = (value: number) => {
+  if (value >= 1000) {
+    const thousands = value / 1000;
+    return `${Number.isInteger(thousands) ? thousands : thousands.toFixed(1)}k`;
+  }
+  return String(Math.round(value));
+};
+
+const renderMonochromeChart = (opts: {
+  title: string;
+  subtitle?: string;
+  categories: string[];
+  series: ChartSeries[];
+  kind: 'line' | 'bar';
+  width?: number;
+  height?: number;
+}) => {
+  const W = opts.width ?? 660;
+  const H = opts.height ?? 300;
+  const SCALE = 2; // draw at 2x so the embedded PNG stays crisp when printed
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W * SCALE;
+  canvas.height = H * SCALE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+  ctx.scale(SCALE, SCALE);
+
+  const FONT = 'Calibri, Arial, sans-serif';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textBaseline = 'middle';
+
+  ctx.fillStyle = '#000000';
+  ctx.textAlign = 'center';
+  ctx.font = `bold 14px ${FONT}`;
+  ctx.fillText(opts.title, W / 2, 18);
+  if (opts.subtitle) {
+    ctx.font = `10px ${FONT}`;
+    ctx.fillText(opts.subtitle, W / 2, 36);
+  }
+
+  const padTop = opts.subtitle ? 52 : 40;
+  const padBottom = opts.series.length > 1 ? 52 : 38;
+  const padLeft = 52;
+  const padRight = 14;
+  const plotW = W - padLeft - padRight;
+  const plotH = H - padTop - padBottom;
+  const yBase = padTop + plotH;
+
+  const maxValue = Math.max(1, ...opts.series.flatMap((s) => s.values));
+  const step = niceStep(maxValue / 4);
+  const top = Math.max(step, Math.ceil(maxValue / step) * step);
+
+  ctx.font = `10px ${FONT}`;
+  for (let v = 0; v <= top + 1e-6; v += step) {
+    const y = yBase - (v / top) * plotH;
+    ctx.strokeStyle = v === 0 ? '#000000' : '#D9D9D9';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(padLeft + plotW, y);
+    ctx.stroke();
+    ctx.fillStyle = '#000000';
+    ctx.textAlign = 'right';
+    ctx.fillText(compactNumber(v), padLeft - 6, y);
+  }
+
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(padLeft, padTop);
+  ctx.lineTo(padLeft, yBase);
+  ctx.lineTo(padLeft + plotW, yBase);
+  ctx.stroke();
+
+  const slot = plotW / Math.max(opts.categories.length, 1);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#000000';
+  opts.categories.forEach((label, i) => {
+    ctx.fillText(label, padLeft + slot * (i + 0.5), yBase + 13);
+  });
+
+  if (opts.kind === 'bar') {
+    const groupPad = slot * 0.18;
+    const barW = Math.max(2, (slot - groupPad * 2) / opts.series.length);
+    opts.series.forEach((serie, si) => {
+      serie.values.forEach((value, i) => {
+        const barH = (value / top) * plotH;
+        const x = padLeft + slot * i + groupPad + si * barW;
+        ctx.fillStyle = serie.shade;
+        ctx.fillRect(x, yBase - barH, barW - 1, barH);
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 0.7;
+        ctx.strokeRect(x, yBase - barH, barW - 1, barH);
+      });
+    });
+  } else {
+    opts.series.forEach((serie) => {
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      serie.values.forEach((value, i) => {
+        const x = padLeft + slot * (i + 0.5);
+        const y = yBase - (value / top) * plotH;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      serie.values.forEach((value, i) => {
+        const x = padLeft + slot * (i + 0.5);
+        const y = yBase - (value / top) * plotH;
+        ctx.fillStyle = serie.shade;
+        ctx.fillRect(x - 3, y - 3, 6, 6);
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - 3, y - 3, 6, 6);
+        if (serie.values.length <= 14) {
+          // White backing so the label stays readable where the line is steep.
+          const text = value.toLocaleString('en-IN');
+          ctx.font = `9px ${FONT}`;
+          ctx.textAlign = 'center';
+          const textW = ctx.measureText(text).width;
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(x - textW / 2 - 2, y - 18, textW + 4, 11);
+          ctx.fillStyle = '#000000';
+          ctx.fillText(text, x, y - 12);
+          ctx.font = `10px ${FONT}`;
+        }
+      });
+    });
+  }
+
+  if (opts.series.length > 1) {
+    const swatch = 10;
+    const gap = 18;
+    ctx.font = `10px ${FONT}`;
+    const widths = opts.series.map((s) => swatch + 5 + ctx.measureText(s.name).width);
+    const totalWidth = widths.reduce((a, b) => a + b, 0) + gap * (opts.series.length - 1);
+    let x = padLeft + (plotW - totalWidth) / 2;
+    const y = H - 14;
+    opts.series.forEach((serie, i) => {
+      ctx.fillStyle = serie.shade;
+      ctx.fillRect(x, y - swatch / 2, swatch, swatch);
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 0.8;
+      ctx.strokeRect(x, y - swatch / 2, swatch, swatch);
+      ctx.fillStyle = '#000000';
+      ctx.textAlign = 'left';
+      ctx.fillText(serie.name, x + swatch + 5, y);
+      x += widths[i] + gap;
+    });
+  }
+
+  return canvas.toDataURL('image/png');
+};
+
 export default function Home() {
   const {
     stats,
@@ -5009,7 +5179,6 @@ export default function Home() {
         .map(([key]) => key);
       const sortedDivisions = Array.from(divisionBuckets.keys()).sort((a, b) => a.localeCompare(b));
 
-      const circleTotal = Array.from(circleBuckets.values()).reduce((acc, b) => acc + combined(b).total, 0);
 
       const { ExcelJS, saveAs } = await excelLibPromise;
       const wb = new ExcelJS.Workbook();
@@ -5056,7 +5225,6 @@ export default function Home() {
         scopeLine: string;
         buckets: Map<string, Bucket>;
         withAreaType: boolean;
-        extraMeta?: [string, string];
       }) => {
         const { sheetName, scopeLine, buckets, withAreaType } = options;
         const columns = [
@@ -5072,7 +5240,7 @@ export default function Home() {
         const sheetTotal = Array.from(buckets.values()).reduce((acc, b) => acc + combined(b).total, 0);
 
         const ws = wb.addWorksheet(sheetName, {
-          views: [{ state: 'frozen', xSplit: labelCols, ySplit: 9, showGridLines: false }],
+          views: [{ state: 'frozen', xSplit: labelCols, ySplit: 6, showGridLines: false }],
           pageSetup: {
             orientation: 'portrait',
             fitToPage: true,
@@ -5116,27 +5284,12 @@ export default function Home() {
         scopeCell.alignment = { vertical: 'middle', horizontal: 'center' };
         scopeCell.border = { bottom: medium };
 
-        const metaCell1 = mergedRow(17);
-        metaCell1.value = label('Reporting Period:  ', `${periodText}   (by complaint registration date & time, IST)`);
-        metaCell1.alignment = { vertical: 'middle', horizontal: 'left' };
-
-        const metaCell2 = mergedRow(17);
-        metaCell2.value = label('Field Shifts:  ', 'A = 08:00-16:00 hrs   |   B = 16:00-24:00 hrs   |   C = 00:00-08:00 hrs'
-          + (withAreaType ? '        Area Type:  Urban as reported; all other area types grouped under Rural' : ''));
-        metaCell2.alignment = { vertical: 'middle', horizontal: 'left' };
-
-        const metaCell3 = mergedRow(17);
-        metaCell3.value = label(
-          `${options.extraMeta ? `${options.extraMeta[0]}  ` : 'Total Complaints:  '}`,
-          options.extraMeta
-            ? `${options.extraMeta[1]}        Total Complaints:  ${sheetTotal.toLocaleString('en-IN')}`
-            : sheetTotal.toLocaleString('en-IN')
+        const metaCell = mergedRow(18);
+        metaCell.value = label(
+          'Period:  ',
+          `${periodText}        Total Complaints:  ${sheetTotal.toLocaleString('en-IN')}        Generated:  ${formatLongDateTime(generatedOn)}`
         );
-        metaCell3.alignment = { vertical: 'middle', horizontal: 'left' };
-
-        const metaCell4 = mergedRow(17);
-        metaCell4.value = label('Data Last Synced:  ', `${lastUpdated || 'not available'}        Report Generated:  ${formatLongDateTime(generatedOn)}`);
-        metaCell4.alignment = { vertical: 'middle', horizontal: 'left' };
+        metaCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
         ws.addRow([]).height = 8; // breathing room above the table
 
@@ -5239,6 +5392,66 @@ export default function Home() {
           ws.getColumn(c).width = c === lastCol ? 14 : 16;
         }
 
+        // --- Charts ------------------------------------------------------
+        const monthShortLabels = sortedMonthKeys.map((key) => {
+          const [name, year] = key.split('-');
+          return `${name.slice(0, 3)} ${year.slice(2)}`;
+        });
+        const bucketFor = (key: string) => buckets.get(key) || newBucket();
+
+        const chartHeadingRow = ws.addRow([]);
+        chartHeadingRow.height = 26;
+        ws.mergeCells(chartHeadingRow.number, 1, chartHeadingRow.number, lastCol);
+        const chartHeading = chartHeadingRow.getCell(1);
+        chartHeading.value = 'GRAPHICAL SUMMARY';
+        chartHeading.font = { name: FONT, bold: true, size: 12, color: { argb: ink.black } };
+        chartHeading.alignment = { vertical: 'middle', horizontal: 'center' };
+        chartHeading.border = { top: medium, bottom: medium };
+
+        let chartAnchorRow = chartHeadingRow.number + 1;
+        const placeChart = (dataUrl: string) => {
+          if (!dataUrl) return;
+          const imageId = wb.addImage({ base64: dataUrl, extension: 'png' });
+          ws.addImage(imageId, {
+            tl: { col: 0.2, row: chartAnchorRow },
+            ext: { width: 660, height: 300 }
+          });
+          chartAnchorRow += 22; // ~300px of default-height rows, plus a gap
+        };
+
+        placeChart(renderMonochromeChart({
+          title: 'COMPLAINT TREND - MONTH ON MONTH',
+          categories: monthShortLabels,
+          kind: 'line',
+          series: [{
+            name: 'Total Complaints',
+            shade: '#000000',
+            values: sortedMonthKeys.map((key) => combined(bucketFor(key)).total)
+          }]
+        }));
+
+        placeChart(renderMonochromeChart({
+          title: 'SHIFT-WISE DISTRIBUTION',
+          subtitle: 'Shift A: 08:00 AM - 04:00 PM     Shift B: 04:00 PM - 12:00 AM     Shift C: 12:00 AM - 08:00 AM',
+          categories: monthShortLabels,
+          kind: 'bar',
+          series: [
+            { name: 'Shift A', shade: '#1A1A1A', values: sortedMonthKeys.map((key) => combined(bucketFor(key)).A) },
+            { name: 'Shift B', shade: '#8C8C8C', values: sortedMonthKeys.map((key) => combined(bucketFor(key)).B) },
+            { name: 'Shift C', shade: '#E0E0E0', values: sortedMonthKeys.map((key) => combined(bucketFor(key)).C) }
+          ]
+        }));
+
+        placeChart(renderMonochromeChart({
+          title: 'AREA TYPE DISTRIBUTION',
+          categories: monthShortLabels,
+          kind: 'bar',
+          series: [
+            { name: 'Rural', shade: '#4D4D4D', values: sortedMonthKeys.map((key) => bucketFor(key).rural.total) },
+            { name: 'Urban', shade: '#E0E0E0', values: sortedMonthKeys.map((key) => bucketFor(key).urban.total) }
+          ]
+        }));
+
         return ws;
       };
 
@@ -5246,8 +5459,7 @@ export default function Home() {
         sheetName: 'Barabanki Circle',
         scopeLine: 'Circle: Barabanki  (all divisions consolidated)',
         buckets: circleBuckets,
-        withAreaType: false,
-        extraMeta: ['Divisions Covered:', String(sortedDivisions.length)]
+        withAreaType: false
       });
 
       // Excel caps sheet names at 31 chars and rejects []:*?/\
@@ -5264,15 +5476,11 @@ export default function Home() {
       };
 
       sortedDivisions.forEach((division) => {
-        const buckets = divisionBuckets.get(division)!;
-        const divisionTotal = Array.from(buckets.values()).reduce((acc, b) => acc + combined(b).total, 0);
-        const share = circleTotal > 0 ? ((divisionTotal / circleTotal) * 100).toFixed(1) : '0.0';
         buildSheet({
           sheetName: toSheetName(division),
           scopeLine: `Division: ${division}  |  Barabanki Circle`,
-          buckets,
-          withAreaType: true,
-          extraMeta: ['Share of Circle:', `${share}%`]
+          buckets: divisionBuckets.get(division)!,
+          withAreaType: true
         });
       });
 
