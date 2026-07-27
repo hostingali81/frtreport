@@ -15,6 +15,10 @@ const formatMins = (mins: number) => {
     return `${h}h ${m}m`;
 };
 
+// Long substation names blow up the y-axis width, so trim them for the tick
+// label only - the table and tooltip still show the full name.
+const shorten = (s: string, max = 26) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+
 // Feeder-wise report. Feeder started appearing in the FRT report recently, so
 // older complaints have no feeder - the coverage line makes that visible
 // instead of silently under-counting.
@@ -52,7 +56,10 @@ function FeederReport({ stats }: Props) {
             chartInstance.current = new Chart(chartRef.current, {
                 type: 'bar',
                 data: {
-                    labels: top.map((f) => f.k),
+                    // Two-line tick: feeder on top, its substation below - the same
+                    // feeder name can exist under two substations, so the feeder
+                    // name alone is ambiguous.
+                    labels: top.map((f) => [f.k, `↳ ${shorten(f.ss || 'Unknown substation')}`]),
                     datasets: [
                         {
                             label: 'Closed',
@@ -73,11 +80,17 @@ function FeederReport({ stats }: Props) {
                     responsive: true,
                     maintainAspectRatio: false,
                     layout: { padding: { right: 40 } },
+                    // This is a horizontal bar chart, so rows are picked along y.
+                    // Chart.js defaults the interaction axis to 'x' regardless of
+                    // indexAxis - without this the tooltip resolves the pointer by
+                    // bar length and shows a different feeder's numbers.
+                    interaction: { mode: 'index' as const, axis: 'y' as const, intersect: false },
                     plugins: {
-                        title: { display: true, text: 'Top 15 Feeders by Complaints', font: { size: 15, weight: 'bold' } },
+                        title: { display: true, text: 'Top 15 Feeders by Complaints (feeder ↳ substation)', font: { size: 15, weight: 'bold' } },
                         legend: { position: 'top' },
                         tooltip: {
                             mode: 'index',
+                            axis: 'y',
                             intersect: false,
                             callbacks: {
                                 title: (items: any[]) => {
@@ -89,7 +102,11 @@ function FeederReport({ stats }: Props) {
                     },
                     scales: {
                         x: { stacked: true, beginAtZero: true, grid: { display: false } },
-                        y: { stacked: true, grid: { display: false }, ticks: { autoSkip: false, font: { size: 11 } } }
+                        y: {
+                            stacked: true,
+                            grid: { display: false },
+                            ticks: { autoSkip: false, font: { size: 11 }, crossAlign: 'far' as const }
+                        }
                     }
                 },
                 plugins: [{
@@ -246,7 +263,8 @@ function FeederReport({ stats }: Props) {
 
             {/* Top feeders chart */}
             <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
-                <div style={{ height: `${Math.max(320, Math.min(15, feeders.length) * 34 + 90)}px` }}>
+                {/* Each tick is now two lines (feeder + substation), so rows need more height. */}
+                <div style={{ height: `${Math.max(360, Math.min(15, feeders.length) * 48 + 100)}px` }}>
                     <canvas ref={chartRef} />
                 </div>
             </div>
