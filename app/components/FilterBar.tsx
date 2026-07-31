@@ -384,7 +384,7 @@ export default function FilterBar({
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                   <FiCalendar /> Date Range
                 </h3>
-                <div className="flex gap-3 items-center">
+                <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
                   <div className="flex-1">
                     <input
                       type="datetime-local"

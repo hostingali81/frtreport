@@ -24,8 +24,8 @@ export default function AppNav({ role, displayName, email, active }: Props) {
 
   return (
     <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
-      <div className="mx-auto flex max-w-md items-center justify-between gap-2 px-3 py-2">
-        <nav className="flex items-center gap-1">
+      <div className="mx-auto flex flex-wrap max-w-md items-center justify-between gap-2 px-3 py-2">
+        <nav className="flex flex-wrap items-center gap-1">
           {tab('/calling', 'Calls', 'calling')}
           {tab('/reports', 'Reports', 'reports')}
           {role === 'super_admin' && tab('/admin/users', 'Users', 'users')}

@@ -5800,7 +5800,7 @@ export default function Home() {
                 </div>
                 <div className="space-y-3">
                   {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="grid grid-cols-6 gap-3 items-center">
+                    <div key={i} className="grid grid-cols-2 md:grid-cols-6 gap-3 items-center">
                       <SkeletonBlock className="h-6 col-span-1" />
                       <SkeletonBlock className="h-6 col-span-1" />
                       <SkeletonBlock className="h-6 col-span-1" />
@@ -6152,7 +6152,7 @@ export default function Home() {
         {showReportModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex flex-wrap items-start sm:items-center justify-between gap-4">
                 <h2 className="text-2xl font-bold text-gray-800">Select Report to Download</h2>
                 <button
                   onClick={() => setShowReportModal(false)}
