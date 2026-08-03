@@ -397,9 +397,9 @@ function DeepDivePanel({ stats }: Props) {
     return (
         <div className="flex flex-col gap-6 animate-in fade-in duration-500">
             {/* One month selector drives every chart below */}
-            <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100 gap-3">
+            <div className="flex flex-col items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm md:flex-row">
                 <div>
-                    <h2 className="text-xl font-bold text-gray-800">🔬 Deep Analysis</h2>
+                    <h2 className="text-xl font-bold text-gray-800">Deep Analysis</h2>
                     <p className="text-sm text-gray-500">Peak hours, heatmap and resolution efficiency</p>
                 </div>
                 <div className="w-full md:w-64">
@@ -416,13 +416,13 @@ function DeepDivePanel({ stats }: Props) {
             </div>
 
             {/* Peak hours + efficiency trend */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
                     <div className="h-[320px]">
                         <canvas ref={hourlyRef} />
                     </div>
                 </div>
-                <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+                <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
                     {trendData.length > 0 ? (
                         <div className="h-[320px]">
                             <canvas ref={trendRef} />
@@ -436,23 +436,23 @@ function DeepDivePanel({ stats }: Props) {
             </div>
 
             {/* Peak time heatmap */}
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+            <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
                 <h3 className="text-lg font-bold text-gray-800 mb-4">
-                    🔥 Peak Time Heatmap ({selectedMonth === 'All' ? 'All Time' : selectedMonth})
+                    Peak Time Heatmap ({selectedMonth === 'All' ? 'All Time' : selectedMonth})
                 </h3>
                 <div className="overflow-x-auto">
-                    <div className="min-w-[600px]">
-                        <div className="flex mb-2">
+                    <div className="min-w-[1120px]">
+                        <div className="mb-2 flex">
                             <div className="w-12"></div>
                             {Array.from({ length: 24 }).map((_, i) => (
-                                <div key={i} className="flex-1 text-[10px] text-center text-gray-400 font-mono transform -rotate-45 origin-bottom translate-y-2">
+                                <div key={i} className="w-11 shrink-0 text-center font-mono text-[10px] text-gray-500">
                                     {formatHourLabel(i)}
                                 </div>
                             ))}
                         </div>
-                        <div className="mt-4">
+                        <div className="mt-2">
                             {days.map((day, dIndex) => (
-                                <div key={day} className="flex items-center mb-1">
+                                <div key={day} className="mb-1 flex items-center">
                                     <div className="w-12 text-xs font-bold text-gray-500">{day}</div>
                                     {heatmapData.grid[dIndex].map((count, hIndex) => {
                                         const intensity = heatmapData.maxCount > 0 ? count / heatmapData.maxCount : 0;
@@ -460,7 +460,7 @@ function DeepDivePanel({ stats }: Props) {
                                         return (
                                             <div
                                                 key={hIndex}
-                                                className={`flex-1 h-8 mx-[1px] rounded-sm ${getHeatmapColor(count, heatmapData.maxCount)} flex items-center justify-center text-[9px] font-medium ${textColor} cursor-default group relative`}
+                                                className={`group relative mx-[1px] flex h-8 w-11 shrink-0 cursor-default items-center justify-center rounded-sm text-[9px] font-medium ${getHeatmapColor(count, heatmapData.maxCount)} ${textColor}`}
                                             >
                                                 {count > 0 ? count : ''}
                                                 <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black text-white text-xs p-1 rounded z-10 whitespace-nowrap pointer-events-none">
@@ -477,7 +477,7 @@ function DeepDivePanel({ stats }: Props) {
             </div>
 
             {/* Resolution by substation (scrollable) */}
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
                 <div className="overflow-x-auto pb-4">
                     <div style={{ width: `${Math.max(1000, resolutionData.length * 40)}px`, height: '600px' }}>
                         <canvas ref={resolutionRef} />
@@ -487,7 +487,7 @@ function DeepDivePanel({ stats }: Props) {
             </div>
 
             {/* Division efficiency */}
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+            <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
                 <div className="h-[350px]">
                     <canvas ref={divisionRef} />
                 </div>

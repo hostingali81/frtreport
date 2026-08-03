@@ -177,7 +177,7 @@ export default function MonthComparison({ stats }: MonthComparisonProps) {
     return (
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 animate-in fade-in duration-500">
             <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-                <h2 className="text-xl font-bold text-gray-800">📊 Simple Comparison</h2>
+                <h2 className="text-xl font-bold text-gray-800">Simple Comparison</h2>
                 <div className="flex gap-4 w-full md:w-auto">
                     <div className="w-48">
                         <Select

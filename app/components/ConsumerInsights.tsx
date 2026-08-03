@@ -255,7 +255,7 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ stats }) => {
                                             <td className="px-6 py-4 text-sm text-gray-700">
                                                 <div className="font-semibold">{c['Division']}</div>
                                                 <div className="text-xs text-gray-500">{c['Sub Station']}</div>
-                                                {c['Feeder'] && <div className="text-xs text-amber-600">⚡ {c['Feeder']}</div>}
+                                                {c['Feeder'] && <div className="text-xs text-amber-600">Feeder: {c['Feeder']}</div>}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                                                 {c['Complaint Date and Time']}

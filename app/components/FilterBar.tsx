@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Select from 'react-select';
-import { FiSearch, FiFilter, FiCalendar, FiClock, FiX, FiLayers, FiChevronDown, FiChevronUp } from 'react-icons/fi';
+import { FiFilter, FiCalendar, FiClock, FiX, FiLayers, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
@@ -96,6 +96,7 @@ export default function FilterBar({
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
+  const menuPortalTarget = typeof document !== 'undefined' ? document.body : undefined;
   const defaultTodayRange = React.useMemo(() => {
     const now = new Date();
     return {
@@ -127,7 +128,20 @@ export default function FilterBar({
 
   const selectStyles = {
     control: (base: any) => ({ ...base, minHeight: '38px', fontSize: '14px', borderRadius: '0.5rem', borderColor: '#e5e7eb' }),
-    menu: (base: any) => ({ ...base, fontSize: '14px' })
+    menu: (base: any) => ({ ...base, fontSize: '14px', zIndex: 9999 }),
+    menuPortal: (base: any) => ({ ...base, zIndex: 9999 })
+  };
+
+  const monthSelectStyles = {
+    control: (base: any) => ({
+      ...base,
+      minHeight: '42px',
+      borderRadius: '0.375rem',
+      borderColor: '#e5e7eb',
+      boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+    }),
+    menu: (base: any) => ({ ...base, zIndex: 9999 }),
+    menuPortal: (base: any) => ({ ...base, zIndex: 9999 })
   };
 
   const toOptions = (arr: string[]) => [{ value: '', label: 'All' }, ...arr.map(s => ({ value: s, label: s }))];
@@ -191,10 +205,27 @@ export default function FilterBar({
     return false;
   };
 
+  const presetLabel = (id: string) => {
+    switch (id) {
+      case 'today':
+        return 'Today';
+      case 'yesterday':
+        return 'Yesterday';
+      case 'last24h':
+        return 'Last 24h';
+      case 'thisMonth':
+        return 'This Month';
+      case 'fromNov2025ToNow':
+        return 'Nov 2025 to Now';
+      default:
+        return id;
+    }
+  };
+
   return (
-    <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-visible hover:shadow-xl transition-shadow duration-300 relative z-20">
+    <div className="relative z-20 overflow-visible rounded-lg border border-slate-200 bg-white shadow-sm transition-shadow duration-300 hover:shadow-md">
       {/* Top Bar: Always Visible */}
-      <div className="p-4 flex flex-col lg:flex-row gap-4 items-center justify-between bg-gradient-to-r from-gray-50/50 via-white to-gray-50/50">
+      <div className="flex flex-col items-center justify-between gap-4 bg-slate-50/80 p-4 lg:flex-row">
 
         {/* Left: Search & Toggle */}
         <div className="flex items-center gap-3 w-full lg:w-auto flex-1 flex-wrap">
@@ -202,7 +233,7 @@ export default function FilterBar({
 
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all active:scale-95 shadow-sm border ${isExpanded ? 'bg-blue-600 text-white border-blue-600 shadow-blue-200' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'}`}
+            className={`flex items-center gap-2 rounded-md border px-4 py-2.5 text-sm font-semibold shadow-sm transition-all active:scale-95 ${isExpanded ? 'border-slate-900 bg-slate-900 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'}`}
           >
             <FiFilter className={isExpanded ? 'text-white' : 'text-gray-500'} />
             <span className="hidden sm:inline">Filters</span>
@@ -214,7 +245,7 @@ export default function FilterBar({
 
           <button
             onClick={() => setShowCalendar(!showCalendar)}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all active:scale-95 shadow-sm border ${showCalendar ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-200' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'}`}
+            className={`flex items-center gap-2 rounded-md border px-4 py-2.5 text-sm font-semibold shadow-sm transition-all active:scale-95 ${showCalendar ? 'border-slate-900 bg-slate-900 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'}`}
           >
             <FiCalendar className={showCalendar ? 'text-white' : 'text-gray-500'} />
             <span className="hidden sm:inline">Calendar</span>
@@ -234,15 +265,9 @@ export default function FilterBar({
                 isClearable={false}
                 isSearchable={true}
                 isDisabled={loading}
-                styles={{
-                  control: (base) => ({
-                    ...base,
-                    minHeight: '42px',
-                    borderRadius: '0.75rem',
-                    borderColor: '#e5e7eb',
-                    boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
-                  }),
-                }}
+                menuPortalTarget={menuPortalTarget}
+                menuPosition="fixed"
+                styles={monthSelectStyles}
               />
               {loading && (
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
@@ -255,10 +280,10 @@ export default function FilterBar({
         <div className="flex items-center gap-3 w-full lg:w-auto justify-end">
           {/* Compact Date Range Display (if selected) */}
           {(fromDT || toDT) && !isExpanded && (
-            <div className="hidden xl:flex items-center gap-2 text-xs font-medium text-blue-800 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 shadow-sm">
+            <div className="hidden items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-800 shadow-sm xl:flex">
               <FiClock className="text-blue-600" />
               <span>{formatDate(fromDT)}</span>
-              <span className="text-blue-400">→</span>
+              <span className="text-blue-400">to</span>
               <span>{formatDate(toDT)}</span>
             </div>
           )}
@@ -267,7 +292,7 @@ export default function FilterBar({
             <button
               onClick={onApply}
               disabled={loading}
-              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition active:scale-95 hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+              className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition active:scale-95 hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-gray-400"
             >
               <FiFilter className={loading ? 'animate-pulse' : ''} />
               <span>{loading ? 'Fetching...' : 'Apply Filters'}</span>
@@ -317,6 +342,8 @@ export default function FilterBar({
                 className="text-sm"
                 placeholder="All Divisions"
                 isClearable
+                menuPortalTarget={menuPortalTarget}
+                menuPosition="fixed"
               />
             </div>
             <div>
@@ -330,6 +357,8 @@ export default function FilterBar({
                 className="text-sm"
                 placeholder="All Sub Divisions"
                 isClearable
+                menuPortalTarget={menuPortalTarget}
+                menuPosition="fixed"
               />
             </div>
             <div>
@@ -343,6 +372,8 @@ export default function FilterBar({
                 className="text-sm"
                 placeholder="All Sub Stations"
                 isClearable
+                menuPortalTarget={menuPortalTarget}
+                menuPosition="fixed"
               />
             </div>
             <div>
@@ -356,6 +387,8 @@ export default function FilterBar({
                 className="text-sm"
                 placeholder="All Statuses"
                 isClearable
+                menuPortalTarget={menuPortalTarget}
+                menuPosition="fixed"
               />
             </div>
             <div>
@@ -369,6 +402,8 @@ export default function FilterBar({
                 className="text-sm"
                 placeholder="Closed Status"
                 isClearable
+                menuPortalTarget={menuPortalTarget}
+                menuPosition="fixed"
               />
             </div>
           </div>
@@ -409,11 +444,11 @@ export default function FilterBar({
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Quick Presets</h3>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { id: 'today', label: 'Today', icon: '📆' },
-                    { id: 'yesterday', label: 'Yesterday', icon: 'back' },
-                    { id: 'last24h', label: 'Last 24h', icon: '⏰' },
-                    { id: 'thisMonth', label: 'This Month', icon: '📊' },
-                    { id: 'fromNov2025ToNow', label: 'Nov 25 →', icon: '📅' },
+                    { id: 'today' },
+                    { id: 'yesterday' },
+                    { id: 'last24h' },
+                    { id: 'thisMonth' },
+                    { id: 'fromNov2025ToNow' },
                   ].map((preset: any) => (
                     <button
                       key={preset.id}
@@ -434,7 +469,7 @@ export default function FilterBar({
                         : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                         }`}
                     >
-                      {preset.icon === 'back' ? <FiClock className="inline mr-1" /> : preset.icon} {preset.label}
+                      <FiClock className="inline mr-1" /> {presetLabel(preset.id)}
                     </button>
                   ))}
                 </div>
@@ -580,8 +615,8 @@ export default function FilterBar({
                       </div>
                     </div>
                     {dateError && (
-                      <p className="text-[10px] text-red-600 font-bold ml-[110px] animate-pulse">
-                        ⚠️ {dateError}
+                      <p className="ml-[110px] text-[10px] font-bold text-red-600">
+                        {dateError}
                       </p>
                     )}
                   </div>

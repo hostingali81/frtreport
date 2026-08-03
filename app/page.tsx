@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { FiDownload, FiRefreshCw, FiFileText, FiClock, FiBarChart2, FiTrendingUp, FiLayers, FiInfo, FiActivity, FiCalendar } from 'react-icons/fi';
@@ -272,7 +272,7 @@ export default function Home() {
   }, [currentFilters]);
   const [sortColumn, setSortColumn] = useState<string>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [selectedShift, setSelectedShift] = useState<string>(''); // e.g. "Today - Morning (07:00–15:00)"
+  const [selectedShift, setSelectedShift] = useState<string>(''); // e.g. "Today - Morning (07:00-15:00)"
   const [showReportModal, setShowReportModal] = useState(false);
   const [showExcelMenu, setShowExcelMenu] = useState(false);
   const [customDate, setCustomDate] = useState<string>('');
@@ -410,14 +410,14 @@ export default function Home() {
         } else if (forceFull) {
           setOriginal([]);
           setData([]);
-          setError('कोई डेटा नहीं मिला');
+          setError('à¤•à¥‹à¤ˆ à¤¡à¥‡à¤Ÿà¤¾ à¤¨à¤¹à¥€à¤‚ à¤®à¤¿à¤²à¤¾');
         }
       } else if (forceFull) {
-        setError(fullResult.error || 'डेटा प्राप्त करने में त्रुटि');
+        setError(fullResult.error || 'à¤¡à¥‡à¤Ÿà¤¾ à¤ªà¥à¤°à¤¾à¤ªà¥à¤¤ à¤•à¤°à¤¨à¥‡ à¤®à¥‡à¤‚ à¤¤à¥à¤°à¥à¤Ÿà¤¿');
       }
 
     } catch (err: any) {
-      setError('डेटा प्राप्त करने में त्रुटि: ' + err.message);
+      setError('à¤¡à¥‡à¤Ÿà¤¾ à¤ªà¥à¤°à¤¾à¤ªà¥à¤¤ à¤•à¤°à¤¨à¥‡ à¤®à¥‡à¤‚ à¤¤à¥à¤°à¥à¤Ÿà¤¿: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -458,7 +458,7 @@ export default function Home() {
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+                                <span className="text-blue-600">{sortDirection === 'asc' ? 'ASC' : 'DESC'}</span>
     } else {
       setSortColumn(column);
       setSortDirection('asc');
@@ -627,18 +627,18 @@ export default function Home() {
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
     const labelMap: Record<string, string> = {
-      today_morning: 'Today - Control Room Morning (07:00 AM–03:00 PM)',
-      today_day: 'Today - Control Room Day (03:00 PM–11:00 PM)',
-      today_night: 'Today - Control Room Night (11:00 PM–07:00 AM)',
-      yesterday_morning: 'Yesterday - Control Room Morning (07:00 AM–03:00 PM)',
-      yesterday_day: 'Yesterday - Control Room Day (03:00 PM–11:00 PM)',
-      yesterday_night: 'Yesterday - Control Room Night (11:00 PM–07:00 AM)',
-      today_field_a: 'Today - Field Shift A (08:00 AM–04:00 PM)',
-      today_field_b: 'Today - Field Shift B (04:00 PM–12:00 AM)',
-      today_field_c: 'Today - Field Shift C (12:00 AM–08:00 AM)',
-      yesterday_field_a: 'Yesterday - Field Shift A (08:00 AM–04:00 PM)',
-      yesterday_field_b: 'Yesterday - Field Shift B (04:00 PM–12:00 AM)',
-      yesterday_field_c: 'Yesterday - Field Shift C (12:00 AM–08:00 AM)',
+      today_morning: 'Today - Control Room Morning (07:00 AM-03:00 PM)',
+      today_day: 'Today - Control Room Day (03:00 PM-11:00 PM)',
+      today_night: 'Today - Control Room Night (11:00 PM-07:00 AM)',
+      yesterday_morning: 'Yesterday - Control Room Morning (07:00 AM-03:00 PM)',
+      yesterday_day: 'Yesterday - Control Room Day (03:00 PM-11:00 PM)',
+      yesterday_night: 'Yesterday - Control Room Night (11:00 PM-07:00 AM)',
+      today_field_a: 'Today - Field Shift A (08:00 AM-04:00 PM)',
+      today_field_b: 'Today - Field Shift B (04:00 PM-12:00 AM)',
+      today_field_c: 'Today - Field Shift C (12:00 AM-08:00 AM)',
+      yesterday_field_a: 'Yesterday - Field Shift A (08:00 AM-04:00 PM)',
+      yesterday_field_b: 'Yesterday - Field Shift B (04:00 PM-12:00 AM)',
+      yesterday_field_c: 'Yesterday - Field Shift C (12:00 AM-08:00 AM)',
     };
     const setRange = (start: Date, end: Date) => {
       setFromDT(formatDateTimeLocal(start));
@@ -727,18 +727,18 @@ export default function Home() {
 
   const applyCustomDateShift = (shiftType: 'morning' | 'day' | 'night' | 'field_a' | 'field_b' | 'field_c') => {
     if (!customDate) {
-      alert('⚠️ Please select a date first!');
+      alert('Please select a date first.');
       return;
     }
     setActivePreset(''); // Clear active preset
     const date = new Date(customDate);
     const labelMap: Record<string, string> = {
-      morning: `${customDate} - Control Room Morning (07:00 AM–03:00 PM)`,
-      day: `${customDate} - Control Room Day (03:00 PM–11:00 PM)`,
-      night: `${customDate} - Control Room Night (11:00 PM–07:00 AM)`,
-      field_a: `${customDate} - Field Shift A (08:00 AM–04:00 PM)`,
-      field_b: `${customDate} - Field Shift B (04:00 PM–12:00 AM)`,
-      field_c: `${customDate} - Field Shift C (12:00 AM–08:00 AM)`,
+      morning: `${customDate} - Control Room Morning (07:00 AM-03:00 PM)`,
+      day: `${customDate} - Control Room Day (03:00 PM-11:00 PM)`,
+      night: `${customDate} - Control Room Night (11:00 PM-07:00 AM)`,
+      field_a: `${customDate} - Field Shift A (08:00 AM-04:00 PM)`,
+      field_b: `${customDate} - Field Shift B (04:00 PM-12:00 AM)`,
+      field_c: `${customDate} - Field Shift C (12:00 AM-08:00 AM)`,
     };
     const setRange = (start: Date, end: Date) => {
       setFromDT(formatDateTimeLocal(start));
@@ -2615,7 +2615,7 @@ export default function Home() {
       },
     });
 
-    // Page 7: Detailed Closed Breakdown (Division → Sub Division → Sub Station)
+    // Page 7: Detailed Closed Breakdown (Division / Sub Division / Sub Station)
     doc.addPage();
     addHeader('Detailed - FRT vs Control Room');
     const detailedMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
@@ -3208,7 +3208,7 @@ export default function Home() {
 
     // Warning for large exports
     if (rows.length > 5000) {
-      const confirm = window.confirm(`⚠️ You are exporting ${rows.length} rows. This may take some time. Continue?`);
+      const confirm = window.confirm(`You are exporting ${rows.length} rows. This may take some time. Continue?`);
       if (!confirm) return;
     }
 
@@ -3296,7 +3296,7 @@ export default function Home() {
     };
 
     // Period subtitle for all sheets
-    const periodSubtitle = fromDT || toDT ? `Period: ${fromDT ? convertTo12Hour(fromDT) : 'Start'} → ${toDT ? convertTo12Hour(toDT) : 'Now'}` : 'Period: All Data';
+    const periodSubtitle = fromDT || toDT ? `Period: ${fromDT ? convertTo12Hour(fromDT) : 'Start'} -> ${toDT ? convertTo12Hour(toDT) : 'Now'}` : 'Period: All Data';
 
     // Helper function to format date with time in 12-hour AM/PM format
     const formatDateTime = (dateStr: string) => {
@@ -3349,33 +3349,33 @@ export default function Home() {
     wsCover.addRow([`Filters: Status="${statusApplied}"`]);
     wsCover.addRow([]);
     wsCover.addRow(['Distinct Divisions', uniqueDivisions.length]);
-    wsCover.addRow([uniqueDivisions.join(', ') || '—']);
+    wsCover.addRow([uniqueDivisions.join(', ') || '-']);
     wsCover.addRow([]);
     wsCover.addRow(['Distinct Statuses', uniqueStatuses.length]);
-    wsCover.addRow([uniqueStatuses.join(', ') || '—']);
+    wsCover.addRow([uniqueStatuses.join(', ') || '-']);
     wsCover.addRow([]);
     wsCover.addRow([]);
     wsCover.addRow(['Quick Navigation']);
     wsCover.getRow(wsCover.lastRow.number).font = { bold: true, size: 12, color: { argb: theme.info } };
     const navLinks = [
-      { text: '📊 All Complaints - Complete Data', sheet: '2. All Complaints Data' },
-      { text: '📋 Division-wise Summary', sheet: '3. Division Summary' },
-      { text: '📅 Date-wise Total Complaint Count', sheet: '4. Date-wise Total Count' },
-      { text: '🔍 Complaint Status Breakdown', sheet: '5. Status Breakdown' },
-      { text: '🎯 Division - FRT vs Control Room', sheet: '6. Division Closed Breakdown' },
-      { text: '📊 Detailed - FRT vs Control Room', sheet: '7. Detailed Closed Breakdown' },
-      { text: '📅 Date-wise - FRT vs Control Room', sheet: '8. Date-wise Closed Breakdown' },
-      { text: '🏢 Sub Station-wise Total Complaint Count', sheet: '9. Sub Station Wise Count' },
-      { text: '📋 Sub Division-wise Summary', sheet: '10. Sub Division Summary' },
-      { text: '🏢 Sub Station-wise Summary', sheet: '11. Sub Station Summary' },
-      { text: '🎯 Sub Division - FRT vs Control Room', sheet: '12. Sub Div Closed Breakdown' },
-      { text: '📊 Division-wise Total Complaint Count', sheet: '13. Division Count' },
-      { text: '📊 Sub Division-wise Total Complaint Count', sheet: '14. Sub Division Count' },
-      { text: '✅ Within/Beyond Status - Division-wise', sheet: '15. Closed Status Division' },
-      { text: '✅ Within/Beyond Status - Sub Division-wise', sheet: '16. Closed Status Sub Div' },
-      { text: '✅ Within/Beyond Status - Sub Station-wise', sheet: '17. Closed Status Sub Stn' },
-      { text: '🗺️ Area Type - Within/Beyond Analysis', sheet: '18. Area Type Breakdown' },
-      { text: '⏱️ Average Resolution Time (Minutes) by Area Type', sheet: '19. Avg Res Time Area Type' },
+      { text: 'All Complaints - Complete Data', sheet: '2. All Complaints Data' },
+      { text: 'Division-wise Summary', sheet: '3. Division Summary' },
+      { text: 'Date-wise Total Complaint Count', sheet: '4. Date-wise Total Count' },
+      { text: 'Complaint Status Breakdown', sheet: '5. Status Breakdown' },
+      { text: 'Division - FRT vs Control Room', sheet: '6. Division Closed Breakdown' },
+      { text: 'Detailed - FRT vs Control Room', sheet: '7. Detailed Closed Breakdown' },
+      { text: 'Date-wise - FRT vs Control Room', sheet: '8. Date-wise Closed Breakdown' },
+      { text: 'Sub Station-wise Total Complaint Count', sheet: '9. Sub Station Wise Count' },
+      { text: 'Sub Division-wise Summary', sheet: '10. Sub Division Summary' },
+      { text: 'Sub Station-wise Summary', sheet: '11. Sub Station Summary' },
+      { text: 'Sub Division - FRT vs Control Room', sheet: '12. Sub Div Closed Breakdown' },
+      { text: 'Division-wise Total Complaint Count', sheet: '13. Division Count' },
+      { text: 'Sub Division-wise Total Complaint Count', sheet: '14. Sub Division Count' },
+      { text: 'Within/Beyond Status - Division-wise', sheet: '15. Closed Status Division' },
+      { text: 'Within/Beyond Status - Sub Division-wise', sheet: '16. Closed Status Sub Div' },
+      { text: 'Within/Beyond Status - Sub Station-wise', sheet: '17. Closed Status Sub Stn' },
+      { text: 'Area Type - Within/Beyond Analysis', sheet: '18. Area Type Breakdown' },
+      { text: 'Average Resolution Time (Minutes) by Area Type', sheet: '19. Avg Res Time Area Type' },
     ];
     navLinks.forEach(link => {
       const row = wsCover.addRow([link.text]);
@@ -3713,7 +3713,7 @@ export default function Home() {
 
     // Sheet 6: Detailed Breakdown (Division + Sub Division + Sub Station)
     const wsDetailedBreakdown = wb.addWorksheet('7. Detailed Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsDetailedBreakdown, 'Detailed Closed Breakdown (Division → Sub Division → Sub Station)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    addTitle(wsDetailedBreakdown, 'Detailed Closed Breakdown (Division / Sub Division / Sub Station)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
 
     // Calculate detailed breakdown
     const detailedMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
@@ -5617,7 +5617,7 @@ export default function Home() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-white to-slate-50 p-4 md:p-8">
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
       {exportLoading && (
         <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-slate-900 px-5 py-3 text-white shadow-lg">
           <span className="inline-flex items-center gap-2 font-semibold">
@@ -5628,23 +5628,23 @@ export default function Home() {
         </div>
       )}
       <div className="max-w-7xl mx-auto space-y-6">
-        <header className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-blue-50/80 p-5 shadow-sm md:p-6">
+        <header className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm md:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="rounded-2xl border border-white/80 bg-white p-3 shadow-sm">
-              <Image src="/logo.png" alt="FRT Logo" width={52} height={52} className="rounded-lg" priority />
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-2 shadow-sm">
+              <Image src="/logo.png" alt="FRT Logo" width={52} height={52} className="rounded-md" priority />
             </div>
             <div className="space-y-2">
               <div className="flex flex-wrap gap-2">
                 <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                  Today-first loading
+                  Live complaint monitoring
                 </span>
                 <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                  Server-side filters
+                  Executive report view
                 </span>
               </div>
-              <h1 className="text-xl md:text-3xl font-bold">FRT बाराबंकी - सप्लाई कंप्लेंट रिपोर्ट</h1>
-              <p className="text-sm text-slate-600 md:text-base">Fast daily view, safer refresh sync, and cleaner exports for complaint analysis.</p>
+              <h1 className="text-xl font-bold tracking-tight text-slate-950 md:text-3xl">FRT Barabanki - Supply Complaint Report Dashboard</h1>
+              <p className="text-sm text-slate-600 md:text-base">Daily complaint monitoring, SLA tracking, analytics and officer-ready exports.</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -5676,7 +5676,7 @@ export default function Home() {
                   alert(`Refresh complete in ${duration}s.\n\nNew: ${newRows} | Updated: ${updatedRows}`);
                   return;
                   /*
-                  console.log('🔄 Starting refresh...');
+                  console.log('Starting refresh...');
                   
                   const timeoutPromise = new Promise((_, reject) => 
                     setTimeout(() => reject(new Error('Request timeout after 3 minutes')), 180000)
@@ -5712,11 +5712,11 @@ export default function Home() {
                       const newRows = result.stats?.new || result.new_rows || 0;
                       const updatedRows = result.stats?.updated || result.updated_rows || 0;
                       
-                      alert(`✅ Refresh complete in ${duration}s!\n\n📊 New: ${newRows} | Updated: ${updatedRows}\n📈 Total: ${dataArray.length} complaints`);
+                      alert(`Refresh complete in ${duration}s!\n\nNew: ${newRows} | Updated: ${updatedRows}\nTotal: ${dataArray.length} complaints`);
                     }
                   } else {
                     setError(result.error || 'Refresh failed');
-                    alert(`❌ Refresh failed: ${result.error || 'Unknown error'}\n\n💡 Tip: Website might be slow. Try again in a minute.`);
+                    alert(`Refresh failed: ${result.error || 'Unknown error'}\n\nTip: Website might be slow. Try again in a minute.`);
                   }
                   */
                 } catch (err: any) {
@@ -5731,13 +5731,13 @@ export default function Home() {
                   }
                   
                   setError(errorMsg);
-                  alert(`❌ Refresh failed after ${duration}s\n\n${errorMsg}\n\n💡 Tips:\n• Wait 1-2 minutes and try again\n• Check if website is accessible\n• Try during off-peak hours`);
+                  alert(`Refresh failed after ${duration}s\n\n${errorMsg}\n\nTips:\n- Wait 1-2 minutes and try again\n- Check if website is accessible\n- Try during off-peak hours`);
                 } finally {
                   setIsRefreshing(false);
                 }
               }}
               disabled={loading}
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 font-semibold text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+              className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2.5 font-semibold text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
             >
               {isRefreshing ? (<><FiClock /> Refreshing...</>) : (<><FiRefreshCw /> Sync Latest</>)}
             </button>
@@ -5748,7 +5748,7 @@ export default function Home() {
 
         {lastUpdated && (
           <div className="bg-amber-50 border-l-4 border-amber-500 text-amber-800 px-4 py-3 rounded">
-            <p className="font-semibold">⚠️ Data last updated on: {lastUpdated}</p>
+            <p className="font-semibold">Data last updated on: {lastUpdated}</p>
           </div>
         )}
 
@@ -5756,7 +5756,7 @@ export default function Home() {
           <div className="bg-blue-50 border-l-4 border-blue-500 text-blue-800 px-4 py-3 rounded">
             <p className="font-medium flex items-center gap-2">
               <FiInfo className="text-lg shrink-0" />
-                Rocket Mode Active 🚀: Loaded recent data instantly. Fetching full history in background...
+                Rocket Mode Active : Loaded recent data instantly. Fetching full history in background...
               </p>
           </div>
         )}
@@ -5873,14 +5873,14 @@ export default function Home() {
                 dashboardStats.map((stat) => {
                   const Icon = stat.icon;
                   return (
-                    <div key={stat.label} className={`rounded-2xl border p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${stat.cardClass}`}>
+                    <div key={stat.label} className={`rounded-lg border p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${stat.cardClass}`}>
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <p className="text-sm font-medium text-slate-600">{stat.label}</p>
-                          <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{stat.value}</p>
+                          <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{stat.value.toLocaleString('en-IN')}</p>
                           <p className="mt-2 text-xs font-medium text-slate-500">{stat.helper}</p>
                         </div>
-                        <div className={`rounded-2xl p-3 shadow-sm ${stat.iconClass}`}>
+                        <div className={`rounded-lg p-3 shadow-sm ${stat.iconClass}`}>
                           <Icon className="text-xl" />
                         </div>
                       </div>
@@ -5890,11 +5890,11 @@ export default function Home() {
               )}
             </div>
 
-            <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-900 shadow-sm">
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-slate-700 shadow-sm">
               <p className="font-medium flex items-start gap-2">
-                <FiInfo className="mt-0.5 shrink-0 text-lg" />
+                <FiInfo className="mt-0.5 shrink-0 text-lg text-slate-500" />
                 <span>
-                  Showing today's complaints by default. Change filters, then use Apply Filters to fetch matching data from Supabase.
+                  Showing today complaints by default. Change filters, then use Apply Filters to fetch matching data from Supabase.
                   Refresh sync re-scrapes from the last successful update minus 1 day to catch delayed complaints safely.
                 </span>
               </p>
@@ -5903,48 +5903,48 @@ export default function Home() {
             {loading ? (
               <ResultsSkeleton />
             ) : totalCount > 0 ? (
-              <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+              <div className="rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-sm">
-                    <FiBarChart2 className="text-sky-600 text-lg" />
-                    <span className="font-semibold text-gray-700">Showing {((currentPage - 1) * rowsPerPage) + 1}-{Math.min(currentPage * rowsPerPage, totalCount)} of {totalCount} complaints</span>
+                    <FiBarChart2 className="text-slate-600 text-lg" />
+                    <span className="font-semibold text-gray-700">Showing {(((currentPage - 1) * rowsPerPage) + 1).toLocaleString('en-IN')}-{Math.min(currentPage * rowsPerPage, totalCount).toLocaleString('en-IN')} of {totalCount.toLocaleString('en-IN')} complaints</span>
                   </div>
                   <div className="flex flex-wrap gap-3">
                     <button
                       onClick={exportSummaryPDF}
-                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-indigo-800"
+                      className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-slate-700"
                     >
                       <FiBarChart2 className="text-lg" /> <span>Summary PDF</span>
                     </button>
                     <button
                       onClick={() => router.push('/analytics')}
-                      className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-slate-800"
+                      className="inline-flex items-center gap-2 rounded-md bg-slate-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-slate-800"
                     >
                       <FiBarChart2 className="text-lg" /> <span>Analytics & Charts</span>
                     </button>
                     <button
                       onClick={exportTrendChartsPDF}
-                      className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-blue-800"
+                      className="inline-flex items-center gap-2 rounded-md bg-blue-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-blue-800"
                     >
                       <FiTrendingUp className="text-lg" /> <span>Charts PDF</span>
                     </button>
                     <button
                       onClick={() => setShowReportModal(true)}
-                      className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-emerald-800"
+                      className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-emerald-800"
                     >
                       <FiLayers className="text-lg" /> <span>Detailed Reports</span>
                     </button>
                     <div className="relative">
                       <button
                         onClick={() => setShowExcelMenu((value) => !value)}
-                        className="inline-flex items-center gap-2 rounded-xl bg-sky-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-sky-800"
+                        className="inline-flex items-center gap-2 rounded-md bg-sky-700 px-4 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-sky-800"
                         aria-haspopup="menu"
                         aria-expanded={showExcelMenu}
                       >
                         <FiDownload className="text-lg" /> <span>Excel (.xlsx)</span>
                       </button>
                       {showExcelMenu && (
-                        <div className="absolute left-0 z-30 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg sm:left-auto sm:right-0" role="menu">
+                        <div className="absolute left-0 z-30 mt-2 w-64 overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg sm:left-auto sm:right-0" role="menu">
                           <button
                             onClick={() => {
                               setShowExcelMenu(false);
@@ -5983,7 +5983,7 @@ export default function Home() {
                             className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-800"
                             role="menuitem"
                           >
-                            <FiLayers className="text-base" /> <span>Circle &amp; Division (Month × Shift)</span>
+                            <FiLayers className="text-base" /> <span>Circle &amp; Division (Month x Shift)</span>
                           </button>
                         </div>
                       )}
@@ -5992,7 +5992,7 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <div className="rounded-2xl border border-yellow-200 bg-yellow-50 px-5 py-5 text-yellow-900 shadow-sm">
+              <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-5 py-5 text-yellow-900 shadow-sm">
                 <p className="font-semibold">No complaints found for the current filters.</p>
                 <p className="mt-1 text-sm">Try another date range, a broader preset, or clear filters and fetch again.</p>
               </div>
@@ -6008,10 +6008,10 @@ export default function Home() {
 
         {!loading && totalCount > 0 && (
           <>
-            <div className="bg-white rounded-xl shadow-md border border-gray-100">
+            <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
               <div className="overflow-x-auto max-h-[70vh] relative">
                 <table className="min-w-full divide-y divide-gray-200 text-xs md:text-sm">
-                  <thead className="bg-gradient-to-r from-gray-100 to-gray-50 sticky top-0 z-10 shadow-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-100 text-slate-700 shadow-sm">
                     <tr>
                       {(() => {
                         const preferredOrder = [
@@ -6042,12 +6042,12 @@ export default function Home() {
                           <th
                             key={header}
                             onClick={() => handleSort(header)}
-                            className="px-4 md:px-6 py-3 text-left font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-200 select-none"
+                            className="cursor-pointer select-none px-4 py-3 text-left font-semibold uppercase tracking-wider text-slate-700 hover:bg-slate-200 md:px-6"
                           >
                             <div className="flex items-center gap-1">
                               {header}
                               {sortColumn === header && (
-                                <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                                <span className="text-blue-600">{sortDirection === 'asc' ? 'ASC' : 'DESC'}</span>
                               )}
                             </div>
                           </th>
@@ -6082,7 +6082,7 @@ export default function Home() {
                       const finalHeaders = [...preferredOrder, ...otherKeys];
 
                       return tableRows.map((row, index) => (
-                        <tr key={index} className="hover:bg-gray-50">
+                        <tr key={index} className="hover:bg-slate-50">
                           {finalHeaders.map((h, i) => {
                             let display: any = (row as any)[h];
                             if (h === 'Resolution Time') display = computeResolutionTime(row);
@@ -6123,7 +6123,7 @@ export default function Home() {
                             }
 
                             return (
-                              <td key={i} className="px-4 md:px-6 py-3 whitespace-nowrap text-gray-900 max-w-[14rem] md:max-w-xs">
+                              <td key={i} className="max-w-[14rem] whitespace-nowrap px-4 py-3 text-gray-900 md:max-w-xs md:px-6">
                                 {cellContent}
                               </td>
                             );
@@ -6158,13 +6158,13 @@ export default function Home() {
                   onClick={() => setShowReportModal(false)}
                   className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
                 >
-                  ×
+                  x
                 </button>
               </div>
               <div className="p-6 space-y-4">
                 <div>
                   <h3 className="text-xs font-bold text-indigo-700 uppercase tracking-wider mb-3 px-2 flex items-center gap-2">
-                    <span className="text-lg">📊</span> Summary Reports
+                    Summary Reports
                   </h3>
                   <div className="space-y-2">
                     <button
@@ -6220,7 +6220,7 @@ export default function Home() {
 
                 <div>
                   <h3 className="text-xs font-bold text-orange-700 uppercase tracking-wider mb-3 px-2 flex items-center gap-2">
-                    <span className="text-lg">📋</span> Within/Beyond Status Reports
+                    Within/Beyond Status Reports
                   </h3>
                   <div className="space-y-2">
                     <button
@@ -6276,7 +6276,7 @@ export default function Home() {
 
                 <div>
                   <h3 className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-3 px-2 flex items-center gap-2">
-                    <span className="text-lg">🔍</span> FRT vs Control Room Reports
+                    FRT vs Control Room Reports
                   </h3>
                   <div className="space-y-2">
                     <button
@@ -6324,7 +6324,7 @@ export default function Home() {
                       </div>
                       <div className="flex-1">
                         <div className="font-semibold text-gray-800 group-hover:text-emerald-700 transition">Detailed - FRT vs Control Room</div>
-                        <div className="text-xs text-gray-600">FRT vs Control Room (Division → Sub Division → Sub Station)</div>
+                        <div className="text-xs text-gray-600">FRT vs Control Room (Division / Sub Division / Sub Station)</div>
                       </div>
                     </button>
                   </div>
@@ -6332,7 +6332,7 @@ export default function Home() {
 
                 <div>
                   <h3 className="text-xs font-bold text-purple-700 uppercase tracking-wider mb-3 px-2 flex items-center gap-2">
-                    <span className="text-lg">📅</span> Total Count Reports
+                    Total Count Reports
                   </h3>
                   <div className="space-y-2">
                     <button
@@ -6388,7 +6388,7 @@ export default function Home() {
 
                 <div>
                   <h3 className="text-xs font-bold text-pink-700 uppercase tracking-wider mb-3 px-2 flex items-center gap-2">
-                    <span className="text-lg">🧠</span> Deep Analysis - Consumer Insights
+                    Deep Analysis - Consumer Insights
                   </h3>
                   <div className="space-y-2">
                     <button

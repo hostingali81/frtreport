@@ -483,7 +483,7 @@ function CallingReport() {
             <div className="flex flex-col gap-6">
                 {header}
                 <div className="bg-red-50 border-l-4 border-red-500 text-red-800 px-4 py-3 rounded">
-                    <p className="font-semibold">⚠️ {error}</p>
+                    <p className="font-semibold">{error}</p>
                     {error.includes('get_calling_stats') && (
                         <p className="mt-1 text-sm">The calling-stats database migration has not been applied yet (supabase db push).</p>
                     )}
@@ -680,7 +680,7 @@ function CallingReport() {
                 {subTab === 'types' && (
                     <>
                         <ChartCard
-                            title="Complaint sub-types × contact outcome"
+                            title="Complaint sub-types by contact outcome"
                             subtitle="What kind of complaints came in, and how far the calling reached them"
                             height={Math.max(280, subTypeItems.length * 36 + 90)}
                         >
@@ -828,7 +828,7 @@ function CallingReport() {
                 {subTab === 'feeders' && (
                     <>
                         <ChartCard
-                            title="Top feeders × contact outcome"
+                            title="Top feeders by contact outcome"
                             subtitle={`Feeders with the most live-feed complaints in this range${
                                 unknownFeeder ? ` · ${nfmt(unknownFeeder.n)} complaints came without feeder info (in the table below)` : ''
                             }`}
@@ -909,7 +909,7 @@ function CallingReport() {
                         ) : (
                             <>
                                 <ChartCard
-                                    title="Top substations × contact outcome"
+                                    title="Top substations by contact outcome"
                                     subtitle="Among complaints whose substation is known"
                                     height={Math.max(280, ssItems.length * 34 + 90)}
                                 >

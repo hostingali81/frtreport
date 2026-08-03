@@ -123,7 +123,7 @@ export function ChartCard({
   className?: string;
 }) {
   return (
-    <div className={`bg-white rounded-2xl border border-gray-200 shadow-sm p-5 ${className}`}>
+    <div className={`rounded-lg border border-gray-200 bg-white p-5 shadow-sm ${className}`}>
       <div className="mb-4">
         <h3 className="text-sm font-bold text-gray-900">{title}</h3>
         <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>
