@@ -2,7 +2,7 @@
 
 import { ReactNode, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FiActivity, FiArrowLeft, FiClock, FiDatabase, FiLoader, FiPhoneCall, FiRefreshCw, FiRepeat, FiTrendingUp, FiZap } from 'react-icons/fi';
+import { FiActivity, FiArrowLeft, FiClock, FiDatabase, FiLoader, FiPhoneCall, FiRefreshCw, FiRepeat, FiTool, FiTrendingUp, FiZap } from 'react-icons/fi';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import FilterBar from '../components/FilterBar';
@@ -21,8 +21,9 @@ const MonthComparison = dynamic(() => import('../components/MonthComparison'), {
 const ConsumerInsights = dynamic(() => import('../components/ConsumerInsights'), { ssr: false, loading: () => <LoadingSkeleton /> });
 const FeederReport = dynamic(() => import('../components/FeederReport'), { ssr: false, loading: () => <LoadingSkeleton /> });
 const CallingReport = dynamic(() => import('../components/CallingReport'), { ssr: false, loading: () => <LoadingSkeleton /> });
+const FieldReport = dynamic(() => import('../components/FieldReport'), { ssr: false, loading: () => <LoadingSkeleton /> });
 
-type TabId = 'trends' | 'deep' | 'months' | 'consumers' | 'feeders' | 'calling';
+type TabId = 'trends' | 'deep' | 'months' | 'consumers' | 'feeders' | 'calling' | 'field';
 
 const TABS: { id: TabId; label: string; icon: ReactNode }[] = [
   { id: 'deep', label: 'Deep Analysis', icon: <FiActivity /> },
@@ -30,8 +31,14 @@ const TABS: { id: TabId; label: string; icon: ReactNode }[] = [
   { id: 'trends', label: 'Trends', icon: <FiTrendingUp /> },
   { id: 'months', label: 'Month Comparison', icon: <FiDatabase /> },
   { id: 'consumers', label: 'Repeat Consumers', icon: <FiRepeat /> },
-  { id: 'calling', label: 'Calling Report', icon: <FiPhoneCall /> }
+  { id: 'calling', label: 'Calling Report', icon: <FiPhoneCall /> },
+  { id: 'field', label: 'Field Report', icon: <FiTool /> }
 ];
+
+// Tabs that render their own universe of data and so must not be gated on (or
+// filtered by) the 1912 complaint stats: the calling app's live_complaints /
+// call_logs, and the manual DT & Line field return.
+const STANDALONE_TABS: TabId[] = ['calling', 'field'];
 
 const formatMins = (mins: number) => {
   const h = Math.floor(mins / 60);
@@ -53,6 +60,7 @@ export default function AnalyticsPage() {
   const [navigating, setNavigating] = useState(false);
 
   const { filterBarProps, buildFilters } = useComplaintFilters();
+  const isStandalone = STANDALONE_TABS.includes(activeTab);
 
   const applyCurrentFilters = async () => {
     setError('');
@@ -136,13 +144,13 @@ export default function AnalyticsPage() {
           </div>
         </header>
 
-        {error && activeTab !== 'calling' && (
+        {error && !isStandalone && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-800">
             <p className="font-semibold">{error}</p>
           </div>
         )}
 
-        {activeTab !== 'calling' && (
+        {!isStandalone && (
           <FilterBar
             {...filterBarProps}
             onApply={applyCurrentFilters}
@@ -150,7 +158,7 @@ export default function AnalyticsPage() {
           />
         )}
 
-        {activeTab !== 'calling' && !statsLoading && kpis && kpis.total > 0 && (
+        {!isStandalone && !statsLoading && kpis && kpis.total > 0 && (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             {[
               { label: 'Total', value: kpis.total, color: 'text-slate-900' },
@@ -188,13 +196,14 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {activeTab === 'calling' && (
+        {isStandalone && (
           <div className="pb-8">
-            <CallingReport />
+            {activeTab === 'calling' && <CallingReport />}
+            {activeTab === 'field' && <FieldReport />}
           </div>
         )}
 
-        {activeTab !== 'calling' && statsLoading && (
+        {!isStandalone && statsLoading && (
           <div className="rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
             <div className="flex items-center justify-center py-16">
               <div className="text-center">
@@ -205,14 +214,14 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {activeTab !== 'calling' && !statsLoading && !error && (!stats || stats.total === 0) && (
+        {!isStandalone && !statsLoading && !error && (!stats || stats.total === 0) && (
           <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-yellow-800">
             <p className="font-semibold">No complaints found for the current filters.</p>
             <p className="mt-1 text-sm">Try another date range, a broader preset, or clear filters.</p>
           </div>
         )}
 
-        {activeTab !== 'calling' && !statsLoading && !error && stats && stats.total > 0 && (
+        {!isStandalone && !statsLoading && !error && stats && stats.total > 0 && (
           <div className="pb-8">
             {activeTab === 'trends' && <TrendCharts stats={stats} />}
             {activeTab === 'deep' && <DeepDivePanel stats={stats} />}
