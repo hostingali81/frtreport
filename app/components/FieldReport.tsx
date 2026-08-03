@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiAlertCircle, FiAward, FiChevronDown, FiDownload, FiInfo, FiPrinter, FiScissors, FiSearch, FiTool, FiZap } from 'react-icons/fi';
+import { FiAlertCircle, FiAward, FiCheck, FiChevronDown, FiDownload, FiInfo, FiPrinter, FiScissors, FiSearch, FiTool, FiZap } from 'react-icons/fi';
 import {
   CIRCLE, DATA_NOTES, DIVISIONS, MONTHS, PAIRED_METRICS,
   SURVEY_ROWS, WORK_ONLY_METRICS, WORK_ROWS,
@@ -133,6 +133,7 @@ function FieldReport() {
   }, [totals, sortDesc]);
 
   const laggards = useMemo(() => ranked.filter((t) => t.pct < 75).length, [ranked]);
+  const allSelected = selectedDivisions.length === DIVISIONS.length;
   const monthCount = slice.months.length;
   const periodLabel = `${monthLabelLong(slice.months[0])} – ${monthLabelLong(slice.months[monthCount - 1])}`;
 
@@ -474,33 +475,46 @@ function FieldReport() {
       {/* One filter row scoping every chart and table below it */}
       <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm print:hidden">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          {/* A chip is either in scope or it is not - one visual language for
+              both, never a third "selected but all-mode" look. The tick keeps
+              the state readable without relying on colour alone. */}
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Division</p>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                onClick={() => setSelectedDivisions([...DIVISIONS])}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition active:scale-95 ${
-                  selectedDivisions.length === DIVISIONS.length ? 'bg-slate-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                All ({DIVISIONS.length})
-              </button>
-              {DIVISIONS.map((d) => (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {DIVISIONS.map((d) => {
+                const on = selectedDivisions.includes(d);
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => toggleDivision(d)}
+                    className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition active:scale-95 ${
+                      on
+                        ? 'border-blue-600 bg-blue-600 text-white shadow-sm hover:bg-blue-700'
+                        : 'border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:bg-gray-50'
+                    }`}
+                  >
+                    {on ? <FiCheck className="text-[13px]" /> : <span className="h-[13px] w-[13px]" aria-hidden />}
+                    {d.replace('EDD-', '')}
+                  </button>
+                );
+              })}
+              {!allSelected && (
                 <button
-                  key={d}
-                  onClick={() => toggleDivision(d)}
-                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition active:scale-95 ${
-                    selectedDivisions.includes(d) && selectedDivisions.length !== DIVISIONS.length
-                      ? 'bg-blue-600 text-white'
-                      : selectedDivisions.includes(d)
-                        ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                  }`}
+                  type="button"
+                  onClick={() => setSelectedDivisions([...DIVISIONS])}
+                  className="ml-1 rounded-md px-2 py-1.5 text-xs font-semibold text-blue-700 underline-offset-2 transition hover:underline active:scale-95"
                 >
-                  {d.replace('EDD-', '')}
+                  Select all
                 </button>
-              ))}
+              )}
             </div>
+            <p className="mt-2 text-[11px] text-gray-500">
+              {allSelected
+                ? `All ${DIVISIONS.length} divisions in scope`
+                : `${selectedDivisions.length} of ${DIVISIONS.length} in scope: ${selectedDivisions.map((d) => d.replace('EDD-', '')).join(', ')}`}
+            </p>
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
