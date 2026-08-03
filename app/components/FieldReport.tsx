@@ -1,30 +1,31 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiAlertCircle, FiAward, FiCheck, FiChevronDown, FiDownload, FiInfo, FiPrinter, FiScissors, FiSearch, FiTool, FiZap } from 'react-icons/fi';
+import { FiAlertCircle, FiChevronDown, FiDownload, FiInfo, FiPrinter } from 'react-icons/fi';
 import {
-  CIRCLE, DATA_NOTES, DIVISIONS, MONTHS, PAIRED_METRICS,
+  CAPACITY_BANDS, CAPACITY_LABELS, CIRCLE, DATA_NOTES, DIVISIONS, MONTHS, PAIRED_METRICS,
   SURVEY_ROWS, WORK_ONLY_METRICS, WORK_ROWS,
-  averageCompletion, divisionScorecard, divisionSeries, headlineTotals,
-  metricTotals, monthlySeries, monthLabel, monthLabelLong, standaloneMonthly,
+  averageCompletion, divisionScorecard, divisionSeries, dtCoverage, dtPopulation,
+  headlineTotals, metricTotals, monthlySeries, monthLabel, monthLabelLong, standaloneMonthly,
   type Division, type Slice
 } from '../lib/fieldData';
-import { CAT, GRID, INK, NEUTRAL, TOOLTIP, axisTicks, hairlineGrid, nfmt } from './chartTheme';
+import { CAT, GRID, INK, NEUTRAL, SURFACE, TOOLTIP, axisTicks, hairlineGrid, nfmt, stackEndLabels } from './chartTheme';
 import { loadExcelJS } from '../utils/lazyImports';
 
-// Field Work & Survey report for EDC-Barabanki. Unlike the other analytics tabs
-// this one is not driven by complaint stats at all - it renders the monthly
-// DT/Line inspection and maintenance return (app/lib/fieldData.ts), so it owns
-// its own division/month filter.
+// Field Work & Survey report for EDC-Barabanki.
 //
-// Encoding convention across every chart here: work DONE is the accent hue,
-// the survey REQUIREMENT is a neutral track behind/beside it. That is a
-// target-vs-actual pair, not two categories, so it never eats a categorical slot.
+// Built to be walked through in front of a senior officer, so the material is
+// split into four views that each answer one question - rather than one long
+// scroll. Raw returns stay available under "Source data" instead of sitting in
+// the middle of the story.
+//
+// Encoding convention: work DONE is the accent hue, the survey REQUIREMENT is a
+// neutral track behind or beside it. That is a target-vs-actual pair, not two
+// categories, so it never consumes a categorical slot.
 const DONE = CAT[0];
 const TRACK = NEUTRAL;
 
-// Sequential ramp (one hue, light -> dark) for the completion scorecard. Bins
-// rather than a continuous scale so adjacent classes stay distinguishable.
+// Sequential ramp (one hue, light -> dark) for the completion scorecard.
 const RAMP = [
   { max: 25, bg: '#eaf1fb', fg: INK.primary, label: 'Under 25%' },
   { max: 50, bg: '#c3d9f2', fg: INK.primary, label: '25 – 50%' },
@@ -33,6 +34,9 @@ const RAMP = [
   { max: Infinity, bg: '#2a78d6', fg: '#ffffff', label: '100% or above' }
 ];
 const rampFor = (pct: number) => RAMP.find((r) => pct <= r.max) ?? RAMP[RAMP.length - 1];
+
+// Ordinal ramp for the three transformer capacity bands (small -> large).
+const BAND_RAMP = ['#c3d9f2', '#6ba3de', '#2a78d6'];
 
 /**
  * Snaps to a clean "100%" only for genuine rounding noise. Anything actually
@@ -44,10 +48,18 @@ const pctText = (p: number) => {
   return `${p.toFixed(p < 10 ? 1 : 0)}%`;
 };
 
+type View = 'overview' | 'activities' | 'divisions' | 'data';
+
+const VIEWS: { id: View; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'activities', label: 'Activities' },
+  { id: 'divisions', label: 'Divisions & Network' },
+  { id: 'data', label: 'Source Data' }
+];
+
 /**
- * Tracks the narrow breakpoint. Chart.js sizes the y-axis to its longest tick,
- * so full activity names eat the plot area on a phone - the short names from the
- * metric catalogue go in instead (the tooltip and the table keep the full name).
+ * Chart.js sizes the y-axis to its longest tick, so full activity names eat the
+ * plot area on a phone - short names from the metric catalogue go in instead.
  */
 function useIsNarrow() {
   const [narrow, setNarrow] = useState(false);
@@ -87,28 +99,50 @@ function useChart(
   }, deps);
 }
 
-function Card({ title, subtitle, children, className = '' }: {
-  title: string; subtitle?: string; children: React.ReactNode; className?: string;
+// --- Presentational primitives ---------------------------------------------
+
+function Panel({ title, hint, action, children }: {
+  title?: string; hint?: string; action?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
-    <section className={`rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5 ${className}`}>
-      <header className="mb-4">
-        <h3 className="text-sm font-bold text-gray-900 sm:text-base">{title}</h3>
-        {subtitle && <p className="mt-0.5 text-xs text-gray-500">{subtitle}</p>}
-      </header>
+    <section className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6">
+      {(title || action) && (
+        <header className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            {title && <h3 className="text-[15px] font-semibold tracking-tight text-slate-900">{title}</h3>}
+            {hint && <p className="mt-1 text-[13px] leading-relaxed text-slate-500">{hint}</p>}
+          </div>
+          {action}
+        </header>
+      )}
       {children}
     </section>
   );
 }
 
+/** A single bordered row of figures - reads far calmer than a grid of cards. */
+function StatStrip({ items }: { items: { label: string; value: string; sub?: string }[] }) {
+  return (
+    <div className="grid grid-cols-2 divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white sm:grid-cols-3 lg:grid-cols-5 lg:divide-x">
+      {items.map((s) => (
+        <div key={s.label} className="border-b border-slate-200 px-5 py-4 last:border-b-0 sm:border-b-0 lg:border-b-0">
+          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">{s.label}</p>
+          <p className="mt-1.5 text-[26px] font-semibold leading-none tracking-tight text-slate-900">{s.value}</p>
+          {s.sub && <p className="mt-1.5 text-[11px] text-slate-400">{s.sub}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function FieldReport() {
+  const [view, setView] = useState<View>('overview');
   const [selectedDivisions, setSelectedDivisions] = useState<Division[]>([...DIVISIONS]);
   const [fromMonth, setFromMonth] = useState<string>(MONTHS[0]);
   const [toMonth, setToMonth] = useState<string>(MONTHS[MONTHS.length - 1]);
   const [focusId, setFocusId] = useState<string>('tree');
   const [sortDesc, setSortDesc] = useState(true);
   const [rawSheet, setRawSheet] = useState<'survey' | 'work'>('survey');
-  const [showNotes, setShowNotes] = useState(false);
   const [exporting, setExporting] = useState(false);
   const isNarrow = useIsNarrow();
 
@@ -127,15 +161,29 @@ function FieldReport() {
   const scorecard = useMemo(() => divisionScorecard(slice), [slice]);
   const focus = useMemo(() => PAIRED_METRICS.find((m) => m.id === focusId) ?? PAIRED_METRICS[0], [focusId]);
 
-  const ranked = useMemo(() => {
-    const rows = totals.filter((t) => t.req > 0);
-    return [...rows].sort((a, b) => (sortDesc ? b.pct - a.pct : a.pct - b.pct));
-  }, [totals, sortDesc]);
+  const ranked = useMemo(
+    () => [...totals.filter((t) => t.req > 0)].sort((a, b) => (sortDesc ? b.pct - a.pct : a.pct - b.pct)),
+    [totals, sortDesc]
+  );
 
-  const laggards = useMemo(() => ranked.filter((t) => t.pct < 75).length, [ranked]);
   const allSelected = selectedDivisions.length === DIVISIONS.length;
   const monthCount = slice.months.length;
   const periodLabel = `${monthLabelLong(slice.months[0])} – ${monthLabelLong(slice.months[monthCount - 1])}`;
+
+  const atTarget = ranked.filter((t) => t.pct >= 99.95).length;
+  const laggards = ranked.filter((t) => t.pct < 75).length;
+  const topGaps = useMemo(
+    () => [...ranked].filter((t) => t.gap > 0).sort((a, b) => b.gap - a.gap).slice(0, 3),
+    [ranked]
+  );
+  const rankedDivisions = useMemo(() => [...scorecard].sort((a, b) => b.average - a.average), [scorecard]);
+  const best = rankedDivisions[0];
+  const worst = rankedDivisions[rankedDivisions.length - 1];
+
+  const dtPop = useMemo(() => dtPopulation(slice), [slice]);
+  const dtCov = useMemo(() => dtCoverage(slice), [slice]);
+  const dtTotal = dtPop.reduce((a, p) => a + p.total, 0);
+  const bandTotals = CAPACITY_BANDS.map((_, i) => dtPop.reduce((a, p) => a + p.bands[i], 0));
 
   const toggleDivision = (d: Division) => {
     setSelectedDivisions((prev) => {
@@ -147,7 +195,7 @@ function FieldReport() {
     });
   };
 
-  // --- Chart 1: completion against survey, one row per activity -------------
+  // --- Overview: completion against survey, one row per activity ------------
   const completionRef = useRef<HTMLCanvasElement>(null);
   useChart(completionRef, () => ({
     type: 'bar',
@@ -158,17 +206,17 @@ function FieldReport() {
           label: 'Work done',
           data: ranked.map((t) => Math.min(100, t.pct)),
           backgroundColor: DONE,
-          borderRadius: { topLeft: 0, bottomLeft: 0, topRight: 4, bottomRight: 4 },
+          borderRadius: { topLeft: 0, bottomLeft: 0, topRight: 3, bottomRight: 3 },
           borderSkipped: false,
-          barThickness: 16
+          barThickness: 14
         },
         {
           label: 'Pending against survey',
           data: ranked.map((t) => Math.max(0, 100 - Math.min(100, t.pct))),
           backgroundColor: TRACK,
-          borderRadius: { topLeft: 0, bottomLeft: 0, topRight: 4, bottomRight: 4 },
+          borderRadius: { topLeft: 0, bottomLeft: 0, topRight: 3, bottomRight: 3 },
           borderSkipped: false,
-          barThickness: 16
+          barThickness: 14
         }
       ]
     },
@@ -179,7 +227,7 @@ function FieldReport() {
       layout: { padding: { right: 52 } },
       interaction: { mode: 'index', axis: 'y', intersect: false },
       plugins: {
-        legend: { position: 'top', align: 'end', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'rectRounded', color: INK.secondary, font: { size: 11 } } },
+        legend: { position: 'top', align: 'end', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'rectRounded', color: INK.secondary, font: { size: 11 }, padding: 14 } },
         tooltip: {
           ...TOOLTIP,
           callbacks: {
@@ -209,16 +257,16 @@ function FieldReport() {
           const t = ranked[i];
           if (!t) return;
           ctx.fillStyle = INK.primary;
-          ctx.font = '700 12px system-ui, sans-serif';
+          ctx.font = '600 12px system-ui, sans-serif';
           ctx.textAlign = 'left';
           ctx.textBaseline = 'middle';
           ctx.fillText(pctText(t.pct), bar.x + 8, bar.y);
         });
       }
     }]
-  }), [ranked, isNarrow]);
+  }), [ranked, isNarrow, view]);
 
-  // --- Chart 2: month-by-month for the focused activity ---------------------
+  // --- Activities: month by month for the focused activity ------------------
   const monthlyRef = useRef<HTMLCanvasElement>(null);
   const monthly = useMemo(() => monthlySeries(focus, slice), [focus, slice]);
   useChart(monthlyRef, () => {
@@ -228,18 +276,18 @@ function FieldReport() {
         label: `${focus.reqLabel} (survey)`,
         data: monthly.map((m) => m.req ?? 0),
         backgroundColor: TRACK,
-        borderRadius: 4,
+        borderRadius: 3,
         borderSkipped: false,
-        maxBarThickness: 24
+        maxBarThickness: 20
       });
     }
     datasets.push({
       label: `${focus.doneLabel} (work)`,
       data: monthly.map((m) => m.done),
       backgroundColor: DONE,
-      borderRadius: 4,
+      borderRadius: 3,
       borderSkipped: false,
-      maxBarThickness: 24
+      maxBarThickness: 20
     });
     return {
       type: 'bar',
@@ -250,7 +298,7 @@ function FieldReport() {
         interaction: { mode: 'index', intersect: false },
         plugins: {
           legend: datasets.length > 1
-            ? { position: 'top', align: 'end', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'rectRounded', color: INK.secondary, font: { size: 11 } } }
+            ? { position: 'top', align: 'end', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'rectRounded', color: INK.secondary, font: { size: 11 }, padding: 14 } }
             : { display: false },
           tooltip: {
             ...TOOLTIP,
@@ -266,9 +314,9 @@ function FieldReport() {
         }
       }
     };
-  }, [monthly, focus]);
+  }, [monthly, focus, view]);
 
-  // --- Chart 3: division-by-division for the focused activity ---------------
+  // --- Activities: division by division for the focused activity ------------
   const divisionRef = useRef<HTMLCanvasElement>(null);
   const byDivision = useMemo(() => divisionSeries(focus, slice), [focus, slice]);
   useChart(divisionRef, () => ({
@@ -280,17 +328,17 @@ function FieldReport() {
           label: `${focus.reqLabel} (survey)`,
           data: byDivision.map((d) => d.req),
           backgroundColor: TRACK,
-          borderRadius: 4,
+          borderRadius: 3,
           borderSkipped: false,
-          barThickness: 14
+          barThickness: 12
         },
         {
           label: `${focus.doneLabel} (work)`,
           data: byDivision.map((d) => d.done),
           backgroundColor: DONE,
-          borderRadius: 4,
+          borderRadius: 3,
           borderSkipped: false,
-          barThickness: 14
+          barThickness: 12
         }
       ]
     },
@@ -300,7 +348,7 @@ function FieldReport() {
       maintainAspectRatio: false,
       interaction: { mode: 'index', axis: 'y', intersect: false },
       plugins: {
-        legend: { position: 'top', align: 'end', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'rectRounded', color: INK.secondary, font: { size: 11 } } },
+        legend: { position: 'top', align: 'end', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'rectRounded', color: INK.secondary, font: { size: 11 }, padding: 14 } },
         tooltip: {
           ...TOOLTIP,
           callbacks: {
@@ -319,22 +367,67 @@ function FieldReport() {
         y: { grid: { display: false }, border: { display: false }, ticks: { ...axisTicks, autoSkip: false } }
       }
     }
-  }), [byDivision, focus]);
+  }), [byDivision, focus, view]);
 
-  // --- Charts 4-6: activities with no survey requirement (small multiples) --
+  // --- Activities: work with no survey counterpart (small multiples) --------
   const oilRef = useRef<HTMLCanvasElement>(null);
   const damageRef = useRef<HTMLCanvasElement>(null);
   const jumperRef = useRef<HTMLCanvasElement>(null);
   const standaloneRefs = [oilRef, damageRef, jumperRef];
-
   const standaloneData = useMemo(
     () => WORK_ONLY_METRICS.map((m) => ({ metric: m, points: standaloneMonthly(m, slice) })),
     [slice]
   );
+  useChart(oilRef, () => singleSeriesConfig(standaloneData[0]), [standaloneData, view]);
+  useChart(damageRef, () => singleSeriesConfig(standaloneData[1]), [standaloneData, view]);
+  useChart(jumperRef, () => singleSeriesConfig(standaloneData[2]), [standaloneData, view]);
 
-  useChart(oilRef, () => singleSeriesConfig(standaloneData[0]), [standaloneData]);
-  useChart(damageRef, () => singleSeriesConfig(standaloneData[1]), [standaloneData]);
-  useChart(jumperRef, () => singleSeriesConfig(standaloneData[2]), [standaloneData]);
+  // --- Divisions & Network: installed DT population by capacity band --------
+  const populationRef = useRef<HTMLCanvasElement>(null);
+  useChart(populationRef, () => ({
+    type: 'bar',
+    data: {
+      labels: dtPop.map((p) => p.division.replace('EDD-', '')),
+      datasets: CAPACITY_BANDS.map((band, i) => ({
+        label: `${band.label} (${band.range})`,
+        data: dtPop.map((p) => p.bands[i]),
+        // Capacity is an ordered scale, so an ordinal ramp - one hue, light to
+        // dark - not categorical hues.
+        backgroundColor: BAND_RAMP[i],
+        borderRadius: 2,
+        borderSkipped: false,
+        borderWidth: 2,
+        borderColor: SURFACE,
+        barThickness: 18
+      }))
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: { right: 60 } },
+      interaction: { mode: 'index', axis: 'y', intersect: false },
+      plugins: {
+        legend: { position: 'top', align: 'end', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'rectRounded', color: INK.secondary, font: { size: 11 }, padding: 14 } },
+        tooltip: {
+          ...TOOLTIP,
+          callbacks: {
+            title: (items: { dataIndex: number }[]) => {
+              const p = dtPop[items[0].dataIndex];
+              return p ? `${p.division} — ${nfmt(p.total)} DTs` : '';
+            },
+            label: (item: { dataset: { label: string }; parsed: { x: number } }) =>
+              `${item.dataset.label}: ${nfmt(item.parsed.x)}`
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, beginAtZero: true, grid: hairlineGrid, border: { display: false }, ticks: { ...axisTicks, callback: (v: number) => nfmt(v) } },
+        y: { stacked: true, grid: { display: false }, border: { display: false }, ticks: { ...axisTicks, autoSkip: false } }
+      }
+    },
+    plugins: [stackEndLabels]
+  }), [dtPop, view]);
 
   const exportExcel = async () => {
     if (exporting) return;
@@ -353,10 +446,7 @@ function FieldReport() {
       const sh = summary.addRow(['Activity', 'Group', 'Unit', 'Required (survey)', 'Done (work)', 'Balance', 'Completion %']);
       sh.eachCell((c: { fill: unknown; font: unknown }) => { c.fill = headerFill; c.font = headerFont; });
       ranked.forEach((t) => {
-        summary.addRow([
-          t.metric.label, t.metric.group, t.metric.unit,
-          t.req, t.done, t.gap, Number(t.pct.toFixed(1))
-        ]);
+        summary.addRow([t.metric.label, t.metric.group, t.metric.unit, t.req, t.done, t.gap, Number(t.pct.toFixed(1))]);
       });
       summary.columns = [{ width: 34 }, { width: 8 }, { width: 8 }, { width: 18 }, { width: 14 }, { width: 12 }, { width: 14 }];
 
@@ -395,6 +485,27 @@ function FieldReport() {
       });
       workWs.columns = Array.from({ length: 19 }, (_, i) => ({ width: i < 2 ? 22 : 16 }));
 
+      const dtWs = wb.addWorksheet('DT Count');
+      const dtHead = dtWs.addRow(['Division', ...CAPACITY_LABELS, 'Total DTs', 'Surveyed', 'Per 100 DTs', 'Maintained', 'Per 100 DTs']);
+      dtHead.eachCell((c: { fill: unknown; font: unknown }) => { c.fill = headerFill; c.font = headerFont; });
+      dtPop.forEach((p, i) => {
+        const c = dtCov[i];
+        dtWs.addRow([
+          p.division, ...p.byCapacity, p.total,
+          c.surveyed, Number(c.surveyedPer100.toFixed(1)),
+          c.maintained, Number(c.maintainedPer100.toFixed(1))
+        ]);
+      });
+      dtWs.addRow([
+        'Circle total',
+        ...CAPACITY_LABELS.map((_, i) => dtPop.reduce((a, p) => a + p.byCapacity[i], 0)),
+        dtTotal, head.dtSurveyed,
+        dtTotal > 0 ? Number(((head.dtSurveyed / dtTotal) * 100).toFixed(1)) : 0,
+        head.dtMaintained,
+        dtTotal > 0 ? Number(((head.dtMaintained / dtTotal) * 100).toFixed(1)) : 0
+      ]).font = { bold: true };
+      dtWs.columns = Array.from({ length: 15 }, (_, i) => ({ width: i === 0 ? 22 : 13 }));
+
       const notesWs = wb.addWorksheet('Data Notes');
       notesWs.addRow(['Note', 'Detail']).eachCell((c: { fill: unknown; font: unknown }) => { c.fill = headerFill; c.font = headerFont; });
       DATA_NOTES.forEach((n) => notesWs.addRow([n.title, n.body]));
@@ -410,140 +521,266 @@ function FieldReport() {
     }
   };
 
-  const kpis = [
-    { label: 'DTs surveyed', value: head.dtSurveyed, unit: 'Nos.', icon: <FiSearch />, context: 'inspection coverage' },
-    {
-      label: 'DTs maintained', value: head.dtMaintained, unit: 'Nos.', icon: <FiTool />,
-      context: head.dtSurveyed > 0 ? `${pctText((head.dtMaintained / head.dtSurveyed) * 100)} of surveyed` : undefined
-    },
-    { label: 'Line surveyed', value: head.lineSurveyedKm, unit: 'KM', icon: <FiSearch />, context: '33KV & 11KV' },
-    { label: 'Tree trimming done', value: head.treeTrimmedKm, unit: 'KM', icon: <FiScissors />, context: '33KV + 11KV combined' },
-    { label: 'Damaged DTs replaced', value: head.damagedDtReplaced, unit: 'Nos.', icon: <FiZap />, context: 'no survey requirement' },
-    { label: 'Jumpers repaired', value: head.jumperRepaired, unit: 'Nos.', icon: <FiZap />, context: 'no survey requirement' }
-  ];
-
-  const atTarget = ranked.filter((t) => t.pct >= 99.95).length;
-  const topGaps = [...ranked].filter((t) => t.gap > 0).sort((a, b) => b.gap - a.gap).slice(0, 3);
-  const rankedDivisions = [...scorecard].sort((a, b) => b.average - a.average);
-  const best = rankedDivisions[0];
-  const worst = rankedDivisions[rankedDivisions.length - 1];
-
   return (
     <div className="flex flex-col gap-5 animate-in fade-in duration-500">
-      {/* Report cover strip - the first thing on screen and on a printout */}
-      <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 shadow-sm">
-        <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-          <div className="flex items-start gap-3.5">
-            <span className="rounded-lg bg-white/10 p-2.5 text-white ring-1 ring-white/15"><FiTool className="text-xl" /></span>
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{CIRCLE}</p>
-              <h2 className="mt-0.5 text-xl font-bold tracking-tight text-white sm:text-2xl">Field Work &amp; Survey Report</h2>
-              <p className="mt-1 text-sm text-slate-300">DT and Line inspection against maintenance carried out</p>
-            </div>
+      {/* Masthead */}
+      <header className="rounded-xl border border-slate-200 bg-white">
+        <div className="flex flex-col gap-4 border-l-[3px] border-blue-600 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">{CIRCLE}</p>
+            <h2 className="mt-1 text-[22px] font-semibold tracking-tight text-slate-900 sm:text-[26px]">
+              Field Work &amp; Survey Report
+            </h2>
+            <p className="mt-1 text-[13px] text-slate-500">
+              {periodLabel} · {slice.divisions.length} of {DIVISIONS.length} divisions · DT and Line inspection against maintenance carried out
+            </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 print:hidden">
+          <div className="flex shrink-0 flex-wrap gap-2 print:hidden">
             <button
               onClick={() => window.print()}
-              className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10 active:scale-95"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-[13px] font-medium text-slate-700 transition hover:bg-slate-50 active:scale-95"
             >
               <FiPrinter /> Print
             </button>
             <button
               onClick={exportExcel}
               disabled={exporting}
-              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 active:scale-95 disabled:bg-slate-600"
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3.5 py-2 text-[13px] font-medium text-white transition hover:bg-slate-800 active:scale-95 disabled:bg-slate-400"
             >
               <FiDownload /> {exporting ? 'Exporting…' : 'Export Excel'}
             </button>
           </div>
         </div>
-        <dl className="grid grid-cols-2 gap-px border-t border-white/10 bg-white/10 sm:grid-cols-4">
-          {[
-            ['Period', periodLabel],
-            ['Divisions', `${slice.divisions.length} of ${DIVISIONS.length}`],
-            ['Months', String(monthCount)],
-            ['Activities tracked', `${PAIRED_METRICS.length} paired + ${WORK_ONLY_METRICS.length} standalone`]
-          ].map(([k, v]) => (
-            <div key={k} className="bg-slate-900 px-5 py-3">
-              <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{k}</dt>
-              <dd className="mt-0.5 text-sm font-semibold text-white">{v}</dd>
-            </div>
+
+        {/* View switcher */}
+        <nav className="flex gap-6 overflow-x-auto border-t border-slate-200 px-5 sm:px-6 print:hidden">
+          {VIEWS.map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setView(v.id)}
+              aria-current={view === v.id ? 'page' : undefined}
+              className={`-mb-px shrink-0 border-b-2 py-3 text-[13px] font-medium transition ${
+                view === v.id
+                  ? 'border-blue-600 text-slate-900'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              {v.label}
+            </button>
           ))}
-        </dl>
+        </nav>
+      </header>
+
+      {/* One filter row scoping every view */}
+      <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 lg:flex-row lg:items-center lg:justify-between print:hidden">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">Division</span>
+          {DIVISIONS.map((d) => {
+            const on = selectedDivisions.includes(d);
+            return (
+              <button
+                key={d}
+                type="button"
+                aria-pressed={on}
+                onClick={() => toggleDivision(d)}
+                className={`rounded-md border px-2.5 py-1 text-[12px] font-medium transition active:scale-95 ${
+                  on
+                    ? 'border-blue-600 bg-blue-600 text-white'
+                    : 'border-slate-300 bg-white text-slate-400 hover:border-slate-400 hover:text-slate-600'
+                }`}
+              >
+                {d.replace('EDD-', '')}
+              </button>
+            );
+          })}
+          {!allSelected && (
+            <button
+              type="button"
+              onClick={() => setSelectedDivisions([...DIVISIONS])}
+              className="ml-1 text-[12px] font-medium text-blue-700 underline-offset-2 transition hover:underline active:scale-95"
+            >
+              Select all
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">Period</span>
+          <select
+            value={fromMonth}
+            onChange={(e) => setFromMonth(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[13px] text-slate-700 focus:border-blue-500 focus:outline-none"
+          >
+            {MONTHS.map((m) => <option key={m} value={m}>{monthLabelLong(m)}</option>)}
+          </select>
+          <span className="text-slate-400">–</span>
+          <select
+            value={toMonth}
+            onChange={(e) => setToMonth(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[13px] text-slate-700 focus:border-blue-500 focus:outline-none"
+          >
+            {MONTHS.map((m) => <option key={m} value={m}>{monthLabelLong(m)}</option>)}
+          </select>
+        </div>
       </div>
 
-      {/* One filter row scoping every chart and table below it */}
-      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm print:hidden">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          {/* A chip is either in scope or it is not - one visual language for
-              both, never a third "selected but all-mode" look. The tick keeps
-              the state readable without relying on colour alone. */}
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Division</p>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {DIVISIONS.map((d) => {
-                const on = selectedDivisions.includes(d);
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => toggleDivision(d)}
-                    className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition active:scale-95 ${
-                      on
-                        ? 'border-blue-600 bg-blue-600 text-white shadow-sm hover:bg-blue-700'
-                        : 'border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:bg-gray-50'
-                    }`}
-                  >
-                    {on ? <FiCheck className="text-[13px]" /> : <span className="h-[13px] w-[13px]" aria-hidden />}
-                    {d.replace('EDD-', '')}
-                  </button>
-                );
-              })}
-              {!allSelected && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedDivisions([...DIVISIONS])}
-                  className="ml-1 rounded-md px-2 py-1.5 text-xs font-semibold text-blue-700 underline-offset-2 transition hover:underline active:scale-95"
-                >
-                  Select all
-                </button>
-              )}
+      {/* ------------------------------ OVERVIEW ------------------------------ */}
+      {view === 'overview' && (
+        <div className="flex flex-col gap-5">
+          {/* Headline figure */}
+          <div className="rounded-xl border border-slate-200 bg-white p-6 sm:p-8">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                  Overall completion against survey
+                </p>
+                <p className="mt-2 text-[64px] font-semibold leading-[0.95] tracking-tight text-slate-900 sm:text-[76px]">
+                  {pctText(avg)}
+                </p>
+                <p className="mt-3 max-w-lg text-[13px] leading-relaxed text-slate-500">
+                  Unweighted mean across {ranked.length} activities the inspection raised a requirement for.
+                  Work beyond target counts as 100%, so over-delivery on one item never masks a shortfall on another.
+                </p>
+              </div>
+              <div className="w-full lg:max-w-sm">
+                <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: TRACK }}>
+                  <div className="h-full rounded-full" style={{ width: `${Math.min(100, avg)}%`, backgroundColor: DONE }} />
+                </div>
+                <div className="mt-3 flex justify-between text-[12px]">
+                  <span className="text-slate-500">
+                    <b className="font-semibold text-slate-900">{atTarget}</b> of {ranked.length} fully closed
+                  </span>
+                  {laggards > 0 && (
+                    <span className="text-slate-500">
+                      <b className="font-semibold text-amber-700">{laggards}</b> below 75%
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
-            <p className="mt-2 text-[11px] text-gray-500">
-              {allSelected
-                ? `All ${DIVISIONS.length} divisions in scope`
-                : `${selectedDivisions.length} of ${DIVISIONS.length} in scope: ${selectedDivisions.map((d) => d.replace('EDD-', '')).join(', ')}`}
-            </p>
           </div>
 
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">From</span>
-              <select
-                value={fromMonth}
-                onChange={(e) => setFromMonth(e.target.value)}
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+          <StatStrip
+            items={[
+              { label: 'DTs surveyed', value: nfmt(head.dtSurveyed), sub: 'Nos.' },
+              { label: 'DTs maintained', value: nfmt(head.dtMaintained), sub: head.dtSurveyed > 0 ? `${pctText((head.dtMaintained / head.dtSurveyed) * 100)} of surveyed` : 'Nos.' },
+              { label: 'Line surveyed', value: nfmt(head.lineSurveyedKm), sub: 'KM · 33KV & 11KV' },
+              { label: 'Tree trimming', value: nfmt(head.treeTrimmedKm), sub: 'KM · 33KV + 11KV' },
+              { label: 'Installed DTs', value: nfmt(dtTotal), sub: 'transformers on ground' }
+            ]}
+          />
+
+          <Panel
+            title="Survey requirement vs work completed"
+            hint="Every tracked activity as a share of what the inspection raised."
+            action={
+              <button
+                onClick={() => setSortDesc((s) => !s)}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-[12px] font-medium text-slate-600 transition hover:bg-slate-50 active:scale-95 print:hidden"
               >
-                {MONTHS.map((m) => <option key={m} value={m}>{monthLabelLong(m)}</option>)}
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">To</span>
-              <select
-                value={toMonth}
-                onChange={(e) => setToMonth(e.target.value)}
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              >
-                {MONTHS.map((m) => <option key={m} value={m}>{monthLabelLong(m)}</option>)}
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">Activity focus</span>
+                <FiChevronDown className={sortDesc ? '' : 'rotate-180'} />
+                {sortDesc ? 'Highest first' : 'Lowest first'}
+              </button>
+            }
+          >
+            <div style={{ height: `${ranked.length * 32 + 60}px` }}>
+              <canvas ref={completionRef} />
+            </div>
+          </Panel>
+
+          {/* The three things worth saying out loud */}
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">Largest outstanding balance</p>
+              {topGaps[0] ? (
+                <>
+                  <p className="mt-2 text-[17px] font-semibold tracking-tight text-slate-900">{topGaps[0].metric.short}</p>
+                  <p className="mt-1 text-[13px] text-slate-500">
+                    <b className="font-semibold text-amber-700">{nfmt(topGaps[0].gap)} {topGaps[0].metric.unit}</b> still open
+                    of {nfmt(topGaps[0].req)} raised
+                  </p>
+                </>
+              ) : (
+                <p className="mt-2 text-[15px] font-semibold text-emerald-700">Everything raised has been closed.</p>
+              )}
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">Highest completion</p>
+              {best && (
+                <>
+                  <p className="mt-2 text-[17px] font-semibold tracking-tight text-slate-900">{best.division.replace('EDD-', '')}</p>
+                  <p className="mt-1 text-[13px] text-slate-500">
+                    <b className="font-semibold text-emerald-700">{pctText(best.average)}</b> average across activities
+                  </p>
+                </>
+              )}
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">Needs attention</p>
+              {worst && (
+                <>
+                  <p className="mt-2 text-[17px] font-semibold tracking-tight text-slate-900">{worst.division.replace('EDD-', '')}</p>
+                  <p className="mt-1 text-[13px] text-slate-500">
+                    <b className="font-semibold text-amber-700">{pctText(worst.average)}</b> average across activities
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------- ACTIVITIES ----------------------------- */}
+      {view === 'activities' && (
+        <div className="flex flex-col gap-5">
+          <Panel title="Activity summary" hint={`Requirement raised by the inspection against work delivered · ${periodLabel}`}>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-left text-[13px]">
+                <thead className="border-b border-slate-200 text-[11px] uppercase tracking-[0.06em] text-slate-500">
+                  <tr>
+                    <th className="py-2.5 pr-3 font-medium">Activity</th>
+                    <th className="py-2.5 pr-3 font-medium">Unit</th>
+                    <th className="py-2.5 pr-3 text-right font-medium">Required</th>
+                    <th className="py-2.5 pr-3 text-right font-medium">Done</th>
+                    <th className="py-2.5 pr-3 text-right font-medium">Balance</th>
+                    <th className="py-2.5 text-right font-medium">Completion</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 [font-variant-numeric:tabular-nums]">
+                  {ranked.map((t) => (
+                    <tr key={t.metric.id} className="hover:bg-slate-50">
+                      <td className="py-2.5 pr-3 font-medium text-slate-900">
+                        <span className={`mr-2 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                          t.metric.group === 'DT' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-600'
+                        }`}>{t.metric.group}</span>
+                        {t.metric.label}
+                        {t.metric.periodScoped && <sup className="ml-1 text-[10px] font-semibold text-amber-600" title="Requirement is a period total, not monthly">†</sup>}
+                      </td>
+                      <td className="py-2.5 pr-3 text-slate-400">{t.metric.unit}</td>
+                      <td className="py-2.5 pr-3 text-right text-slate-500">{nfmt(t.req)}</td>
+                      <td className="py-2.5 pr-3 text-right font-medium text-slate-900">{nfmt(t.done)}</td>
+                      <td className={`py-2.5 pr-3 text-right ${t.gap > 0 ? 'font-medium text-amber-700' : 'text-slate-300'}`}>{nfmt(t.gap)}</td>
+                      <td className="py-2.5 text-right font-semibold text-slate-900">{pctText(t.pct)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {ranked.some((t) => t.metric.periodScoped) && (
+              <p className="mt-3 text-[11px] text-slate-500">
+                † LT ABC Cable and Weasel Conductor requirements are recorded once for the whole period in the survey sheet, so they do not change with the period filter.
+              </p>
+            )}
+          </Panel>
+
+          <Panel
+            title="Activity detail"
+            hint="Pick one activity to see how it moved month to month and how it landed across divisions."
+            action={
               <select
                 value={focusId}
                 onChange={(e) => setFocusId(e.target.value)}
-                className="w-full max-w-[16rem] rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                className="w-full max-w-[17rem] shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[13px] text-slate-700 focus:border-blue-500 focus:outline-none print:hidden"
               >
                 <optgroup label="DT works">
                   {PAIRED_METRICS.filter((m) => m.group === 'DT').map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
@@ -552,313 +789,276 @@ function FieldReport() {
                   {PAIRED_METRICS.filter((m) => m.group === 'Line').map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
                 </optgroup>
               </select>
-            </label>
-          </div>
-        </div>
-      </div>
-
-      {/* Headline: one hero figure + the raw volumes behind it */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm lg:col-span-1">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Average completion against survey</p>
-          <p className="mt-1 text-5xl font-bold leading-none text-gray-900">{pctText(avg)}</p>
-          <div className="mt-3 h-2 w-full overflow-hidden rounded-full" style={{ backgroundColor: TRACK }}>
-            <div className="h-full rounded-full" style={{ width: `${Math.min(100, avg)}%`, backgroundColor: DONE }} />
-          </div>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            <span className="rounded-md bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-800">
-              {atTarget} of {ranked.length} at 100%
-            </span>
-            {laggards > 0 && (
-              <span className="rounded-md bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800">
-                {laggards} below 75%
-              </span>
-            )}
-          </div>
-          <p className="mt-3 text-[11px] leading-relaxed text-gray-500">
-            Unweighted mean across {ranked.length} activities the survey raised a requirement for.
-            Work beyond target counts as 100%, so over-delivery on one item never masks a shortfall on another.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:col-span-2">
-          {kpis.map((k) => (
-            <div key={k.label} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:shadow">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{k.label}</p>
-                <span className="shrink-0 text-gray-300">{k.icon}</span>
+            }
+          >
+            <div className="grid gap-6 xl:grid-cols-2">
+              <div>
+                <p className="mb-3 text-[12px] font-medium text-slate-600">Month by month <span className="text-slate-400">({focus.unit})</span></p>
+                <div style={{ height: '280px' }}><canvas ref={monthlyRef} /></div>
+                {focus.periodReq && (
+                  <p className="mt-3 flex items-start gap-1.5 text-[11px] text-slate-500">
+                    <FiInfo className="mt-0.5 shrink-0" />
+                    The survey sheet holds a single requirement for the entire period, so only work done is plotted by month.
+                  </p>
+                )}
               </div>
-              <p className="mt-1 text-2xl font-bold text-gray-900">{nfmt(k.value)}</p>
-              <p className="text-[11px] text-gray-400">
-                {k.unit}{k.context && <> · {k.context}</>}
-              </p>
+              <div>
+                <p className="mb-3 text-[12px] font-medium text-slate-600">Division by division <span className="text-slate-400">({focus.unit})</span></p>
+                <div style={{ height: '280px' }}><canvas ref={divisionRef} /></div>
+              </div>
             </div>
-          ))}
-        </div>
-      </div>
+          </Panel>
 
-      {/* What an officer acts on: the biggest shortfalls and the standings */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm lg:col-span-2">
-          <h3 className="text-sm font-bold text-gray-900">Largest outstanding balances</h3>
-          <p className="mt-0.5 text-xs text-gray-500">Where the survey raised the most work that is still open.</p>
-          {topGaps.length === 0 ? (
-            <p className="mt-4 text-sm font-semibold text-emerald-700">Every raised requirement has been closed.</p>
-          ) : (
-            <ul className="mt-3 space-y-2.5">
-              {topGaps.map((t) => (
-                <li key={t.metric.id} className="flex items-center gap-3">
-                  <span className="w-40 shrink-0 truncate text-sm font-semibold text-gray-900" title={t.metric.label}>
-                    {t.metric.short}
+          <Panel
+            title="Additional maintenance carried out"
+            hint="Activities the maintenance return records but the inspection raises no requirement for — reported as volume delivered."
+          >
+            <div className="grid gap-6 md:grid-cols-3">
+              {standaloneData.map((s, i) => (
+                <div key={s.metric.id}>
+                  <div className="mb-2 flex items-baseline justify-between">
+                    <p className="text-[12px] font-medium text-slate-600">{s.metric.label}</p>
+                    <p className="text-[15px] font-semibold text-slate-900">
+                      {nfmt(s.points.reduce((a, p) => a + p.value, 0))} <span className="text-[11px] font-normal text-slate-400">{s.metric.unit}</span>
+                    </p>
+                  </div>
+                  <div style={{ height: '150px' }}><canvas ref={standaloneRefs[i]} /></div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-5 border-t border-slate-100 pt-4 text-[12px] text-slate-500">
+              The survey side has one such column too — <span className="font-medium text-slate-700">Line surveyed (33KV &amp; 11KV): {nfmt(head.lineSurveyedKm)} KM</span> — with no matching &ldquo;work done&rdquo; column, so it is reported as inspection coverage rather than a completion rate.
+            </p>
+          </Panel>
+        </div>
+      )}
+
+      {/* ------------------------- DIVISIONS & NETWORK ------------------------- */}
+      {view === 'divisions' && (
+        <div className="flex flex-col gap-5">
+          <Panel
+            title="Division scorecard"
+            hint="Completion against survey for every activity, ranked by average. Darker means more of the raised requirement was closed."
+          >
+            <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-slate-500">
+              {RAMP.map((r) => (
+                <span key={r.label} className="inline-flex items-center gap-1.5">
+                  <span className="inline-block h-2.5 w-4 rounded-sm" style={{ backgroundColor: r.bg }} />
+                  {r.label}
+                </span>
+              ))}
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-4 rounded-sm bg-slate-100" />
+                No requirement
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] border-separate border-spacing-0.5 text-[13px]">
+                <thead>
+                  <tr>
+                    <th className="sticky left-0 z-10 bg-white px-2 py-2 text-left text-[11px] font-medium uppercase tracking-[0.06em] text-slate-500">Division</th>
+                    {PAIRED_METRICS.map((m) => (
+                      <th key={m.id} className="px-1 py-2 text-center align-bottom text-[10px] font-medium leading-tight text-slate-500">
+                        <span className={`mb-1 block text-[8px] font-semibold uppercase tracking-wider ${m.group === 'DT' ? 'text-blue-400' : 'text-slate-300'}`}>
+                          {m.group}
+                        </span>
+                        {m.short}
+                      </th>
+                    ))}
+                    <th className="px-2 py-2 text-right text-[11px] font-medium uppercase tracking-[0.06em] text-slate-500">Average</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rankedDivisions.map((row, rank) => (
+                    <tr key={row.division}>
+                      <td className="sticky left-0 z-10 whitespace-nowrap bg-white px-2 py-2 font-medium text-slate-900">
+                        <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-[10px] font-semibold text-slate-500">{rank + 1}</span>
+                        {row.division.replace('EDD-', '')}
+                      </td>
+                      {row.cells.map((c) => {
+                        const step = rampFor(c.pct);
+                        return (
+                          <td
+                            key={c.id}
+                            className="rounded px-1 py-2 text-center text-[11px] font-semibold [font-variant-numeric:tabular-nums]"
+                            style={c.req > 0 ? { backgroundColor: step.bg, color: step.fg } : { backgroundColor: '#f1f5f9', color: '#94a3b8' }}
+                            title={`${row.division} · ${PAIRED_METRICS.find((m) => m.id === c.id)?.label}: ${nfmt(c.done)} of ${nfmt(c.req)}`}
+                          >
+                            {c.req > 0 ? pctText(c.pct) : '—'}
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-2 text-right">
+                        <span className="font-semibold text-slate-900 [font-variant-numeric:tabular-nums]">{pctText(row.average)}</span>
+                        <span className="mt-1 block h-1 w-full overflow-hidden rounded-full" style={{ backgroundColor: TRACK }}>
+                          <span className="block h-full rounded-full" style={{ width: `${Math.min(100, row.average)}%`, backgroundColor: DONE }} />
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+
+          <Panel title="Installed DT population" hint="Transformers on the ground, by division and capacity.">
+            <div className="mb-5 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-4">
+              {[
+                { label: 'Total DTs', value: nfmt(dtTotal), sub: `across ${dtPop.length} division(s)` },
+                ...CAPACITY_BANDS.map((band, i) => ({
+                  label: `${band.label} capacity`,
+                  value: nfmt(bandTotals[i]),
+                  sub: `${band.range} · ${dtTotal > 0 ? Math.round((bandTotals[i] / dtTotal) * 100) : 0}%`
+                }))
+              ].map((t) => (
+                <div key={t.label} className="bg-white px-4 py-3">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-slate-500">{t.label}</p>
+                  <p className="mt-1 text-[20px] font-semibold leading-none tracking-tight text-slate-900">{t.value}</p>
+                  <p className="mt-1 text-[11px] text-slate-400">{t.sub}</p>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ height: `${dtPop.length * 42 + 80}px` }}>
+              <canvas ref={populationRef} />
+            </div>
+
+            {/* The chart shows three bands; the table carries all nine columns. */}
+            <div className="mt-5 overflow-x-auto">
+              <table className="w-full min-w-[760px] text-[13px]">
+                <thead className="border-b border-slate-200">
+                  <tr>
+                    <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-[0.06em] text-slate-500">Division</th>
+                    {CAPACITY_LABELS.map((c) => (
+                      <th key={c} className="px-2 py-2 text-right text-[10px] font-medium uppercase tracking-[0.06em] text-slate-500">{c}</th>
+                    ))}
+                    <th className="px-2 py-2 text-right text-[10px] font-medium uppercase tracking-[0.06em] text-slate-500">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 [font-variant-numeric:tabular-nums]">
+                  {dtPop.map((p) => (
+                    <tr key={p.division} className="hover:bg-slate-50">
+                      <td className="whitespace-nowrap px-2 py-2 font-medium text-slate-900">{p.division.replace('EDD-', '')}</td>
+                      {p.byCapacity.map((n, i) => (
+                        <td key={CAPACITY_LABELS[i]} className={`px-2 py-2 text-right ${n === 0 ? 'text-slate-300' : 'text-slate-600'}`}>{nfmt(n)}</td>
+                      ))}
+                      <td className="px-2 py-2 text-right font-semibold text-slate-900">{nfmt(p.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="border-t-2 border-slate-200">
+                  <tr className="[font-variant-numeric:tabular-nums]">
+                    <td className="px-2 py-2 text-left text-[12px] font-semibold text-slate-900">Circle total</td>
+                    {CAPACITY_LABELS.map((c, i) => (
+                      <td key={c} className="px-2 py-2 text-right text-[12px] font-semibold text-slate-900">
+                        {nfmt(dtPop.reduce((a, p) => a + p.byCapacity[i], 0))}
+                      </td>
+                    ))}
+                    <td className="px-2 py-2 text-right text-[12px] font-semibold text-slate-900">{nfmt(dtTotal)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </Panel>
+
+          <Panel title="Field work against the installed base" hint="How much DT work the period delivered per 100 transformers on the ground.">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[600px] text-left text-[13px]">
+                <thead className="border-b border-slate-200 text-[11px] uppercase tracking-[0.06em] text-slate-500">
+                  <tr>
+                    <th className="py-2.5 pr-3 font-medium">Division</th>
+                    <th className="py-2.5 pr-3 text-right font-medium">DTs installed</th>
+                    <th className="py-2.5 pr-3 text-right font-medium">Surveyed</th>
+                    <th className="py-2.5 pr-3 text-right font-medium">Per 100 DTs</th>
+                    <th className="py-2.5 pr-3 text-right font-medium">Maintained</th>
+                    <th className="py-2.5 text-right font-medium">Per 100 DTs</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 [font-variant-numeric:tabular-nums]">
+                  {dtCov.map((c) => (
+                    <tr key={c.division} className="hover:bg-slate-50">
+                      <td className="py-2.5 pr-3 font-medium text-slate-900">{c.division.replace('EDD-', '')}</td>
+                      <td className="py-2.5 pr-3 text-right text-slate-500">{nfmt(c.population)}</td>
+                      <td className="py-2.5 pr-3 text-right text-slate-600">{nfmt(c.surveyed)}</td>
+                      <td className="py-2.5 pr-3 text-right font-semibold text-slate-900">{c.surveyedPer100.toFixed(1)}</td>
+                      <td className="py-2.5 pr-3 text-right text-slate-600">{nfmt(c.maintained)}</td>
+                      <td className="py-2.5 text-right font-semibold text-slate-900">{c.maintainedPer100.toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="border-t-2 border-slate-200">
+                  <tr className="[font-variant-numeric:tabular-nums] text-[12px] font-semibold text-slate-900">
+                    <td className="py-2.5 pr-3">Circle</td>
+                    <td className="py-2.5 pr-3 text-right">{nfmt(dtTotal)}</td>
+                    <td className="py-2.5 pr-3 text-right">{nfmt(head.dtSurveyed)}</td>
+                    <td className="py-2.5 pr-3 text-right">{dtTotal > 0 ? ((head.dtSurveyed / dtTotal) * 100).toFixed(1) : '—'}</td>
+                    <td className="py-2.5 pr-3 text-right">{nfmt(head.dtMaintained)}</td>
+                    <td className="py-2.5 text-right">{dtTotal > 0 ? ((head.dtMaintained / dtTotal) * 100).toFixed(1) : '—'}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <p className="mt-4 flex items-start gap-1.5 text-[11px] text-slate-500">
+              <FiInfo className="mt-0.5 shrink-0" />
+              A job rate, not a coverage percentage — the DT count has no month dimension, so a transformer attended in two different months counts twice.
+            </p>
+          </Panel>
+        </div>
+      )}
+
+      {/* ----------------------------- SOURCE DATA ----------------------------- */}
+      {view === 'data' && (
+        <div className="flex flex-col gap-5">
+          <Panel
+            title="Monthly return, as recorded"
+            hint={`${slice.divisions.length * monthCount} rows for the current filter. Use Export Excel for the complete workbook.`}
+            action={
+              <div className="inline-flex shrink-0 rounded-lg border border-slate-200 p-0.5 print:hidden">
+                {(['survey', 'work'] as const).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setRawSheet(k)}
+                    className={`rounded-md px-3 py-1.5 text-[12px] font-medium transition active:scale-95 ${
+                      rawSheet === k ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    {k === 'survey' ? 'Survey / Inspection' : 'Maintenance / Work done'}
+                  </button>
+                ))}
+              </div>
+            }
+          >
+            <div className="max-h-[30rem] overflow-auto rounded-lg border border-slate-100 print:max-h-none print:overflow-visible">
+              {rawSheet === 'survey' ? <SurveyTable slice={slice} /> : <WorkTable slice={slice} />}
+            </div>
+            {rawSheet === 'survey' && (
+              <p className="mt-3 text-[11px] text-slate-500">
+                ‡ Shown as recorded. This column exceeds the combined 33+11KV tree-trimming requirement in four of the five divisions, so it is not used in any completion figure.
+              </p>
+            )}
+          </Panel>
+
+          <Panel title="How to read these figures" hint="Caveats the source sheets imply but never state.">
+            <ul className="space-y-4">
+              {DATA_NOTES.map((n, i) => (
+                <li key={n.title} className="flex gap-3">
+                  <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-50 text-[11px] font-semibold text-amber-700">
+                    {i + 1}
                   </span>
-                  <span className="h-2 flex-1 overflow-hidden rounded-full" style={{ backgroundColor: TRACK }}>
-                    <span className="block h-full rounded-full" style={{ width: `${Math.min(100, t.pct)}%`, backgroundColor: DONE }} />
-                  </span>
-                  <span className="w-32 shrink-0 text-right text-xs text-gray-500 [font-variant-numeric:tabular-nums]">
-                    <b className="text-amber-700">{nfmt(t.gap)}</b> {t.metric.unit} left
-                  </span>
+                  <div>
+                    <p className="text-[13px] font-medium text-slate-900">{n.title}</p>
+                    <p className="mt-1 text-[13px] leading-relaxed text-slate-500">{n.body}</p>
+                  </div>
                 </li>
               ))}
             </ul>
-          )}
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <h3 className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-900"><FiAward className="text-gray-400" /> Division standings</h3>
-          {best && worst && (
-            <dl className="mt-3 space-y-3 text-sm">
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-gray-500">Highest completion</dt>
-                <dd className="mt-0.5 font-bold text-gray-900">
-                  {best.division.replace('EDD-', '')} <span className="text-emerald-700">{pctText(best.average)}</span>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-gray-500">Needs attention</dt>
-                <dd className="mt-0.5 font-bold text-gray-900">
-                  {worst.division.replace('EDD-', '')} <span className="text-amber-700">{pctText(worst.average)}</span>
-                </dd>
-              </div>
-            </dl>
-          )}
-          <p className="mt-3 text-[11px] text-gray-500">Full breakdown in the division scorecard below.</p>
-        </div>
-      </div>
-
-      {/* Hero chart */}
-      <Card
-        title="Survey requirement vs work completed"
-        subtitle={`Every tracked activity as a share of what the inspection raised · ${slice.divisions.length} division(s) · ${monthCount} month(s)`}
-      >
-        <div className="mb-3 flex justify-end print:hidden">
-          <button
-            onClick={() => setSortDesc((s) => !s)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 active:scale-95"
-          >
-            <FiChevronDown className={sortDesc ? '' : 'rotate-180'} />
-            {sortDesc ? 'Highest completion first' : 'Needs attention first'}
-          </button>
-        </div>
-        <div style={{ height: `${ranked.length * 34 + 70}px` }}>
-          <canvas ref={completionRef} />
-        </div>
-
-        {/* Table view twin - every plotted value is readable without the chart */}
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="border-b border-gray-200 text-xs uppercase tracking-wider text-gray-500">
-              <tr>
-                <th className="py-2 pr-3 font-semibold">Activity</th>
-                <th className="py-2 pr-3 font-semibold">Unit</th>
-                <th className="py-2 pr-3 text-right font-semibold">Required</th>
-                <th className="py-2 pr-3 text-right font-semibold">Done</th>
-                <th className="py-2 pr-3 text-right font-semibold">Balance</th>
-                <th className="py-2 text-right font-semibold">Completion</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 [font-variant-numeric:tabular-nums]">
-              {ranked.map((t) => (
-                <tr key={t.metric.id} className="hover:bg-blue-50/40">
-                  <td className="py-2 pr-3 font-semibold text-gray-900">
-                    <span className={`mr-2 inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                      t.metric.group === 'DT' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600'
-                    }`}>{t.metric.group}</span>
-                    {t.metric.label}
-                    {t.metric.periodScoped && <sup className="ml-1 text-[10px] font-bold text-amber-600" title="Requirement is a period total, not monthly">†</sup>}
-                  </td>
-                  <td className="py-2 pr-3 text-gray-500">{t.metric.unit}</td>
-                  <td className="py-2 pr-3 text-right text-gray-600">{nfmt(t.req)}</td>
-                  <td className="py-2 pr-3 text-right font-semibold text-gray-900">{nfmt(t.done)}</td>
-                  <td className={`py-2 pr-3 text-right ${t.gap > 0 ? 'font-semibold text-amber-700' : 'text-gray-400'}`}>{nfmt(t.gap)}</td>
-                  <td className="py-2 text-right font-bold text-gray-900">{pctText(t.pct)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {ranked.some((t) => t.metric.periodScoped) && (
-            <p className="mt-2 text-[11px] text-gray-500">
-              † LT ABC Cable and Weasel Conductor requirements are recorded once for the whole period in the survey sheet, so they do not change with the month filter.
+            <p className="mt-5 flex items-start gap-1.5 border-t border-slate-100 pt-4 text-[11px] text-slate-500">
+              <FiAlertCircle className="mt-0.5 shrink-0" />
+              Figures come straight from Key-Point.xlsx and DT-Count.xlsx; every cell is re-verified against those workbooks on each build.
             </p>
-          )}
+          </Panel>
         </div>
-      </Card>
-
-      {/* Focused activity: by month and by division */}
-      <div className="grid gap-5 xl:grid-cols-2">
-        <Card title={`${focus.label} — month by month`} subtitle={`${focus.unit} · ${slice.divisions.length} division(s) selected`}>
-          <div style={{ height: '320px' }}><canvas ref={monthlyRef} /></div>
-          {focus.periodReq && (
-            <p className="mt-3 flex items-start gap-1.5 text-[11px] text-gray-500">
-              <FiInfo className="mt-0.5 shrink-0" />
-              The survey sheet holds a single {focus.label.toLowerCase()} requirement for the entire period, so only work done is plotted by month.
-            </p>
-          )}
-        </Card>
-        <Card title={`${focus.label} — division by division`} subtitle={`${focus.unit} · ${periodLabel}`}>
-          <div style={{ height: '320px' }}><canvas ref={divisionRef} /></div>
-        </Card>
-      </div>
-
-      {/* Division scorecard */}
-      <Card
-        title="Division scorecard"
-        subtitle="Completion against survey for every activity, ranked by average. Darker means more of the raised requirement was closed."
-      >
-        <div className="mb-3 flex flex-wrap items-center gap-3 text-[11px] text-gray-500">
-          <span className="font-semibold uppercase tracking-wide">Completion</span>
-          {RAMP.map((r) => (
-            <span key={r.label} className="inline-flex items-center gap-1.5">
-              <span className="inline-block h-3 w-5 rounded-sm" style={{ backgroundColor: r.bg }} />
-              {r.label}
-            </span>
-          ))}
-          <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block h-3 w-5 rounded-sm bg-gray-100" />
-            No requirement
-          </span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] border-separate border-spacing-0.5 text-sm">
-            <thead>
-              <tr>
-                <th className="sticky left-0 z-10 bg-white px-2 py-2 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Division</th>
-                {PAIRED_METRICS.map((m) => (
-                  <th key={m.id} className="px-1 py-2 text-center align-bottom text-[10px] font-semibold leading-tight text-gray-500">
-                    <span className={`mb-1 block text-[8px] font-bold uppercase tracking-wider ${m.group === 'DT' ? 'text-blue-400' : 'text-gray-300'}`}>
-                      {m.group}
-                    </span>
-                    {m.short}
-                  </th>
-                ))}
-                <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">Average</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rankedDivisions.map((row, rank) => (
-                <tr key={row.division}>
-                  <td className="sticky left-0 z-10 bg-white px-2 py-2 font-semibold text-gray-900">
-                    <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-gray-100 text-[10px] font-bold text-gray-500">{rank + 1}</span>
-                    {row.division.replace('EDD-', '')}
-                  </td>
-                  {row.cells.map((c) => {
-                    const step = rampFor(c.pct);
-                    return (
-                      <td
-                        key={c.id}
-                        className="rounded px-1 py-2 text-center text-[11px] font-bold [font-variant-numeric:tabular-nums]"
-                        style={c.req > 0
-                          ? { backgroundColor: step.bg, color: step.fg }
-                          : { backgroundColor: '#f3f4f6', color: '#9ca3af' }}
-                        title={`${row.division} · ${PAIRED_METRICS.find((m) => m.id === c.id)?.label}: ${nfmt(c.done)} of ${nfmt(c.req)}`}
-                      >
-                        {c.req > 0 ? pctText(c.pct) : '—'}
-                      </td>
-                    );
-                  })}
-                  <td className="px-2 py-2 text-right">
-                    <span className="font-bold text-gray-900 [font-variant-numeric:tabular-nums]">{pctText(row.average)}</span>
-                    <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: TRACK }}>
-                      <span className="block h-full rounded-full" style={{ width: `${Math.min(100, row.average)}%`, backgroundColor: DONE }} />
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      {/* Work with no survey counterpart */}
-      <Card
-        title="Additional maintenance carried out"
-        subtitle="Activities the maintenance return records but the inspection sheet raises no requirement for — reported as volume delivered."
-      >
-        <div className="grid gap-5 md:grid-cols-3">
-          {standaloneData.map((s, i) => (
-            <div key={s.metric.id}>
-              <div className="mb-1 flex items-baseline justify-between">
-                <p className="text-xs font-semibold text-gray-700">{s.metric.label}</p>
-                <p className="text-sm font-bold text-gray-900">
-                  {nfmt(s.points.reduce((a, p) => a + p.value, 0))} <span className="text-[11px] font-medium text-gray-400">{s.metric.unit}</span>
-                </p>
-              </div>
-              <div style={{ height: '180px' }}><canvas ref={standaloneRefs[i]} /></div>
-            </div>
-          ))}
-        </div>
-        <p className="mt-4 border-t border-gray-100 pt-3 text-xs text-gray-500">
-          The survey side has one such column too — <span className="font-semibold text-gray-700">Line surveyed (33KV &amp; 11KV): {nfmt(head.lineSurveyedKm)} KM</span> — with no matching &ldquo;work done&rdquo; column, so it is reported as inspection coverage rather than a completion rate.
-        </p>
-      </Card>
-
-      {/* Source data */}
-      <Card title="Source data" subtitle="Exactly as recorded in the monthly return, for the current filter.">
-        <div className="mb-3 inline-flex rounded-lg border border-gray-200 p-1 print:hidden">
-          {(['survey', 'work'] as const).map((k) => (
-            <button
-              key={k}
-              onClick={() => setRawSheet(k)}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition active:scale-95 ${
-                rawSheet === k ? 'bg-slate-900 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              {k === 'survey' ? 'Survey / Inspection' : 'Maintenance / Work done'}
-            </button>
-          ))}
-        </div>
-        {/* Capped so 45 raw rows don't bury the charts above; header and totals
-            stay pinned while scrolling. */}
-        <div className="max-h-[28rem] overflow-auto rounded-lg border border-gray-100 print:max-h-none print:overflow-visible">
-          {rawSheet === 'survey' ? <SurveyTable slice={slice} /> : <WorkTable slice={slice} />}
-        </div>
-        <p className="mt-2 text-[11px] text-gray-500">
-          {slice.divisions.length * slice.months.length} rows · scroll inside the table, or use Export Excel for the full sheet.
-          {rawSheet === 'survey' && (
-            <> <br />‡ Shown as recorded. This column exceeds the combined 33+11KV tree-trimming requirement in four of the five divisions, so it is not used in any completion figure.</>
-          )}
-        </p>
-      </Card>
-
-      {/* Caveats */}
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-        <button
-          onClick={() => setShowNotes((s) => !s)}
-          className="flex w-full items-center justify-between gap-2 text-left"
-        >
-          <span className="inline-flex items-center gap-2 text-sm font-bold text-amber-900">
-            <FiAlertCircle /> How to read these figures ({DATA_NOTES.length} notes)
-          </span>
-          <FiChevronDown className={`shrink-0 text-amber-700 transition ${showNotes ? 'rotate-180' : ''}`} />
-        </button>
-        {showNotes && (
-          <ul className="mt-3 space-y-3">
-            {DATA_NOTES.map((n) => (
-              <li key={n.title} className="text-sm">
-                <p className="font-semibold text-amber-900">{n.title}</p>
-                <p className="mt-0.5 text-amber-800">{n.body}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -874,9 +1074,9 @@ function singleSeriesConfig(entry: { metric: { label: string; unit: string }; po
         label: entry.metric.label,
         data: entry.points.map((p) => p.value),
         backgroundColor: DONE,
-        borderRadius: 4,
+        borderRadius: 3,
         borderSkipped: false,
-        maxBarThickness: 22
+        maxBarThickness: 18
       }]
     },
     options: {
@@ -886,23 +1086,21 @@ function singleSeriesConfig(entry: { metric: { label: string; unit: string }; po
         legend: { display: false },
         tooltip: {
           ...TOOLTIP,
-          callbacks: {
-            label: (item: { parsed: { y: number } }) => `${nfmt(item.parsed.y)} ${entry.metric.unit}`
-          }
+          callbacks: { label: (item: { parsed: { y: number } }) => `${nfmt(item.parsed.y)} ${entry.metric.unit}` }
         }
       },
       scales: {
         x: { grid: { display: false }, border: { color: GRID }, ticks: { ...axisTicks, font: { size: 10 } } },
-        y: { beginAtZero: true, grid: hairlineGrid, border: { display: false }, ticks: { ...axisTicks, font: { size: 10 }, maxTicksLimit: 5, callback: (v: number) => nfmt(v) } }
+        y: { beginAtZero: true, grid: hairlineGrid, border: { display: false }, ticks: { ...axisTicks, font: { size: 10 }, maxTicksLimit: 4, callback: (v: number) => nfmt(v) } }
       }
     }
   };
 }
 
 // Header and totals stay put while the capped table body scrolls.
-const thStickyBase = 'sticky top-0 z-10 whitespace-nowrap border-b border-gray-200 bg-white px-2 py-2 text-[10px] font-semibold uppercase leading-tight tracking-wide text-gray-500';
-const tdStickyFoot = 'sticky bottom-0 whitespace-nowrap border-t-2 border-gray-300 bg-gray-50 px-2 py-2 text-xs font-bold text-gray-900 [font-variant-numeric:tabular-nums]';
-const tdBase = 'whitespace-nowrap px-2 py-1.5 text-right text-gray-700 [font-variant-numeric:tabular-nums]';
+const thSticky = 'sticky top-0 z-10 whitespace-nowrap border-b border-slate-200 bg-white px-2 py-2 text-[10px] font-medium uppercase leading-tight tracking-[0.06em] text-slate-500';
+const tdFoot = 'sticky bottom-0 whitespace-nowrap border-t-2 border-slate-200 bg-slate-50 px-2 py-2 text-[12px] font-semibold text-slate-900 [font-variant-numeric:tabular-nums]';
+const td = 'whitespace-nowrap px-2 py-1.5 text-right text-slate-600 [font-variant-numeric:tabular-nums]';
 
 function SurveyTable({ slice }: { slice: Slice }) {
   const rows = SURVEY_ROWS.filter((r) => slice.divisions.includes(r.division) && slice.months.includes(r.month));
@@ -915,27 +1113,27 @@ function SurveyTable({ slice }: { slice: Slice }) {
   const total = (key: string) => rows.reduce((a, r) => a + (r[key as keyof typeof r] as number), 0);
 
   return (
-    <table className="w-full min-w-[1100px] border-collapse text-sm">
+    <table className="w-full min-w-[1100px] border-collapse text-[13px]">
       <thead>
         <tr>
-          <th className={`${thStickyBase} text-left`}>Division</th>
-          <th className={`${thStickyBase} text-left`}>Month</th>
-          {cols.map(([label]) => <th key={label} className={`${thStickyBase} text-right`}>{label}</th>)}
+          <th className={`${thSticky} text-left`}>Division</th>
+          <th className={`${thSticky} text-left`}>Month</th>
+          {cols.map(([label]) => <th key={label} className={`${thSticky} text-right`}>{label}</th>)}
         </tr>
       </thead>
-      <tbody className="divide-y divide-gray-100">
+      <tbody className="divide-y divide-slate-100">
         {rows.map((r) => (
-          <tr key={`${r.division}|${r.month}`} className="hover:bg-blue-50/40">
-            <td className="whitespace-nowrap px-2 py-1.5 font-semibold text-gray-900">{r.division.replace('EDD-', '')}</td>
-            <td className="whitespace-nowrap px-2 py-1.5 text-gray-500">{monthLabel(r.month)}</td>
-            {cols.map(([label, key]) => <td key={label} className={tdBase}>{nfmt(r[key] as number)}</td>)}
+          <tr key={`${r.division}|${r.month}`} className="hover:bg-slate-50">
+            <td className="whitespace-nowrap px-2 py-1.5 font-medium text-slate-900">{r.division.replace('EDD-', '')}</td>
+            <td className="whitespace-nowrap px-2 py-1.5 text-slate-400">{monthLabel(r.month)}</td>
+            {cols.map(([label, key]) => <td key={label} className={td}>{nfmt(r[key] as number)}</td>)}
           </tr>
         ))}
       </tbody>
       <tfoot>
         <tr>
-          <td className={`${tdStickyFoot} text-left`} colSpan={2}>Total</td>
-          {cols.map(([label, key]) => <td key={label} className={`${tdStickyFoot} text-right`}>{nfmt(total(key))}</td>)}
+          <td className={`${tdFoot} text-left`} colSpan={2}>Total</td>
+          {cols.map(([label, key]) => <td key={label} className={`${tdFoot} text-right`}>{nfmt(total(key))}</td>)}
         </tr>
       </tfoot>
     </table>
@@ -953,27 +1151,27 @@ function WorkTable({ slice }: { slice: Slice }) {
   const total = (key: string) => rows.reduce((a, r) => a + (r[key as keyof typeof r] as number), 0);
 
   return (
-    <table className="w-full min-w-[1300px] border-collapse text-sm">
+    <table className="w-full min-w-[1300px] border-collapse text-[13px]">
       <thead>
         <tr>
-          <th className={`${thStickyBase} text-left`}>Division</th>
-          <th className={`${thStickyBase} text-left`}>Month</th>
-          {cols.map(([label]) => <th key={label} className={`${thStickyBase} text-right`}>{label}</th>)}
+          <th className={`${thSticky} text-left`}>Division</th>
+          <th className={`${thSticky} text-left`}>Month</th>
+          {cols.map(([label]) => <th key={label} className={`${thSticky} text-right`}>{label}</th>)}
         </tr>
       </thead>
-      <tbody className="divide-y divide-gray-100">
+      <tbody className="divide-y divide-slate-100">
         {rows.map((r) => (
-          <tr key={`${r.division}|${r.month}`} className="hover:bg-blue-50/40">
-            <td className="whitespace-nowrap px-2 py-1.5 font-semibold text-gray-900">{r.division.replace('EDD-', '')}</td>
-            <td className="whitespace-nowrap px-2 py-1.5 text-gray-500">{monthLabel(r.month)}</td>
-            {cols.map(([label, key]) => <td key={label} className={tdBase}>{nfmt(r[key] as number)}</td>)}
+          <tr key={`${r.division}|${r.month}`} className="hover:bg-slate-50">
+            <td className="whitespace-nowrap px-2 py-1.5 font-medium text-slate-900">{r.division.replace('EDD-', '')}</td>
+            <td className="whitespace-nowrap px-2 py-1.5 text-slate-400">{monthLabel(r.month)}</td>
+            {cols.map(([label, key]) => <td key={label} className={td}>{nfmt(r[key] as number)}</td>)}
           </tr>
         ))}
       </tbody>
       <tfoot>
         <tr>
-          <td className={`${tdStickyFoot} text-left`} colSpan={2}>Total</td>
-          {cols.map(([label, key]) => <td key={label} className={`${tdStickyFoot} text-right`}>{nfmt(total(key))}</td>)}
+          <td className={`${tdFoot} text-left`} colSpan={2}>Total</td>
+          {cols.map(([label, key]) => <td key={label} className={`${tdFoot} text-right`}>{nfmt(total(key))}</td>)}
         </tr>
       </tfoot>
     </table>

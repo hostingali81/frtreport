@@ -1,14 +1,25 @@
-// Field work + survey data for EDC-Barabanki, Nov 2025 - Jul 2026.
+// Field work, survey and DT-population data for EDC-Barabanki, Nov 2025 - Jul 2026.
 //
-// Source: public/Key-Point.xlsx, two sheets:
-//   "DT and Line Survey"       -> inspection: what was found to be REQUIRED
-//   "DT and Line Maintenance"  -> the work actually DONE off the back of that survey
+// Sources:
+//   public/Key-Point.xlsx
+//     "DT and Line Survey"       -> inspection: what was found to be REQUIRED
+//     "DT and Line Maintenance"  -> the work actually DONE off the back of that survey
+//   public/DT-Count.xlsx
+//     "DT Count"                 -> installed transformer population, folded up
+//                                   from its substation rows to division level
 //
-// Hard-coded on purpose for now (no DB round-trip) - the sheet is a monthly
-// manual return, not a scraped feed. Numbers are transcribed verbatim from the
-// sheet, including its formula results; scripts/verify-field-data.ts asserts
-// every column total against the sheet's own Grand Total row, so a typo here
-// fails loudly instead of quietly skewing a chart.
+// Held in-repo rather than in the DB for now - these are monthly manual returns,
+// not a scraped feed. The numbers themselves live in fieldData.generated.ts and
+// are produced by scripts/generate-field-data.ts straight from the spreadsheets,
+// so updating a sheet is a one-command regenerate. Verify with
+// scripts/crosscheck-field-data.ts, which re-reads the workbooks and diffs every
+// cell against what the app is serving.
+
+import {
+  WORK_RAW, SURVEY_RAW, PERIOD_MATERIAL_REQ_RAW, DT_COUNT_RAW, CAPACITY_LABELS
+} from './fieldData.generated';
+
+export { CAPACITY_LABELS };
 
 export const DIVISIONS = [
   'EDD-Barabanki',
@@ -88,144 +99,10 @@ export interface SurveyRow {
   poleReq: number;       // Req. Damage/Mid Span/Tilted Pole Replacement
 }
 
-// Tuple column order mirrors the source sheet left-to-right, so a row here can
-// be diffed against the spreadsheet by eye.
-// [month, dtMaint, lug, bushing, silica, oil, earthing, dtLead, damageDt,
-//  trim33, trim11, ins33, ins11, abc, weasel, stay, jumper, pole]
-type WorkTuple = [string, ...number[]];
-
-const WORK_RAW: Record<Division, WorkTuple[]> = {
-  'EDD-Barabanki': [
-    ['2025-11', 120, 65, 0, 0, 0, 0, 229, 0, 10, 10, 0, 0, 0, 0, 5, 78, 20],
-    ['2025-12', 135, 180, 0, 0, 0, 21, 0, 9, 5, 11, 0, 45, 100, 200, 15, 43, 13],
-    ['2026-01', 35, 419, 1, 0, 150, 3, 0, 12, 10, 13, 0, 0, 0, 0, 18, 80, 14],
-    ['2026-02', 40, 312, 1, 0, 195, 0, 1420, 8, 8, 9, 0, 53, 0, 0, 22, 66, 12],
-    ['2026-03', 110, 318, 3, 0, 200, 0, 909, 6, 21, 12, 3, 70, 0, 200, 8, 40, 15],
-    ['2026-04', 142, 161, 2, 10, 350, 5, 415, 8, 13, 17, 0, 33, 350, 270, 13, 118, 8],
-    ['2026-05', 60, 210, 1, 0, 400, 0, 0, 33, 9, 21, 0, 40, 720, 26, 0, 187, 43],
-    ['2026-06', 86, 92, 1, 0, 200, 0, 0, 38, 8, 12, 0, 0, 0, 0, 0, 134, 26],
-    ['2026-07', 39, 104, 2, 0, 0, 0, 0, 58, 10, 6, 0, 0, 0, 0, 0, 100, 12]
-  ],
-  'EDD-Ramnagar': [
-    ['2025-11', 40, 14, 0, 0, 0, 25, 1159, 0, 10, 25, 10, 20, 995, 400, 2, 79, 31],
-    ['2025-12', 20, 52, 0, 0, 0, 19, 829, 9, 6, 10, 6, 13, 150, 250, 2, 47, 19],
-    ['2026-01', 22, 84, 0, 0, 0, 0, 12, 23, 18, 6, 2, 10, 730, 200, 0, 55, 13],
-    ['2026-02', 24, 182, 0, 0, 0, 13, 190, 13, 16, 6, 3, 20, 615, 250, 1, 45, 11],
-    ['2026-03', 104, 124, 0, 0, 1140, 3, 30, 15, 20, 41, 14, 16, 110, 200, 2, 104, 9],
-    ['2026-04', 110, 160, 0, 0, 540, 0, 5, 31, 12, 20, 4, 12, 0, 180, 3, 90, 15],
-    ['2026-05', 40, 44, 0, 0, 0, 0, 35, 107, 10, 11, 2, 10, 0, 170, 0, 70, 65],
-    ['2026-06', 20, 90, 0, 0, 0, 0, 0, 110, 17, 27, 0, 20, 0, 150, 0, 80, 25],
-    ['2026-07', 18, 46, 0, 0, 0, 0, 0, 145, 14, 12, 4, 6, 0, 0, 0, 68, 35]
-  ],
-  'EDD-Fatehpur': [
-    ['2025-11', 48, 12, 0, 0, 0, 0, 0, 0, 15, 40, 0, 27, 1000, 100, 0, 35, 35],
-    ['2025-12', 28, 38, 0, 0, 0, 0, 0, 9, 22, 32, 0, 0, 0, 0, 0, 55, 14],
-    ['2026-01', 30, 40, 0, 0, 400, 0, 0, 18, 20, 55, 5, 0, 570, 0, 2, 30, 16],
-    ['2026-02', 32, 79, 0, 25, 250, 0, 0, 16, 15, 45, 0, 0, 200, 0, 4, 50, 11],
-    ['2026-03', 102, 38, 4, 0, 220, 10, 0, 26, 12, 10, 0, 1, 150, 0, 1, 45, 8],
-    ['2026-04', 119, 28, 8, 0, 200, 0, 0, 16, 17, 25, 0, 16, 0, 450, 5, 85, 8],
-    ['2026-05', 48, 68, 2, 0, 200, 30, 0, 76, 20, 45, 6, 3, 400, 450, 0, 135, 55],
-    ['2026-06', 26, 15, 2, 0, 200, 0, 0, 96, 8, 22, 0, 0, 768, 0, 0, 65, 22],
-    // Oil Top-up for Jul-26 is blank in the sheet (not a zero) - recorded as 0.
-    ['2026-07', 28, 22, 0, 0, 0, 0, 0, 85, 13, 15, 0, 0, 0, 0, 1, 45, 18]
-  ],
-  'EDD-Haidergarh': [
-    ['2025-11', 15, 140, 0, 0, 0, 0, 220, 0, 20, 35, 3, 0, 0, 0, 0, 80, 19],
-    ['2025-12', 45, 90, 9, 0, 0, 30, 1274, 16, 17, 30, 27, 74, 290, 160, 5, 115, 9],
-    ['2026-01', 35, 116, 14, 0, 600, 0, 0, 29, 20, 60, 2, 0, 530, 340, 2, 60, 10],
-    ['2026-02', 43, 166, 5, 25, 200, 0, 334, 11, 25, 90, 18, 0, 0, 160, 2, 75, 8],
-    ['2026-03', 55, 307, 8, 0, 800, 220, 522, 15, 14, 70, 10, 11, 0, 50, 7, 90, 9],
-    ['2026-04', 60, 312, 10, 0, 550, 100, 630, 22, 10, 42, 41, 180, 150, 270, 1, 120, 30],
-    ['2026-05', 82, 435, 15, 0, 350, 0, 504, 58, 12, 24, 6, 60, 80, 520, 5, 155, 83],
-    ['2026-06', 87, 134, 7, 0, 200, 0, 0, 73, 15, 12, 0, 0, 280, 0, 0, 125, 25],
-    ['2026-07', 110, 95, 2, 0, 0, 0, 0, 91, 10, 20, 0, 0, 0, 0, 0, 70, 17]
-  ],
-  'EDD-Ramsanehighat': [
-    ['2025-11', 30, 160, 0, 0, 0, 87, 955, 0, 12, 20, 5, 61, 460, 400, 0, 80, 27],
-    ['2025-12', 102, 211, 0, 0, 0, 5, 100, 16, 13, 55, 0, 2, 0, 0, 2, 95, 13],
-    ['2026-01', 58, 347, 0, 25, 250, 0, 0, 11, 10, 105, 0, 0, 0, 0, 1, 105, 11],
-    ['2026-02', 65, 412, 1, 0, 350, 16, 555, 15, 13, 92, 12, 34, 1000, 400, 1, 150, 13],
-    ['2026-03', 70, 116, 3, 0, 200, 0, 0, 33, 26, 75, 0, 0, 0, 0, 0, 185, 9],
-    ['2026-04', 52, 79, 2, 0, 0, 0, 200, 26, 10, 40, 12, 38, 50, 0, 0, 60, 21],
-    ['2026-05', 48, 85, 1, 0, 0, 13, 210, 69, 17, 45, 16, 29, 0, 200, 2, 65, 52],
-    ['2026-06', 20, 78, 0, 0, 0, 0, 0, 81, 7, 30, 0, 0, 0, 0, 1, 70, 21],
-    ['2026-07', 30, 33, 0, 0, 0, 12, 150, 85, 15, 45, 0, 0, 40, 0, 1, 40, 22]
-  ]
-};
-
-// [month, dtSurvey, lugReq, bushingReq, silicaReq, earthingReq, dtLeadReq,
-//  lineSurveyKm, treeTrimReq, trim11Req, ins33Req, ins11Req, stayReq, poleReq]
-type SurveyTuple = [string, ...number[]];
-
-const SURVEY_RAW: Record<Division, SurveyTuple[]> = {
-  'EDD-Barabanki': [
-    ['2025-11', 180, 65, 8, 120, 80, 1000, 90, 32, 55, 3, 0, 5, 20],
-    ['2025-12', 185, 180, 10, 140, 100, 1000, 110, 70, 20, 4, 45, 15, 13],
-    ['2026-01', 150, 419, 10, 120, 70, 1000, 240, 50, 50, 2, 0, 18, 14],
-    ['2026-02', 80, 312, 10, 150, 75, 750, 150, 70, 70, 2, 53, 22, 12],
-    ['2026-03', 70, 318, 7, 200, 80, 500, 350, 100, 80, 8, 70, 8, 15],
-    ['2026-04', 55, 161, 5, 150, 80, 500, 220, 75, 110, 5, 33, 13, 8],
-    ['2026-05', 60, 210, 4, 140, 60, 500, 80, 40, 110, 5, 40, 0, 43],
-    ['2026-06', 86, 92, 4, 160, 60, 500, 90, 40, 120, 5, 0, 0, 26],
-    ['2026-07', 39, 104, 2, 200, 70, 500, 120, 45, 120, 5, 0, 0, 12]
-  ],
-  'EDD-Ramnagar': [
-    ['2025-11', 40, 14, 4, 0, 25, 1159, 200, 80, 50, 10, 20, 2, 31],
-    ['2025-12', 20, 52, 6, 0, 19, 829, 160, 78, 20, 6, 13, 2, 19],
-    ['2026-01', 22, 84, 7, 0, 0, 12, 140, 40, 11, 2, 10, 0, 13],
-    ['2026-02', 24, 182, 3, 0, 13, 190, 150, 84, 12, 3, 20, 1, 11],
-    ['2026-03', 104, 124, 1, 0, 3, 30, 150, 75, 82, 14, 16, 2, 9],
-    ['2026-04', 110, 160, 1, 0, 0, 5, 80, 45, 40, 4, 12, 3, 15],
-    ['2026-05', 40, 44, 5, 0, 0, 35, 120, 90, 22, 2, 10, 0, 65],
-    ['2026-06', 20, 90, 8, 0, 0, 0, 140, 75, 55, 0, 20, 0, 25],
-    ['2026-07', 18, 46, 2, 0, 0, 0, 150, 75, 24, 4, 6, 0, 35]
-  ],
-  'EDD-Fatehpur': [
-    ['2025-11', 48, 12, 2, 0, 0, 0, 90, 30, 80, 0, 27, 0, 35],
-    ['2025-12', 28, 38, 1, 0, 0, 0, 150, 70, 65, 0, 0, 0, 14],
-    ['2026-01', 30, 40, 1, 0, 0, 0, 200, 80, 115, 5, 0, 2, 16],
-    ['2026-02', 32, 79, 1, 25, 0, 0, 150, 60, 120, 0, 0, 4, 11],
-    ['2026-03', 102, 38, 4, 0, 10, 0, 120, 50, 20, 0, 1, 1, 8],
-    ['2026-04', 119, 28, 8, 0, 0, 0, 140, 35, 50, 0, 16, 5, 8],
-    ['2026-05', 48, 68, 2, 0, 30, 0, 180, 40, 90, 6, 3, 0, 55],
-    ['2026-06', 26, 15, 2, 0, 0, 0, 40, 15, 45, 0, 0, 0, 22],
-    ['2026-07', 28, 22, 0, 0, 0, 0, 110, 26, 30, 0, 0, 1, 18]
-  ],
-  'EDD-Haidergarh': [
-    ['2025-11', 30, 140, 4, 0, 0, 220, 135, 40, 70, 3, 0, 0, 19],
-    ['2025-12', 45, 90, 9, 0, 30, 1274, 200, 70, 60, 27, 74, 5, 9],
-    ['2026-01', 62, 116, 14, 0, 0, 0, 190, 40, 135, 2, 0, 2, 10],
-    ['2026-02', 43, 166, 5, 25, 0, 334, 180, 55, 180, 18, 0, 2, 8],
-    ['2026-03', 55, 307, 8, 0, 220, 522, 180, 55, 140, 10, 11, 7, 9],
-    ['2026-04', 60, 312, 10, 0, 100, 630, 160, 80, 85, 41, 180, 1, 30],
-    ['2026-05', 82, 435, 15, 0, 0, 504, 150, 50, 45, 6, 60, 5, 83],
-    ['2026-06', 87, 134, 7, 0, 0, 0, 140, 30, 25, 0, 0, 0, 25],
-    ['2026-07', 110, 95, 2, 0, 0, 0, 140, 30, 40, 0, 0, 0, 17]
-  ],
-  'EDD-Ramsanehighat': [
-    ['2025-11', 30, 160, 2, 0, 87, 955, 240, 90, 40, 5, 61, 0, 27],
-    ['2025-12', 102, 211, 8, 0, 5, 100, 320, 110, 110, 0, 2, 2, 13],
-    ['2026-01', 58, 347, 8, 25, 0, 0, 160, 60, 210, 0, 0, 1, 11],
-    ['2026-02', 65, 412, 7, 0, 16, 555, 100, 85, 185, 12, 34, 1, 13],
-    ['2026-03', 70, 116, 4, 0, 0, 0, 130, 90, 180, 0, 0, 0, 9],
-    ['2026-04', 52, 79, 2, 0, 0, 200, 140, 70, 40, 12, 38, 0, 21],
-    ['2026-05', 48, 85, 1, 0, 13, 210, 180, 70, 45, 16, 29, 2, 52],
-    ['2026-06', 20, 78, 1, 0, 0, 0, 160, 75, 30, 0, 0, 1, 21],
-    ['2026-07', 30, 33, 1, 0, 12, 150, 180, 90, 45, 0, 0, 1, 22]
-  ]
-};
-
-// LT ABC Cable and Weasel Conductor requirements are entered in the survey sheet
-// as ONE merged cell spanning all nine months of a division - a period-level
-// target, not a monthly figure. Kept out of the monthly rows so nothing can sum
-// them nine times over.
-export const PERIOD_MATERIAL_REQ: Record<Division, { abcReq: number; weaselReq: number }> = {
-  'EDD-Barabanki': { abcReq: 2500, weaselReq: 2000 },
-  'EDD-Ramnagar': { abcReq: 3000, weaselReq: 2000 },
-  'EDD-Fatehpur': { abcReq: 2500, weaselReq: 2000 },
-  'EDD-Haidergarh': { abcReq: 2000, weaselReq: 2000 },
-  'EDD-Ramsanehighat': { abcReq: 2000, weaselReq: 2000 }
-};
+// The monthly rows and the DT population are generated straight from the two
+// spreadsheets - see scripts/generate-field-data.ts. Nothing here is typed by
+// hand, so a sheet update is a one-command sync rather than a transcription job.
+export const PERIOD_MATERIAL_REQ = PERIOD_MATERIAL_REQ_RAW as Record<Division, { abcReq: number; weaselReq: number }>;
 
 export const WORK_ROWS: WorkRow[] = DIVISIONS.flatMap((division) =>
   WORK_RAW[division].map(([month, ...v]) => ({
@@ -247,6 +124,83 @@ export const SURVEY_ROWS: SurveyRow[] = DIVISIONS.flatMap((division) =>
     trim11Req: v[8], ins33Req: v[9], ins11Req: v[10], stayReq: v[11], poleReq: v[12]
   }))
 );
+
+// ---------------------------------------------------------------------------
+// Installed DT population (DT-Count.xlsx)
+// ---------------------------------------------------------------------------
+
+// `substations` is the number of source rows the division block was folded up
+// from. It is deliberately not surfaced anywhere in the UI - the report is
+// division-wise only - but scripts/crosscheck-field-data.ts asserts it, so a row
+// added to or removed from DT-Count.xlsx fails loudly instead of silently
+// shifting a division total.
+export const DT_COUNT = DT_COUNT_RAW as Record<Division, { substations: number; byCapacity: number[] }>;
+
+/**
+ * Capacity is an ordered scale (10 -> 630 KVA), and nine buckets is more colour
+ * classes than any chart can carry. Rolled into three ordered bands for the
+ * visual; the full nine-column split stays in the table.
+ */
+export const CAPACITY_BANDS: { id: string; label: string; range: string; columns: number[] }[] = [
+  { id: 'small', label: 'Small', range: '10 – 25 KVA', columns: [0, 1, 2] },
+  { id: 'medium', label: 'Medium', range: '63 – 100 KVA', columns: [3, 4] },
+  { id: 'large', label: 'Large', range: '160 – 630 KVA', columns: [5, 6, 7, 8] }
+];
+
+export const divisionDtTotal = (d: Division) =>
+  DT_COUNT[d].byCapacity.reduce((a, b) => a + b, 0);
+
+export interface DtPopulation {
+  division: Division;
+  byCapacity: number[];
+  bands: number[];
+  total: number;
+}
+
+export function dtPopulation(slice: Slice): DtPopulation[] {
+  return slice.divisions.map((division) => {
+    const byCapacity = DT_COUNT[division].byCapacity;
+    return {
+      division,
+      byCapacity,
+      bands: CAPACITY_BANDS.map((b) => b.columns.reduce((a, c) => a + byCapacity[c], 0)),
+      total: byCapacity.reduce((a, b) => a + b, 0)
+    };
+  });
+}
+
+/**
+ * DT work carried out per 100 installed transformers.
+ *
+ * The DT count is a point-in-time population with no month dimension, so this is
+ * a job rate, NOT a share of distinct transformers covered - a DT attended twice
+ * counts twice. Labelled that way everywhere it is shown.
+ */
+export interface DtCoverage {
+  division: Division;
+  population: number;
+  surveyed: number;
+  maintained: number;
+  surveyedPer100: number;
+  maintainedPer100: number;
+}
+
+export function dtCoverage(slice: Slice): DtCoverage[] {
+  return slice.divisions.map((division) => {
+    const one: Slice = { divisions: [division], months: slice.months };
+    const population = divisionDtTotal(division);
+    const surveyed = surveyRowsIn(one).reduce((a, r) => a + r.dtSurvey, 0);
+    const maintained = workRowsIn(one).reduce((a, r) => a + r.dtMaint, 0);
+    return {
+      division,
+      population,
+      surveyed,
+      maintained,
+      surveyedPer100: population > 0 ? (surveyed / population) * 100 : 0,
+      maintainedPer100: population > 0 ? (maintained / population) * 100 : 0
+    };
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Metric catalogue
@@ -497,11 +451,30 @@ export function standaloneMonthly(metric: StandaloneMetric, slice: Slice) {
 // same footnotes the sheet implies but never states.
 // ---------------------------------------------------------------------------
 
+const nf = (n: number) => n.toLocaleString('en-IN');
+
+/** Divisions where the standalone 11KV column exceeds the combined requirement. */
+const trim11OverCombined = DIVISIONS.filter((d) => {
+  const rows = SURVEY_ROWS.filter((r) => r.division === d);
+  return rows.reduce((a, r) => a + r.trim11Req, 0) > rows.reduce((a, r) => a + r.treeTrimReq, 0);
+}).length;
+
+/** Activities where every division and month recorded done === required. */
+const fullyClosed = PAIRED_METRICS.filter((m) => {
+  if (!m.req) return false;
+  return SURVEY_ROWS.every((s) => {
+    const w = WORK_ROWS.find((x) => x.division === s.division && x.month === s.month);
+    return w ? m.req!(s) === m.done(w) : false;
+  });
+}).map((m) => m.short);
+
+// Figures are derived, never typed in, so a spreadsheet update cannot leave a
+// stale number sitting in a footnote.
 export const DATA_NOTES: { title: string; body: string }[] = [
   {
     title: 'Tree trimming requirement is a combined figure',
     body:
-      'The survey sheet records one tree-trimming requirement covering both 33KV and 11KV lines (2,760 KM for the circle), so it is compared against 33KV + 11KV trimming done together. The sheet also carries a separate "Req. 11KV Tree Trimming" column (3,331 KM); it exceeds the combined figure in four of the five divisions, so it is shown in the survey table only and is not used in any completion percentage.'
+      `The survey sheet records one tree-trimming requirement covering both 33KV and 11KV lines (${nf(SURVEY_ROWS.reduce((a, r) => a + r.treeTrimReq, 0))} KM for the circle), so it is compared against 33KV + 11KV trimming done together. The sheet also carries a separate "Req. 11KV Tree Trimming" column (${nf(SURVEY_ROWS.reduce((a, r) => a + r.trim11Req, 0))} KM); it exceeds the combined figure in ${trim11OverCombined} of the ${DIVISIONS.length} divisions, so it is shown in the survey table only and is not used in any completion percentage.`
   },
   {
     title: 'LT ABC Cable and Weasel Conductor requirements are period totals',
@@ -509,10 +482,17 @@ export const DATA_NOTES: { title: string; body: string }[] = [
       'In the survey sheet these two requirements are single merged cells covering all nine months of each division, not monthly entries. They are therefore always reported for the full period of the selected divisions and do not change with the month filter.'
   },
   {
-    title: 'Activities recorded at full completion',
+    title: 'DT count is a population snapshot, not a monthly figure',
     body:
-      'Lug, 11KV Insulator, Stay Set and Pole Replacement show the same figure under "required" and "done" in every division and month, i.e. everything the survey raised was attended to within the same month.'
+      `DT-Count.xlsx lists ${nf(DIVISIONS.reduce((a, d) => a + divisionDtTotal(d), 0))} installed transformers across the ${DIVISIONS.length} divisions, with no month dimension. Work is therefore expressed as jobs per 100 installed DTs rather than as a share of transformers covered — a DT attended in two different months counts twice, so the rate can exceed the number of distinct DTs touched.`
   },
+  ...(fullyClosed.length
+    ? [{
+      title: 'Activities recorded at full completion',
+      body:
+        `${fullyClosed.join(', ')} show the same figure under "required" and "done" in every division and month, i.e. everything the survey raised was attended to within the same month.`
+    }]
+    : []),
   {
     title: 'One blank cell',
     body: 'Oil Top-up for EDD-Fatehpur, July 2026 is blank in the source sheet and is counted as zero.'
