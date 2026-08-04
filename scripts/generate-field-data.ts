@@ -56,6 +56,19 @@ async function main() {
   const survey: Record<string, number[][]> = {};
   const periodReq: Record<string, { abcReq: number; weaselReq: number }> = {};
 
+  // Truly empty cells (as opposed to an entered zero). Recorded so the UI can
+  // footnote them accurately instead of carrying a hand-written note that goes
+  // stale the next time the sheet is edited.
+  const blanks: { sheet: string; division: string; month: string; column: string }[] = [];
+  const label = (ws: ExcelJS.Worksheet, col: number) =>
+    String(ws.getRow(3).getCell(col).value ?? '').replace(/\s+/g, ' ').trim();
+  const noteBlank = (ws: ExcelJS.Worksheet, sheet: string, division: string, month: string, row: ExcelJS.Row, col: number) => {
+    const v = row.getCell(col).value;
+    if (v === null || v === undefined || v === '') {
+      blanks.push({ sheet, division, month, column: label(ws, col) });
+    }
+  };
+
   DIVISIONS.forEach((division, di) => {
     const start = blockStart(di);
     work[division] = [];
@@ -70,6 +83,7 @@ async function main() {
       const wKey = `${wMonth.getUTCFullYear()}-${String(wMonth.getUTCMonth() + 1).padStart(2, '0')}`;
       if (wKey !== month) throw new Error(`Maintenance R${r}: month ${wKey}, expected ${month}`);
       // Columns C..S
+      for (let c = 3; c <= 19; c++) noteBlank(workWs, 'Maintenance', division, month, wRow, c);
       work[division].push(Array.from({ length: 17 }, (_, c) => num(wRow.getCell(3 + c))));
 
       const sRow = surveyWs.getRow(r);
@@ -77,7 +91,11 @@ async function main() {
       if (!(sMonth instanceof Date)) throw new Error(`Survey R${r}: month cell is not a date`);
       const sKey = `${sMonth.getUTCFullYear()}-${String(sMonth.getUTCMonth() + 1).padStart(2, '0')}`;
       if (sKey !== month) throw new Error(`Survey R${r}: month ${sKey}, expected ${month}`);
-      // Columns C..M then P..Q - N and O are the merged period requirements.
+      // Columns C..M then P..Q - N and O are the merged period requirements and
+      // are only populated on the first row of each block, so they are skipped.
+      for (const c of [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17]) {
+        noteBlank(surveyWs, 'Survey', division, month, sRow, c);
+      }
       const sVals = [
         ...Array.from({ length: 11 }, (_, c) => num(sRow.getCell(3 + c))),
         num(sRow.getCell(16)),
@@ -173,6 +191,11 @@ export const PERIOD_MATERIAL_REQ_RAW: Record<string, { abcReq: number; weaselReq
 ${DIVISIONS.map((d) => `  '${d}': { abcReq: ${periodReq[d].abcReq}, weaselReq: ${periodReq[d].weaselReq} }`).join(',\n')}
 };
 
+/** Cells left empty in the source sheets (an entered zero is not a blank). */
+export const BLANK_CELLS: { sheet: string; division: string; month: string; column: string }[] = [
+${blanks.map((b) => `  { sheet: '${b.sheet}', division: '${b.division}', month: '${b.month}', column: ${JSON.stringify(b.column)} }`).join(',\n')}
+];
+
 /** Transformer capacity buckets, smallest to largest (an ordered scale). */
 export const CAPACITY_LABELS = [${capacityLabels.map((l) => `'${l}'`).join(', ')}] as const;
 
@@ -187,6 +210,8 @@ ${DIVISIONS.map((d) => `  '${d}': { substations: ${dtCount[d].substations}, byCa
   const grand = DIVISIONS.reduce((a, d) => a + dtCount[d].byCapacity.reduce((x, y) => x + y, 0), 0);
   console.log(`Wrote ${path.relative(ROOT, OUT)}`);
   console.log(`  Key-Point : ${DIVISIONS.length} divisions × ${MONTHS.length} months`);
+  console.log(`  Blanks    : ${blanks.length} empty cell(s) in Key-Point.xlsx`);
+  blanks.forEach((b) => console.log(`    ${b.sheet} · ${b.division} · ${b.month} · ${b.column}`));
   console.log(`  DT-Count  : ${DIVISIONS.reduce((a, d) => a + dtCount[d].substations, 0)} substations, ${grand.toLocaleString('en-IN')} DTs`);
   DIVISIONS.forEach((d) => {
     const t = dtCount[d].byCapacity.reduce((x, y) => x + y, 0);

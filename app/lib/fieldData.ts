@@ -16,7 +16,7 @@
 // cell against what the app is serving.
 
 import {
-  WORK_RAW, SURVEY_RAW, PERIOD_MATERIAL_REQ_RAW, DT_COUNT_RAW, CAPACITY_LABELS
+  WORK_RAW, SURVEY_RAW, PERIOD_MATERIAL_REQ_RAW, DT_COUNT_RAW, CAPACITY_LABELS, BLANK_CELLS
 } from './fieldData.generated';
 
 export { CAPACITY_LABELS };
@@ -493,8 +493,13 @@ export const DATA_NOTES: { title: string; body: string }[] = [
         `${fullyClosed.join(', ')} show the same figure under "required" and "done" in every division and month, i.e. everything the survey raised was attended to within the same month.`
     }]
     : []),
-  {
-    title: 'One blank cell',
-    body: 'Oil Top-up for EDD-Fatehpur, July 2026 is blank in the source sheet and is counted as zero.'
-  }
+  ...(BLANK_CELLS.length
+    ? [{
+      title: BLANK_CELLS.length === 1 ? 'One blank cell' : `${BLANK_CELLS.length} blank cells`,
+      body:
+        `${BLANK_CELLS.map((b) => `${b.column} for ${b.division}, ${monthLabelLong(b.month)}`).join('; ')} ${
+          BLANK_CELLS.length === 1 ? 'is' : 'are'
+        } left empty in the source sheet and counted as zero.`
+    }]
+    : [])
 ];
