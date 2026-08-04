@@ -145,7 +145,7 @@ export function useComplaintFilters() {
 
     const handleMonthChange = (val: string) => {
         setMonthFilter(val);
-        if (val !== 'All') {
+        if (val) {
             setFromDT('');
             setToDT('');
             setActivePreset('');
