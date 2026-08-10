@@ -1,7 +1,10 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { FiDownload, FiLoader, FiPhoneCall, FiSearch } from 'react-icons/fi';
+import { CALLING_PRESETS, type PresetId, istDateOnly, presetRange } from '../lib/calling-ranges';
+import { canonicalFault } from '../lib/faults';
 import { loadExcelJS } from '../utils/lazyImports';
 import {
     CAT,
@@ -64,26 +67,6 @@ const STATUS_COLORS: Record<string, string> = {
 
 const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
 
-// Before the app shipped a fixed fault dropdown, operators typed the category
-// free-hand, so the history holds spelling/format variants of the same fault.
-// These get folded into one canonical label so the fault report isn't split
-// across near-duplicate rows. Kept deliberately conservative — only unambiguous
-// same-fault variants, never a semantic guess. Keys are lower-cased + space-
-// collapsed; see canonicalFault.
-const FAULT_ALIASES: Record<string, string> = {
-    'voltage flactuation': 'Voltage Fluctuation',
-    '11kv line fault': '11 KV Line Fault',
-    'bill related issue': 'Billing Issue',
-    'meter related issue': 'Meter Issue',
-    't/f fault': 'Transformer (DT) Fault',
-    transformer: 'Transformer (DT) Fault',
-    'individiual cable fault': 'Service Cable Fault (Individual)'
-};
-const canonicalFault = (raw: string): string => {
-    const clean = raw.trim().replace(/\s+/g, ' ');
-    return FAULT_ALIASES[clean.toLowerCase()] ?? clean;
-};
-
 // Re-aggregate every fault-keyed list under the canonical label (summing counts,
 // re-sorting by n desc) so charts, tables and the Excel export all agree. Applied
 // once to the fetched stats. A complaint logged under two variants of the same
@@ -131,18 +114,6 @@ const fullDate = (isoDate: string) => {
     const [y, m, d] = isoDate.split('-');
     return `${d}/${m}/${y}`;
 };
-
-function istToday(): string {
-    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
-    const map = Object.fromEntries(parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]));
-    return `${map.year}-${map.month}-${map.day}`;
-}
-function daysAgo(dateOnly: string, days: number): string {
-    const [y, m, d] = dateOnly.split('-').map(Number);
-    const dt = new Date(Date.UTC(y, m - 1, d));
-    dt.setUTCDate(dt.getUTCDate() - days);
-    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
-}
 
 // Top-N breakdown text ("11 KV Line Fault (12), Meter Issue (4)") for a
 // feeder/substation from the flat matrix rows.
@@ -214,28 +185,29 @@ function contactStackConfig(items: { k: string; n: number; called: number; conne
 
 // ---------- component ----------
 
-type Preset = 'today' | '7d' | '30d' | 'all' | 'custom';
-type SubTab = 'overview' | 'types' | 'faults' | 'feeders' | 'substations';
+// The per-complaint drill-down pulls its own (larger) dataset, so it loads only
+// when its sub-tab is opened.
+const CalledComplaints = dynamic(() => import('./CalledComplaints'), {
+    ssr: false,
+    loading: () => <div className="h-96 w-full animate-pulse rounded-2xl bg-gray-100" />
+});
+
+type Preset = PresetId | 'custom';
+type SubTab = 'overview' | 'complaints' | 'types' | 'faults' | 'feeders' | 'substations';
 
 const SUB_TABS: { id: SubTab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
+    { id: 'complaints', label: 'Called Complaints' },
     { id: 'types', label: 'Complaint Types' },
     { id: 'faults', label: 'Fault Types' },
     { id: 'feeders', label: 'Feeders' },
     { id: 'substations', label: 'Substations' }
 ];
 
-const PRESETS: { id: Preset; label: string }[] = [
-    { id: 'today', label: 'Today' },
-    { id: '7d', label: 'Last 7 Days' },
-    { id: '30d', label: 'Last 30 Days' },
-    { id: 'all', label: 'All Time' }
-];
-
 function CallingReport() {
-    const today = istToday();
-    const [preset, setPreset] = useState<Preset>('7d');
-    const [from, setFrom] = useState(daysAgo(today, 6));
+    const today = istDateOnly();
+    const [preset, setPreset] = useState<Preset>('today');
+    const [from, setFrom] = useState(today);
     const [to, setTo] = useState(today);
     const [stats, setStats] = useState<CallingStats | null>(null);
     const [loading, setLoading] = useState(true);
@@ -247,7 +219,7 @@ function CallingReport() {
     const [ssLimit, setSsLimit] = useState(20);
     const [exporting, setExporting] = useState(false);
 
-    const rangeLabel = preset === 'all' ? 'All time' : `${fullDate(from)} – ${fullDate(to)}`;
+    const rangeLabel = from === to ? fullDate(from) : `${fullDate(from)} – ${fullDate(to)}`;
 
     useEffect(() => {
         let cancelled = false;
@@ -255,7 +227,7 @@ function CallingReport() {
             setLoading(true);
             setError('');
             try {
-                const qs = preset === 'all' ? 'all=1' : `from=${from}&to=${to}`;
+                const qs = `from=${from}&to=${to}`;
                 const res = await fetch(`/api/calling/analytics?${qs}`);
                 const json = await res.json();
                 if (!json.success) throw new Error(json.error || 'Failed to load calling data');
@@ -269,20 +241,13 @@ function CallingReport() {
         return () => {
             cancelled = true;
         };
-    }, [preset, from, to]);
+    }, [from, to]);
 
-    const applyPreset = (p: Preset) => {
+    const applyPreset = (p: PresetId) => {
+        const range = presetRange(p, today);
         setPreset(p);
-        if (p === 'today') {
-            setFrom(today);
-            setTo(today);
-        } else if (p === '7d') {
-            setFrom(daysAgo(today, 6));
-            setTo(today);
-        } else if (p === '30d') {
-            setFrom(daysAgo(today, 29));
-            setTo(today);
-        }
+        setFrom(range.from);
+        setTo(range.to);
     };
 
     // Top fault / top type per feeder & substation (matrices come pre-sorted by n desc).
@@ -445,7 +410,7 @@ function CallingReport() {
             </div>
             {/* One filter row above everything it scopes. */}
             <div className="mt-4 flex flex-wrap items-center gap-2">
-                {PRESETS.map((p) => (
+                {CALLING_PRESETS.map((p) => (
                     <button
                         key={p.id}
                         onClick={() => applyPreset(p.id)}
@@ -456,21 +421,45 @@ function CallingReport() {
                         {p.label}
                     </button>
                 ))}
+                <button
+                    onClick={() => setPreset('custom')}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition active:scale-95 ${
+                        preset === 'custom' ? 'bg-sky-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 active:bg-gray-300'
+                    }`}
+                >
+                    Custom
+                </button>
+                {/* The pickers stay visible so a date can be nudged straight from
+                    any preset — touching one just flips the mode to Custom. min/max
+                    only guide the native picker (a typed date ignores them), so each
+                    handler also drags the other end along rather than let the range
+                    inverts into an empty report. */}
                 <div className="flex items-center gap-2 text-sm text-gray-600">
                     <input
                         type="date"
-                        value={preset === 'all' ? '' : from}
-                        max={to}
-                        onChange={(e) => { if (e.target.value) { setPreset('custom'); setFrom(e.target.value); } }}
+                        value={from}
+                        max={today}
+                        onChange={(e) => {
+                            const v = e.target.value;
+                            if (!v) return;
+                            setPreset('custom');
+                            setFrom(v);
+                            if (v > to) setTo(v);
+                        }}
                         className="rounded-lg border border-gray-200 px-2 py-1.5 focus:border-sky-400 focus:outline-none"
                     />
                     <span>to</span>
                     <input
                         type="date"
-                        value={preset === 'all' ? '' : to}
-                        min={from}
+                        value={to}
                         max={today}
-                        onChange={(e) => { if (e.target.value) { setPreset('custom'); setTo(e.target.value); } }}
+                        onChange={(e) => {
+                            const v = e.target.value;
+                            if (!v) return;
+                            setPreset('custom');
+                            setTo(v);
+                            if (v < from) setFrom(v);
+                        }}
                         className="rounded-lg border border-gray-200 px-2 py-1.5 focus:border-sky-400 focus:outline-none"
                     />
                 </div>
@@ -593,6 +582,11 @@ function CallingReport() {
                         </button>
                     ))}
                 </div>
+
+                {/* ---------- Called Complaints (per-complaint drill-down) ---------- */}
+                {subTab === 'complaints' && (
+                    <CalledComplaints from={from} to={to} rangeLabel={rangeLabel} />
+                )}
 
                 {/* ---------- Overview ---------- */}
                 {subTab === 'overview' && (
