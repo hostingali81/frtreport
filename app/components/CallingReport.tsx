@@ -555,8 +555,11 @@ function CallingReport() {
 
     const kpis: { label: string; value: string; sub?: string; color: string; title?: string }[] = [
         { label: 'Total Complaints', value: nfmt(stats.total), sub: 'live feed', color: 'text-gray-900', title: 'Complaints that arrived in this date range' },
-        { label: 'Called', value: nfmt(stats.called), sub: `${pct(stats.called, stats.total)}% of total`, color: 'text-amber-600', title: 'Complaints from this range that got at least one call (whenever it was made)' },
-        { label: 'Connected', value: nfmt(stats.connected), sub: `${pct(stats.connected, stats.total)}% of total`, color: 'text-green-600', title: 'Complaints from this range where a call was answered' },
+        // "Complaints …" prefixes are deliberate: these count complaints, while
+        // Total Calls counts calls. Bare "Called"/"Connected" read as call counts
+        // and got compared against the app's call totals.
+        { label: 'Complaints Called', value: nfmt(stats.called), sub: `${pct(stats.called, stats.total)}% of total`, color: 'text-amber-600', title: 'Complaints from this range that got at least one call (whenever it was made)' },
+        { label: 'Complaints Reached', value: nfmt(stats.connected), sub: `${pct(stats.connected, stats.total)}% of total`, color: 'text-green-600', title: 'Complaints from this range where a call was answered' },
         { label: 'Connect Rate', value: `${pct(stats.connected, stats.called)}%`, sub: 'of called', color: 'text-sky-700' },
         { label: 'Total Calls', value: nfmt(callsMade), sub: `${nfmt(callsConnected)} connected`, color: 'text-indigo-600', title: 'Calls placed/received in this date range — matches the app’s Reports screen' },
         { label: 'Talk Time', value: fmtTalk(callTalkSeconds), sub: 'calls in this range', color: 'text-blue-700' }
