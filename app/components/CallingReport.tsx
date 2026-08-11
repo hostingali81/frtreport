@@ -553,64 +553,83 @@ function CallingReport() {
     const unknownFeeder = stats.byFeeder.find((f) => f.k === 'Unknown');
     const ssItems = stats.bySubstation.slice(0, 15);
 
-    const kpis: { label: string; value: string; sub?: string; color: string; title?: string }[] = [
+    // Two KPI families on two different clocks. Mixing them in one anonymous row
+    // is what made the dashboard look "wrong" next to the app: people read
+    // "Connected 113" as a call count and compared it with the app's 155. They
+    // are now separate, headed blocks, and the call block mirrors the app's
+    // Reports screen card-for-card so the two can be checked side by side.
+    type Kpi = { label: string; value: string; sub?: string; color: string; title?: string };
+
+    const complaintKpis: Kpi[] = [
         { label: 'Total Complaints', value: nfmt(stats.total), sub: 'live feed', color: 'text-gray-900', title: 'Complaints that arrived in this date range' },
-        // "Complaints …" prefixes are deliberate: these count complaints, while
-        // Total Calls counts calls. Bare "Called"/"Connected" read as call counts
-        // and got compared against the app's call totals.
         { label: 'Complaints Called', value: nfmt(stats.called), sub: `${pct(stats.called, stats.total)}% of total`, color: 'text-amber-600', title: 'Complaints from this range that got at least one call (whenever it was made)' },
         { label: 'Complaints Reached', value: nfmt(stats.connected), sub: `${pct(stats.connected, stats.total)}% of total`, color: 'text-green-600', title: 'Complaints from this range where a call was answered' },
-        { label: 'Connect Rate', value: `${pct(stats.connected, stats.called)}%`, sub: 'of called', color: 'text-sky-700' },
-        { label: 'Total Calls', value: nfmt(callsMade), sub: `${nfmt(callsConnected)} connected`, color: 'text-indigo-600', title: 'Calls placed/received in this date range — matches the app’s Reports screen' },
-        { label: 'Talk Time', value: fmtTalk(callTalkSeconds), sub: 'calls in this range', color: 'text-blue-700' }
+        { label: 'Reach Rate', value: `${pct(stats.connected, stats.called)}%`, sub: 'of complaints called', color: 'text-sky-700', title: 'Of the complaints we called, how many we actually reached' }
     ];
+
+    const callKpis: Kpi[] = [
+        { label: 'Total Calls', value: nfmt(callsMade), sub: fullDate(from) === fullDate(to) ? 'today' : 'in this range', color: 'text-indigo-600', title: 'Every call placed or received in this date range' },
+        { label: 'Calls Answered', value: `${pct(callsConnected, callsMade)}%`, sub: `${nfmt(callsConnected)} of ${nfmt(callsMade)} picked up`, color: 'text-green-600' },
+        { label: 'Total Talk Time', value: fmtTalk(callTalkSeconds), sub: `avg ${callsConnected ? Math.round(callTalkSeconds / callsConnected) : 0}s per answered call`, color: 'text-blue-700' },
+        ...(activity
+            ? [
+                  { label: 'Outgoing Calls', value: nfmt(activity.outgoing), sub: `${nfmt(activity.outgoingConnected)} connected`, color: 'text-emerald-700' },
+                  { label: 'Incoming Calls', value: nfmt(activity.incoming), sub: `${nfmt(activity.incomingConnected)} answered`, color: 'text-violet-700' }
+              ]
+            : [])
+    ];
+
+    const kpiCard = (kpi: Kpi) => (
+        <div key={kpi.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4" title={kpi.title}>
+            <p className="text-xs text-gray-500 uppercase tracking-wide">{kpi.label}</p>
+            <p className={`text-2xl font-bold ${kpi.color}`}>{kpi.value}</p>
+            {kpi.sub && <p className="text-[11px] text-gray-400">{kpi.sub}</p>}
+        </div>
+    );
+    const blockHeading = (title: string, note: string) => (
+        <p className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-600">
+            {title} <span className="ml-1 font-medium normal-case tracking-normal text-gray-400">{note}</span>
+        </p>
+    );
 
     return (
         <div className="flex flex-col gap-6 animate-in fade-in duration-500">
             {header}
 
             <div className={loading ? 'opacity-60 pointer-events-none transition-opacity flex flex-col gap-6' : 'flex flex-col gap-6'}>
-                {/* KPI row */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                    {kpis.map((kpi) => (
-                        <div key={kpi.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4" title={kpi.title}>
-                            <p className="text-xs text-gray-500 uppercase tracking-wide">{kpi.label}</p>
-                            <p className={`text-2xl font-bold ${kpi.color}`}>{kpi.value}</p>
-                            {kpi.sub && <p className="text-[11px] text-gray-400">{kpi.sub}</p>}
+                {/* KPI blocks — complaints first (what came in), then calls (what
+                    the operators did). Each block says which date it is counted on. */}
+                <div>
+                    {blockHeading('Complaints', `that arrived ${from === to ? 'on' : 'between'} ${rangeLabel} · counted per complaint`)}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{complaintKpis.map(kpiCard)}</div>
+                    {/* Coverage bar belongs to this block — it splits the same
+                        Total Complaints into reached / tried / untouched. */}
+                    <div className="mt-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                        <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-gray-200" title={`${stats.connected} reached · ${calledNotReached} called but not reached · ${notCalled} not called`}>
+                            <div style={{ width: `${pct(stats.connected, stats.total)}%`, backgroundColor: C_CONNECTED }}></div>
+                            <div style={{ width: `${pct(calledNotReached, stats.total)}%`, backgroundColor: C_CALLED }}></div>
                         </div>
-                    ))}
+                        <div className="mt-1.5 flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                            <span className="inline-flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: C_CONNECTED }}></span>
+                                Reached: <b className="text-gray-700">{nfmt(stats.connected)}</b>
+                            </span>
+                            <span className="inline-flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: C_CALLED }}></span>
+                                Called, not reached: <b className="text-gray-700">{nfmt(calledNotReached)}</b>
+                            </span>
+                            <span className="inline-flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full bg-gray-300"></span>
+                                Not called: <b className="text-gray-700">{nfmt(notCalled)}</b>
+                            </span>
+                            <span className="text-gray-400">of {nfmt(stats.total)} complaints</span>
+                        </div>
+                    </div>
                 </div>
 
-                {/* The two KPI families are measured on different clocks — say so
-                    once here instead of letting people rediscover it by comparing
-                    with the app. */}
-                <p className="-mt-3 text-[11px] leading-relaxed text-gray-500">
-                    Complaint counts (Total / Called / Connected) are for complaints that <b>arrived</b> in this range.
-                    Total Calls and Talk Time count calls <b>made</b> in this range — the same number the mobile app&apos;s
-                    Reports screen shows
-                    {activity ? ` (${nfmt(activity.outgoing)} outgoing · ${nfmt(activity.incoming)} incoming)` : ''}.
-                </p>
-
-                {/* Contact coverage bar */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                    <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-gray-200" title={`${stats.connected} connected · ${calledNotReached} called but not reached · ${notCalled} not called`}>
-                        <div style={{ width: `${pct(stats.connected, stats.total)}%`, backgroundColor: C_CONNECTED }}></div>
-                        <div style={{ width: `${pct(calledNotReached, stats.total)}%`, backgroundColor: C_CALLED }}></div>
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-4 text-xs text-gray-500">
-                        <span className="inline-flex items-center gap-1.5">
-                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: C_CONNECTED }}></span>
-                            Connected: <b className="text-gray-700">{nfmt(stats.connected)}</b>
-                        </span>
-                        <span className="inline-flex items-center gap-1.5">
-                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: C_CALLED }}></span>
-                            Called, not reached: <b className="text-gray-700">{nfmt(calledNotReached)}</b>
-                        </span>
-                        <span className="inline-flex items-center gap-1.5">
-                            <span className="h-2 w-2 rounded-full bg-gray-300"></span>
-                            Not called: <b className="text-gray-700">{nfmt(notCalled)}</b>
-                        </span>
-                    </div>
+                <div>
+                    {blockHeading('Calls', `made ${from === to ? 'on' : 'between'} ${rangeLabel} · counted per call — same numbers as the app's Call Report screen`)}
+                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">{callKpis.map(kpiCard)}</div>
                 </div>
 
                 {/* Sub tabs */}

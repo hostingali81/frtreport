@@ -306,17 +306,24 @@ function CalledComplaints({ from, to, rangeLabel }: { from: string; to: string; 
 
   return (
     <div className="flex flex-col gap-4">
+      {/* This table's universe is complaints, not calls: the call numbers below
+          cover every call on the listed complaints, including calls placed on a
+          later day. They are therefore NOT the "Calls" block upstairs, and people
+          did compare the two — so the scope is spelled out. */}
+      <p className="text-xs leading-relaxed text-gray-500">
+        One row per complaint that arrived in this range and got at least one call. The call figures here count{' '}
+        <b>every call on these complaints</b>, including calls made on a later day — so they differ from the{' '}
+        <b>Calls</b> cards above, which count calls made inside the range.
+      </p>
+
       {/* Summary of what the current filters select */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {[
-          { label: 'Complaints Called', value: nfmt(shown.complaints), sub: `of ${nfmt(data.totals.complaints)} in range`, color: 'text-gray-900' },
-          { label: 'Consumer Reached', value: nfmt(shown.reached), sub: `${shown.complaints ? Math.round((shown.reached / shown.complaints) * 100) : 0}% of shown`, color: 'text-green-600' },
-          // Not the same as the KPI row's "Total Calls": this table's universe is
-          // complaints that arrived in the range, so it counts every call on them
-          // whenever it was placed — hence the different label.
-          { label: 'Calls On These', value: nfmt(shown.calls), sub: `${(shown.complaints ? shown.calls / shown.complaints : 0).toFixed(1)} per complaint`, color: 'text-indigo-600' },
-          { label: 'Connected Calls', value: nfmt(shown.connected), sub: `${shown.calls ? Math.round((shown.connected / shown.calls) * 100) : 0}% of calls`, color: 'text-sky-700' },
-          { label: 'Talk Time', value: fmtTalk(shown.talkSeconds), sub: 'total, shown rows', color: 'text-blue-700' }
+          { label: 'Complaints Shown', value: nfmt(shown.complaints), sub: `of ${nfmt(data.totals.complaints)} called in range`, color: 'text-gray-900' },
+          { label: 'Consumers Reached', value: nfmt(shown.reached), sub: `${shown.complaints ? Math.round((shown.reached / shown.complaints) * 100) : 0}% of shown`, color: 'text-green-600' },
+          { label: 'Calls On These', value: nfmt(shown.calls), sub: `${(shown.complaints ? shown.calls / shown.complaints : 0).toFixed(1)} per complaint · any day`, color: 'text-indigo-600' },
+          { label: 'Of Those, Connected', value: nfmt(shown.connected), sub: `${shown.calls ? Math.round((shown.connected / shown.calls) * 100) : 0}% of those calls`, color: 'text-sky-700' },
+          { label: 'Talk Time On These', value: fmtTalk(shown.talkSeconds), sub: 'shown rows', color: 'text-blue-700' }
         ].map((k) => (
           <div key={k.label} className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
             <p className="text-xs uppercase tracking-wide text-gray-500">{k.label}</p>
