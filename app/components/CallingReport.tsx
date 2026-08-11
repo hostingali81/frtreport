@@ -47,6 +47,20 @@ type CallingStats = {
     daily: { d: string; n: number; called: number; connected: number }[];
 };
 
+// Calls MADE in the range (call_time), as opposed to everything above, which is
+// keyed on the complaint's arrival date. This is the number the Android app's
+// Reports screen shows, so the two now agree. See app/lib/calling-activity.ts.
+type CallActivity = {
+    calls: number;
+    callsConnected: number;
+    talkSeconds: number;
+    incoming: number;
+    incomingConnected: number;
+    outgoing: number;
+    outgoingConnected: number;
+    byCallStatus: KN[];
+};
+
 // ---------- entity colors (stable across every chart in this report) ----------
 
 const C_TOTAL = CAT[0]; // complaints
@@ -210,6 +224,7 @@ function CallingReport() {
     const [from, setFrom] = useState(today);
     const [to, setTo] = useState(today);
     const [stats, setStats] = useState<CallingStats | null>(null);
+    const [activity, setActivity] = useState<CallActivity | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [subTab, setSubTab] = useState<SubTab>('overview');
@@ -231,7 +246,10 @@ function CallingReport() {
                 const res = await fetch(`/api/calling/analytics?${qs}`);
                 const json = await res.json();
                 if (!json.success) throw new Error(json.error || 'Failed to load calling data');
-                if (!cancelled) setStats(normalizeFaults(json.stats as CallingStats));
+                if (!cancelled) {
+                    setStats(normalizeFaults(json.stats as CallingStats));
+                    setActivity((json.activity as CallActivity) ?? null);
+                }
             } catch (err: any) {
                 if (!cancelled) setError(err.message || 'Failed to load calling data');
             } finally {
@@ -304,6 +322,14 @@ function CallingReport() {
         return q ? list.filter((s) => s.k.toLowerCase().includes(q)) : list;
     }, [stats, ssSearch]);
 
+    // Calls made in the range - the same definition the Android app's Reports
+    // screen uses. If the endpoint couldn't compute it, fall back to the
+    // complaint-date attempt counts rather than showing nothing.
+    const callsMade = activity?.calls ?? stats?.attempts ?? 0;
+    const callsConnected = activity?.callsConnected ?? stats?.attemptsConnected ?? 0;
+    const callTalkSeconds = activity?.talkSeconds ?? stats?.talkSeconds ?? 0;
+    const callStatusItems = activity?.byCallStatus ?? stats?.byCallStatus ?? [];
+
     const exportExcel = async () => {
         if (exporting || !stats) return;
         setExporting(true);
@@ -323,20 +349,26 @@ function CallingReport() {
             summary.mergeCells(1, 1, 1, 2);
             summary.getRow(1).font = { bold: true, size: 12 };
             const kv: [string, string | number][] = [
+                ['Complaints that arrived in this range', ''],
                 ['Total complaints (live feed)', stats.total],
                 ['Complaints called', stats.called],
                 ['Complaints connected', stats.connected],
                 ['Connect rate (of called)', `${pct(stats.connected, stats.called)}%`],
                 ['Not called', stats.total - stats.called],
-                ['Call attempts', stats.attempts],
-                ['Attempts connected', stats.attemptsConnected],
-                ['Total talk time', fmtTalk(stats.talkSeconds)],
-                ['Connected but no fault recorded', stats.uncategorizedConnected]
+                ['Calls on these complaints (any date)', stats.attempts],
+                ['Connected but no fault recorded', stats.uncategorizedConnected],
+                ['', ''],
+                ['Calls made in this range (same as the app)', ''],
+                ['Total calls', callsMade],
+                ['Calls connected', callsConnected],
+                ['Outgoing', activity?.outgoing ?? ''],
+                ['Incoming', activity?.incoming ?? ''],
+                ['Total talk time', fmtTalk(callTalkSeconds)]
             ];
             kv.forEach(([k, v]) => summary.addRow([k, v]));
             summary.addRow([]);
-            headerStyle(summary.addRow(['Call Status (attempts)', 'Count']));
-            stats.byCallStatus.forEach((s) => summary.addRow([s.k, s.n]));
+            headerStyle(summary.addRow(['Call Status (calls made in this range)', 'Count']));
+            callStatusItems.forEach((s) => summary.addRow([s.k, s.n]));
             summary.columns = [{ width: 36 }, { width: 16 }];
 
             const types = wb.addWorksheet('Complaint Types');
@@ -521,13 +553,13 @@ function CallingReport() {
     const unknownFeeder = stats.byFeeder.find((f) => f.k === 'Unknown');
     const ssItems = stats.bySubstation.slice(0, 15);
 
-    const kpis: { label: string; value: string; sub?: string; color: string }[] = [
-        { label: 'Total Complaints', value: nfmt(stats.total), sub: 'live feed', color: 'text-gray-900' },
-        { label: 'Called', value: nfmt(stats.called), sub: `${pct(stats.called, stats.total)}% of total`, color: 'text-amber-600' },
-        { label: 'Connected', value: nfmt(stats.connected), sub: `${pct(stats.connected, stats.total)}% of total`, color: 'text-green-600' },
+    const kpis: { label: string; value: string; sub?: string; color: string; title?: string }[] = [
+        { label: 'Total Complaints', value: nfmt(stats.total), sub: 'live feed', color: 'text-gray-900', title: 'Complaints that arrived in this date range' },
+        { label: 'Called', value: nfmt(stats.called), sub: `${pct(stats.called, stats.total)}% of total`, color: 'text-amber-600', title: 'Complaints from this range that got at least one call (whenever it was made)' },
+        { label: 'Connected', value: nfmt(stats.connected), sub: `${pct(stats.connected, stats.total)}% of total`, color: 'text-green-600', title: 'Complaints from this range where a call was answered' },
         { label: 'Connect Rate', value: `${pct(stats.connected, stats.called)}%`, sub: 'of called', color: 'text-sky-700' },
-        { label: 'Call Attempts', value: nfmt(stats.attempts), sub: `${nfmt(stats.attemptsConnected)} connected`, color: 'text-indigo-600' },
-        { label: 'Talk Time', value: fmtTalk(stats.talkSeconds), sub: 'total', color: 'text-blue-700' }
+        { label: 'Total Calls', value: nfmt(callsMade), sub: `${nfmt(callsConnected)} connected`, color: 'text-indigo-600', title: 'Calls placed/received in this date range — matches the app’s Reports screen' },
+        { label: 'Talk Time', value: fmtTalk(callTalkSeconds), sub: 'calls in this range', color: 'text-blue-700' }
     ];
 
     return (
@@ -538,13 +570,23 @@ function CallingReport() {
                 {/* KPI row */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                     {kpis.map((kpi) => (
-                        <div key={kpi.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+                        <div key={kpi.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4" title={kpi.title}>
                             <p className="text-xs text-gray-500 uppercase tracking-wide">{kpi.label}</p>
                             <p className={`text-2xl font-bold ${kpi.color}`}>{kpi.value}</p>
                             {kpi.sub && <p className="text-[11px] text-gray-400">{kpi.sub}</p>}
                         </div>
                     ))}
                 </div>
+
+                {/* The two KPI families are measured on different clocks — say so
+                    once here instead of letting people rediscover it by comparing
+                    with the app. */}
+                <p className="-mt-3 text-[11px] leading-relaxed text-gray-500">
+                    Complaint counts (Total / Called / Connected) are for complaints that <b>arrived</b> in this range.
+                    Total Calls and Talk Time count calls <b>made</b> in this range — the same number the mobile app&apos;s
+                    Reports screen shows
+                    {activity ? ` (${nfmt(activity.outgoing)} outgoing · ${nfmt(activity.incoming)} incoming)` : ''}.
+                </p>
 
                 {/* Contact coverage bar */}
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
@@ -632,21 +674,21 @@ function CallingReport() {
                         </ChartCard>
                         <ChartCard
                             className="lg:col-span-2"
-                            title="Call attempts by result"
-                            subtitle="Every attempt operators logged in this range"
+                            title="Calls by result"
+                            subtitle="Every call made in this range"
                             height={300}
                         >
                             <ChartCanvas
-                                deps={[stats.byCallStatus]}
+                                deps={[callStatusItems]}
                                 build={(Chart, el) =>
                                     new Chart(el, {
                                         type: 'doughnut',
                                         data: {
-                                            labels: stats.byCallStatus.map((s) => s.k),
+                                            labels: callStatusItems.map((s) => s.k),
                                             datasets: [
                                                 {
-                                                    data: stats.byCallStatus.map((s) => s.n),
-                                                    backgroundColor: stats.byCallStatus.map((s) => STATUS_COLORS[s.k] ?? NEUTRAL),
+                                                    data: callStatusItems.map((s) => s.n),
+                                                    backgroundColor: callStatusItems.map((s) => STATUS_COLORS[s.k] ?? NEUTRAL),
                                                     borderColor: SURFACE,
                                                     borderWidth: 2,
                                                     hoverBorderColor: SURFACE
@@ -662,7 +704,7 @@ function CallingReport() {
                                                 tooltip: TOOLTIP
                                             }
                                         },
-                                        plugins: [doughnutCenter('attempts')]
+                                        plugins: [doughnutCenter('calls')]
                                     })
                                 }
                             />

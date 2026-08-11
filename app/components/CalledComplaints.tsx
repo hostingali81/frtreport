@@ -311,7 +311,10 @@ function CalledComplaints({ from, to, rangeLabel }: { from: string; to: string; 
         {[
           { label: 'Complaints Called', value: nfmt(shown.complaints), sub: `of ${nfmt(data.totals.complaints)} in range`, color: 'text-gray-900' },
           { label: 'Consumer Reached', value: nfmt(shown.reached), sub: `${shown.complaints ? Math.round((shown.reached / shown.complaints) * 100) : 0}% of shown`, color: 'text-green-600' },
-          { label: 'Total Calls', value: nfmt(shown.calls), sub: `${(shown.complaints ? shown.calls / shown.complaints : 0).toFixed(1)} per complaint`, color: 'text-indigo-600' },
+          // Not the same as the KPI row's "Total Calls": this table's universe is
+          // complaints that arrived in the range, so it counts every call on them
+          // whenever it was placed — hence the different label.
+          { label: 'Calls On These', value: nfmt(shown.calls), sub: `${(shown.complaints ? shown.calls / shown.complaints : 0).toFixed(1)} per complaint`, color: 'text-indigo-600' },
           { label: 'Connected Calls', value: nfmt(shown.connected), sub: `${shown.calls ? Math.round((shown.connected / shown.calls) * 100) : 0}% of calls`, color: 'text-sky-700' },
           { label: 'Talk Time', value: fmtTalk(shown.talkSeconds), sub: 'total, shown rows', color: 'text-blue-700' }
         ].map((k) => (

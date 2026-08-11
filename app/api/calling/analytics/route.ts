@@ -1,16 +1,22 @@
 import { NextResponse } from 'next/server';
 
+import { type CallActivity, fetchCallActivity } from '../../../lib/calling-activity';
 import { matchPresetKey, readCachedCallingStats } from '../../../lib/calling-stats-cache';
 import { getSupabaseClient } from '../../../lib/shared-scraper';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 // Aggregates for the Calling Report tab on /analytics. Everything is computed
 // in the database (get_calling_stats RPC) and comes back as one jsonb doc, so
 // no row downloads and no PostgREST row cap. Counts only - no consumer PII and
 // no operator names - so like /api/complaints/stats (which feeds the same
 // unauthenticated dashboard) this endpoint does not require a session.
+//
+// `stats` ranges on complaint_date (complaints that ARRIVED in the window);
+// `activity` ranges on call_time (calls MADE in the window) so the dashboard's
+// call numbers match the Android app's Reports screen - see calling-activity.ts.
 
 const CACHE_TTL = 60 * 1000;
 const cache = new Map<string, { timestamp: number; payload: any }>();
@@ -47,14 +53,25 @@ export async function GET(request: Request) {
       return NextResponse.json(cached.payload);
     }
 
-    // Fast path: the preset buttons (Today / 7d / 30d / All) are precomputed by
-    // the cron into the `reports` table, so serve that single row instead of the
-    // cold ~4-8s RPC. Custom date ranges fall through to the live RPC below.
+    // Calls made in the window. Always computed live (a few narrow rows out of a
+    // 14k-row table) so it stays in step with the app even when the complaint
+    // aggregates come from the precomputed row below. Non-fatal: if it fails the
+    // client falls back to the complaint-date attempt counts.
+    let activity: CallActivity | null = null;
+    try {
+      activity = await fetchCallActivity(supabase, { from, to, allTime });
+    } catch {
+      activity = null;
+    }
+
+    // Fast path: the preset buttons (Today / Yesterday / Current + Last Month)
+    // are precomputed by the cron into the `reports` table, so serve that single
+    // row instead of the cold ~4-8s RPC. Custom ranges fall through to the RPC.
     const presetKey = matchPresetKey({ allTime, from, to });
     if (presetKey) {
       const precomputed = await readCachedCallingStats(supabase, presetKey);
       if (precomputed) {
-        const payload = { success: true, range: allTime ? null : { from, to }, stats: precomputed.stats, precomputedAt: precomputed.computedAt };
+        const payload = { success: true, range: allTime ? null : { from, to }, stats: precomputed.stats, activity, precomputedAt: precomputed.computedAt };
         cache.set(cacheKey, { timestamp: Date.now(), payload });
         return NextResponse.json(payload);
       }
@@ -66,7 +83,7 @@ export async function GET(request: Request) {
     });
     if (error) throw new Error(error.message);
 
-    const payload = { success: true, range: allTime ? null : { from, to }, stats: data };
+    const payload = { success: true, range: allTime ? null : { from, to }, stats: data, activity };
     cache.set(cacheKey, { timestamp: Date.now(), payload });
     return NextResponse.json(payload);
   } catch (error) {
