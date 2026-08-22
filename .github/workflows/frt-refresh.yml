@@ -1,4 +1,4 @@
-name: FRT Refresh (backstop, every 15 min)
+name: FRT Refresh (backstop, every 5 min)
 
 # Backstop + fallback for the fast path. The primary refresh is now an external
 # pinger (cron-job.org) hitting the Vercel /api/cron route every ~2 min, which
