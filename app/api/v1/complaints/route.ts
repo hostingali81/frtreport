@@ -6,10 +6,13 @@ import {
   checkApiKey,
   corsPreflight,
   csvResponse,
+  cursorFor,
+  deepOffsetNotice,
   nextPageUrl,
   parseQuery,
   QueryError,
   shapeRow,
+  supportsCursor,
   toCsv
 } from '@/app/lib/publicApi';
 
@@ -47,14 +50,26 @@ export async function GET(request: Request) {
     throw err;
   }
 
+  const cursorMode = supportsCursor(query);
+
+  // The cursor is built from the row id, so it has to be fetched even when the
+  // caller projected it away. It is dropped again during shaping.
+  const selectFields = cursorMode && !query.fields.includes('id')
+    ? [...query.fields, 'id']
+    : query.fields;
+
   // The count is requested in the same round trip as the rows (PostgREST's
   // Prefer: count header), so `count=exact` costs latency but not a second call.
   let builder = supabase
     .from('complaints')
-    .select(query.fields.join(','), query.wantCount ? { count: 'exact' } : undefined)
-    .order(query.sort, { ascending: query.ascending, nullsFirst: false })
-    // Tie-break so a row never appears on two pages when timestamps collide.
-    .order('id', { ascending: false });
+    .select(selectFields.join(','), query.wantCount ? { count: 'exact' } : undefined)
+    .order(query.sort, { ascending: query.ascending, nullsFirst: false });
+
+  // Tie-break so a row never appears on two pages when the sort values collide.
+  // Sorting by id already is its own tie-break.
+  if (!cursorMode) {
+    builder = builder.order('id', { ascending: false });
+  }
 
   builder = applyQuery(builder, query);
   builder = builder.range(query.offset, query.offset + query.limit - 1);
@@ -65,7 +80,8 @@ export async function GET(request: Request) {
     return apiError(500, 'query_failed', error.message);
   }
 
-  const rows = (data || []).map((row: any) => shapeRow(row, query.fields, query.tz));
+  const raw = (data || []) as Array<Record<string, any>>;
+  const rows = raw.map((row) => shapeRow(row, query.fields, query.tz));
 
   if (query.format === 'csv') {
     return csvResponse(toCsv(rows, query.fields), 'complaints.csv');
@@ -73,24 +89,31 @@ export async function GET(request: Request) {
 
   const total = query.wantCount ? (count ?? 0) : null;
   const totalPages = total === null ? null : Math.max(1, Math.ceil(total / query.limit));
-  const hasMore = total === null ? rows.length === query.limit : query.offset + rows.length < total;
+  const hasMore = cursorMode || total === null
+    ? raw.length === query.limit
+    : query.offset + raw.length < total;
+
+  const nextCursor = hasMore ? cursorFor(query, raw) : null;
+  const notice = deepOffsetNotice(query);
 
   return apiJson(
     {
       success: true,
       meta: {
         total,
-        totalPages,
+        totalPages: cursorMode ? null : totalPages,
         count: rows.length,
-        page: query.page,
+        page: cursorMode ? null : query.page,
         limit: query.limit,
-        offset: query.offset,
+        offset: cursorMode ? null : query.offset,
         hasMore,
-        nextPage: nextPageUrl(request, query, hasMore),
+        nextCursor,
+        nextPage: nextPageUrl(request, query, hasMore, nextCursor),
         sort: query.sort,
         order: query.ascending ? 'asc' : 'desc',
         timezone: query.tz === 'utc' ? 'UTC' : 'Asia/Kolkata',
         filters: query.applied,
+        ...(notice ? { notice } : {}),
         docs: new URL('/api-docs', request.url).toString()
       },
       data: rows

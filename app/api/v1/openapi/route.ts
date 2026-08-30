@@ -109,6 +109,15 @@ export async function GET(request: Request) {
             { name: 'page', in: 'query', description: '1-based page number.', schema: { type: 'integer', default: 1 } },
             { name: 'limit', in: 'query', description: 'Rows per page.', schema: { type: 'integer', default: DEFAULT_LIMIT, maximum: MAX_LIMIT } },
             { name: 'offset', in: 'query', description: 'Row offset. Overrides `page` when both are sent.', schema: { type: 'integer' } },
+            {
+              name: 'cursor',
+              in: 'query',
+              description:
+                'The `meta.nextCursor` value from the previous response. Requires `sort=id` and replaces `page`/`offset`. ' +
+                'Unlike offset paging, cost does not grow with depth, so this is the way to walk a large result set. ' +
+                'Keep every filter plus `sort` and `order` identical for the whole walk.',
+              schema: { type: 'string' }
+            },
             { name: 'sort', in: 'query', description: 'Column to sort by.', schema: { type: 'string', enum: [...SORTABLE_FIELDS], default: 'complaint_date' } },
             { name: 'order', in: 'query', description: 'Sort direction.', schema: { type: 'string', enum: ['asc', 'desc'], default: 'desc' } },
             { name: 'fields', in: 'query', description: 'Comma-separated subset of columns to return.', schema: { type: 'string', example: 'complaint_number,status,complaint_date' } },
@@ -186,13 +195,19 @@ export async function GET(request: Request) {
           type: 'object',
           properties: {
             total: { type: 'integer', nullable: true, description: 'Total matching rows, or null when count=none.' },
-            totalPages: { type: 'integer', nullable: true },
+            totalPages: { type: 'integer', nullable: true, description: 'Null while paging by cursor.' },
             count: { type: 'integer', description: 'Rows in this response.' },
-            page: { type: 'integer' },
+            page: { type: 'integer', nullable: true, description: 'Null while paging by cursor.' },
             limit: { type: 'integer' },
-            offset: { type: 'integer' },
+            offset: { type: 'integer', nullable: true, description: 'Null while paging by cursor.' },
             hasMore: { type: 'boolean' },
-            nextPage: { type: 'string', nullable: true, description: 'Ready-made URL for the next page.' },
+            nextCursor: {
+              type: 'string',
+              nullable: true,
+              description: 'Opaque position to send back as ?cursor= for the next page. Only issued when sort=id.'
+            },
+            nextPage: { type: 'string', nullable: true, description: 'Ready-made URL for the next page, cursor already applied where applicable.' },
+            notice: { type: 'string', description: 'Present only when the request is on a slow paging path, explaining the faster one.' },
             sort: { type: 'string' },
             order: { type: 'string' },
             timezone: { type: 'string' },

@@ -48,6 +48,7 @@ const OUTPUT_PARAMS: Row[] = [
   { name: 'page', type: 'integer', detail: '1-based page number. Default 1.' },
   { name: 'limit', type: 'integer', detail: 'Rows per page. Default 100, maximum 1000.' },
   { name: 'offset', type: 'integer', detail: 'Row offset. Overrides page when both are sent.' },
+  { name: 'cursor', type: 'string', detail: 'The meta.nextCursor value from the previous response. Requires sort=id, and replaces page/offset. This is the fast way to walk a large result set.' },
   { name: 'sort', type: 'string', detail: 'Column to sort by. Default complaint_date.' },
   { name: 'order', type: 'string', detail: 'asc or desc. Default desc.' },
   { name: 'fields', type: 'string', detail: 'Comma-separated subset of columns, to cut the response size.' },
@@ -161,7 +162,7 @@ const NAV = [
   ['response', 'Response shape'],
   ['fields', 'Field reference'],
   ['recipes', 'Recipes'],
-  ['paging-code', 'Fetching everything'],
+  ['bulk', 'Downloading everything'],
   ['errors', 'Errors'],
   ['notes', 'Limits & notes']
 ];
@@ -319,7 +320,10 @@ export default async function ApiDocsPage() {
             <ParamTable rows={OUTPUT_PARAMS} />
             <p>
               The hard ceiling on <span className="font-mono text-sm">limit</span> is 1000 rows per request. To pull more
-              than that, walk the pages - see <a className="text-sky-700 underline" href="#paging-code">fetching everything</a>.
+              than that, walk the result set. For anything beyond a few thousand rows, walk it with{' '}
+              <span className="font-mono text-sm">cursor</span> rather than{' '}
+              <span className="font-mono text-sm">page</span> - see{' '}
+              <a className="text-sky-700 underline" href="#bulk">downloading everything</a>.
             </p>
           </Section>
 
@@ -338,6 +342,7 @@ export default async function ApiDocsPage() {
     "limit": 100,
     "offset": 0,
     "hasMore": true,
+    "nextCursor": null,
     "nextPage": "` + base + `/api/v1/complaints?month=2026-08&page=2",
     "sort": "complaint_date",
     "order": "desc",
@@ -419,28 +424,65 @@ export default async function ApiDocsPage() {
               <Try base={base} label="Just the count, no rows" path="/api/v1/complaints?month=2026-08&limit=1&fields=id&pretty=1" />
               <Try base={base} label="CSV download" path="/api/v1/complaints?month=2026-08&division=EDD-BARABANKI&format=csv&limit=1000" />
               <Try base={base} label="One complaint by number" path="/api/v1/complaints/MV05072637096?pretty=1" />
+              <Try base={base} label="First page of a full download (follow meta.nextCursor from here)" path="/api/v1/complaints?sort=id&order=desc&limit=1000&fields=complaint_number,sub_station,status,complaint_date&pretty=1" />
               <Try base={base} label="Feeders under one sub-station" path="/api/v1/filters?subStation=33/11%20KV%20BADEL&pretty=1" />
             </div>
           </Section>
 
-          <Section id="paging-code" title="Fetching everything">
+          <Section id="bulk" title="Downloading everything">
             <p>
-              With <span className="font-mono text-sm">limit=1000</span> and{' '}
-              <span className="font-mono text-sm">count=none</span>, a month of complaints is a handful of requests. Keep
-              going until a page comes back with fewer rows than you asked for.
+              There are 185,000-odd complaints. Pulling all of them works, but <em>how</em> you page matters a great
+              deal, because <span className="font-mono text-sm">page</span>/<span className="font-mono text-sm">offset</span>{' '}
+              paging makes the database re-scan every row it skips. Measured on this dataset, 1000 rows per request:
             </p>
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[560px] border-collapse text-left text-sm">
+                <thead className="bg-slate-50 text-slate-600">
+                  <tr>
+                    <th className="px-4 py-2.5 font-semibold">Rows already skipped</th>
+                    <th className="px-4 py-2.5 font-semibold">page / offset</th>
+                    <th className="px-4 py-2.5 font-semibold">cursor</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  <tr><td className="px-4 py-2.5">0</td><td className="px-4 py-2.5">1.0s</td><td className="px-4 py-2.5">0.9s</td></tr>
+                  <tr><td className="px-4 py-2.5">60,000</td><td className="px-4 py-2.5">1.5s</td><td className="px-4 py-2.5">0.3s</td></tr>
+                  <tr><td className="px-4 py-2.5">120,000</td><td className="px-4 py-2.5 font-semibold text-red-700">14.9s</td><td className="px-4 py-2.5">0.3s</td></tr>
+                  <tr><td className="px-4 py-2.5">180,000</td><td className="px-4 py-2.5 font-semibold text-red-700">15.8s</td><td className="px-4 py-2.5">0.3s</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              So: <strong className="font-semibold text-slate-900">use <span className="font-mono">page</span> for browsing,
+              and <span className="font-mono">cursor</span> for bulk.</strong> A cursor stays flat at any depth, which puts the
+              full dataset at roughly a minute rather than hours.
+            </p>
+
+            <div className="rounded-lg border-l-4 border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+              <strong className="font-semibold">How cursor paging works.</strong> Add{' '}
+              <span className="font-mono">sort=id</span> to your request. Every response then carries a{' '}
+              <span className="font-mono">meta.nextCursor</span> string; send it back as{' '}
+              <span className="font-mono">?cursor=</span> to get the rows after it, and stop when{' '}
+              <span className="font-mono">meta.hasMore</span> is false. Keep every filter, plus{' '}
+              <span className="font-mono">sort</span> and <span className="font-mono">order</span>, identical for the whole
+              walk - change one and the API rejects the cursor rather than quietly returning the wrong rows. If you would
+              rather not build the URL yourself, <span className="font-mono">meta.nextPage</span> is the same request with
+              the cursor already applied.
+            </div>
+
             <p className="pt-2 font-medium text-slate-900">JavaScript</p>
             <Code>{`const BASE = "` + base + `/api/v1/complaints";
 
-async function fetchAll(filters) {
+async function fetchAll(filters = {}) {
   const rows = [];
-  let page = 1;
+  let cursor = null;
 
   while (true) {
     const params = new URLSearchParams(filters);
+    params.set("sort", "id");     // required for cursor paging
+    params.set("order", "desc");
     params.set("limit", "1000");
-    params.set("count", "none");
-    params.set("page", String(page));
+    if (cursor) params.set("cursor", cursor);
 
     const res = await fetch(BASE + "?" + params);
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -448,35 +490,62 @@ async function fetchAll(filters) {
     const body = await res.json();
     rows.push(...body.data);
 
-    if (body.data.length < 1000) break;
-    page += 1;
+    if (!body.meta.hasMore) return rows;
+    cursor = body.meta.nextCursor;
   }
-
-  return rows;
 }
 
+// One division, one month
 const august = await fetchAll({ month: "2026-08", division: "EDD-BARABANKI" });
-console.log(august.length + " complaints");`}</Code>
+
+// Or the entire dataset - no filters at all
+const everything = await fetchAll();
+console.log(everything.length + " complaints");`}</Code>
+
             <p className="pt-2 font-medium text-slate-900">Python</p>
             <Code>{`import requests
 
 BASE = "` + base + `/api/v1/complaints"
 
 def fetch_all(**filters):
-    rows, page = [], 1
+    rows, cursor = [], None
     while True:
-        params = {**filters, "limit": 1000, "count": "none", "page": page}
+        params = {**filters, "sort": "id", "order": "desc", "limit": 1000}
+        if cursor:
+            params["cursor"] = cursor
         body = requests.get(BASE, params=params, timeout=60).json()
         rows.extend(body["data"])
-        if len(body["data"]) < 1000:
+        if not body["meta"]["hasMore"]:
             return rows
-        page += 1
+        cursor = body["meta"]["nextCursor"]
 
-august = fetch_all(month="2026-08", division="EDD-BARABANKI")
-print(len(august), "complaints")`}</Code>
-            <p className="pt-2 font-medium text-slate-900">Straight into a spreadsheet</p>
-            <Code>{`curl -o august.csv \\
-  "` + base + `/api/v1/complaints?month=2026-08&format=csv&limit=1000"`}</Code>
+everything = fetch_all()
+print(len(everything), "complaints")`}</Code>
+
+            <p>
+              Two things make this cheap to run. Ask only for the columns you need with{' '}
+              <span className="font-mono text-sm">fields=</span> - a full row is roughly 600 bytes, four columns are
+              about 80. And <span className="font-mono text-sm">count</span> defaults to{' '}
+              <span className="font-mono text-sm">none</span> as soon as a cursor is in play, so no page wastes time
+              re-counting the same result set.
+            </p>
+            <p>
+              Resuming is free: a cursor is just a position, so store the last one you saw and carry on later. Because{' '}
+              <span className="font-mono text-sm">order=desc</span> walks from the newest id downwards, rows added while
+              you are paging appear above your cursor and never disturb the walk.
+            </p>
+
+            <p className="pt-2 font-medium text-slate-900">Just a slice, as a spreadsheet</p>
+            <p>
+              For a single month or sub-station, CSV straight from the URL is simpler than any of the above. One request
+              is capped at 1000 rows, so this suits a slice rather than the whole dataset:
+            </p>
+            <Code>{`curl -o august.csv "` + base + `/api/v1/complaints?month=2026-08&division=EDD-BARABANKI&format=csv&limit=1000"`}</Code>
+            <div className="rounded-lg border-l-4 border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              If what you actually want is every complaint in a spreadsheet and you are not writing code, the report
+              dashboard&apos;s own Excel export is the better tool - it already handles the whole dataset in one file.
+              This API is for programs.
+            </div>
           </Section>
 
           <Section id="errors" title="Errors">
@@ -509,7 +578,9 @@ print(len(august), "complaints")`}</Code>
             <ul className="list-disc space-y-2 pl-5">
               <li>
                 <strong className="font-semibold text-slate-900">Page size</strong> is capped at 1000 rows. Anything
-                larger is silently reduced to 1000 rather than rejected.
+                larger is silently reduced to 1000 rather than rejected. Past a few thousand rows, page with{' '}
+                <a className="text-sky-700 underline" href="#bulk">a cursor</a> rather than{' '}
+                <span className="font-mono text-sm">page</span>.
               </li>
               <li>
                 <strong className="font-semibold text-slate-900">Caching.</strong> List responses carry{' '}

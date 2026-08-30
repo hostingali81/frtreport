@@ -110,7 +110,8 @@ const KNOWN_PARAMS = new Set<string>([
   'dateField', 'date_field', 'updatedSince', 'updated_since',
   'page', 'limit', 'perPage', 'per_page', 'offset',
   'sort', 'sortBy', 'sort_by', 'order', 'sortDir', 'sort_dir',
-  'fields', 'format', 'tz', 'timezone', 'count', 'pretty', 'apiKey', 'api_key'
+  'fields', 'format', 'tz', 'timezone', 'count', 'pretty', 'apiKey', 'api_key',
+  'cursor'
 ]);
 
 const MONTH_NAMES = [
@@ -122,6 +123,38 @@ export const MAX_LIMIT = 1000;
 export const DEFAULT_LIMIT = 100;
 /** Guard against a caller pasting thousands of values into one filter. */
 const MAX_FILTER_VALUES = 50;
+
+/** Offset paging re-scans every skipped row, so it degrades with depth: past
+ *  ~120k rows one page took ~15s against this dataset, versus a flat ~340ms for
+ *  the keyset path below. Anything bulk should be paging by cursor. */
+const DEEP_OFFSET_WARNING_AT = 25000;
+
+/** Cursor paging keys off `id` alone. It is the only column that is both NOT
+ *  NULL and unique, which is what makes a cursor provably complete - a cursor
+ *  over a nullable column silently drops the rows that sort into the NULL
+ *  region. Ordering by the primary key is also index-only, hence the flat cost. */
+const CURSOR_SORT = 'id';
+
+function encodeCursor(order: 'asc' | 'desc', lastId: number) {
+  return Buffer.from('v1:' + CURSOR_SORT + ':' + order + ':' + lastId, 'utf8').toString('base64url');
+}
+
+function decodeCursor(raw: string): { sort: string; order: string; id: number } | null {
+  let decoded: string;
+  try {
+    decoded = Buffer.from(raw, 'base64url').toString('utf8');
+  } catch {
+    return null;
+  }
+
+  const parts = decoded.split(':');
+  if (parts.length !== 4 || parts[0] !== 'v1') return null;
+
+  const id = Number.parseInt(parts[3], 10);
+  if (!Number.isFinite(id)) return null;
+
+  return { sort: parts[1], order: parts[2], id };
+}
 
 // ---------------------------------------------------------------------------
 // Dates. Every date in this API is Indian Standard Time. IST has no DST, so a
@@ -296,6 +329,7 @@ export type ParsedQuery = {
   offset: number;
   page: number;
   usedOffset: boolean;
+  cursor: number | null;
   sort: string;
   ascending: boolean;
   fields: string[];
@@ -479,11 +513,6 @@ export function parseQuery(searchParams: URLSearchParams): ParsedQuery {
     throw new QueryError('page', 'page starts at 1.');
   }
 
-  // An explicit offset wins; page is then derived so meta stays self-consistent.
-  const usedOffset = rawOffset !== null;
-  const page = usedOffset ? Math.floor(rawOffset / limit) + 1 : (rawPage ?? 1);
-  const offset = usedOffset ? rawOffset : (page - 1) * limit;
-
   // --- sorting --------------------------------------------------------------
   const sort = (firstOf(searchParams, ['sort', 'sortBy', 'sort_by']) || 'complaint_date').trim();
   if (!SORTABLE.has(sort)) {
@@ -494,6 +523,31 @@ export function parseQuery(searchParams: URLSearchParams): ParsedQuery {
   if (!['asc', 'desc'].includes(rawOrder)) {
     throw new QueryError('order', '"' + rawOrder + '" is not a sort direction.', 'Use asc or desc.');
   }
+
+  // --- cursor ---------------------------------------------------------------
+  const rawCursor = firstOf(searchParams, ['cursor']);
+  let cursor: number | null = null;
+  if (rawCursor) {
+    const decoded = decodeCursor(rawCursor);
+    if (!decoded) {
+      throw new QueryError('cursor', 'That cursor could not be read.', 'Pass the meta.nextCursor value from the previous response unchanged.');
+    }
+    if (decoded.sort !== sort || decoded.order !== rawOrder) {
+      throw new QueryError(
+        'cursor',
+        'That cursor was issued for sort=' + decoded.sort + '&order=' + decoded.order + ', but this request asks for sort=' + sort + '&order=' + rawOrder + '.',
+        'Keep sort, order and every filter identical for the whole cursor walk.'
+      );
+    }
+    cursor = decoded.id;
+    applied.cursor = rawCursor;
+  }
+
+  // A cursor supersedes offset paging entirely: the previous row is the
+  // starting point, so there is nothing to skip.
+  const usedOffset = cursor === null && rawOffset !== null;
+  const page = cursor !== null ? 1 : (usedOffset ? Math.floor((rawOffset as number) / limit) + 1 : (rawPage ?? 1));
+  const offset = cursor !== null ? 0 : (usedOffset ? (rawOffset as number) : (page - 1) * limit);
 
   // --- projection and output ------------------------------------------------
   let fields: string[] = [...COMPLAINT_FIELDS];
@@ -522,7 +576,10 @@ export function parseQuery(searchParams: URLSearchParams): ParsedQuery {
     throw new QueryError('tz', '"' + rawTz + '" is not a supported timezone.', 'Use ist (default) or utc.');
   }
 
-  const rawCount = (firstOf(searchParams, ['count']) || 'exact').toLowerCase();
+  // Counting is on by default, except while walking a cursor - repeating an
+  // exact count on every page of a bulk pull is pure waste.
+  const rawCountParam = firstOf(searchParams, ['count']);
+  const rawCount = (rawCountParam || (cursor === null ? 'exact' : 'none')).toLowerCase();
   if (!['exact', 'none'].includes(rawCount)) {
     throw new QueryError('count', '"' + rawCount + '" is not a supported count mode.', 'Use exact (default) or none.');
   }
@@ -537,6 +594,7 @@ export function parseQuery(searchParams: URLSearchParams): ParsedQuery {
     offset,
     page,
     usedOffset,
+    cursor,
     sort,
     ascending: rawOrder === 'asc',
     fields,
@@ -562,7 +620,34 @@ export function applyQuery(builder: any, query: ParsedQuery) {
   if (query.to) q = q.lte(query.dateField, query.to);
   if (query.updatedSince) q = q.gte('updated_at', query.updatedSince);
 
+  if (query.cursor !== null) {
+    q = query.ascending ? q.gt(CURSOR_SORT, query.cursor) : q.lt(CURSOR_SORT, query.cursor);
+  }
+
   return q;
+}
+
+/** Whether this request can hand back a cursor for the next page. */
+export function supportsCursor(query: ParsedQuery) {
+  return query.sort === CURSOR_SORT;
+}
+
+/** The cursor a caller should send to continue past the rows just returned. */
+export function cursorFor(query: ParsedQuery, rows: Array<Record<string, any>>) {
+  if (!supportsCursor(query) || !rows.length) return null;
+  const lastId = rows[rows.length - 1].id;
+  if (typeof lastId !== 'number') return null;
+  return encodeCursor(query.ascending ? 'asc' : 'desc', lastId);
+}
+
+/** Warns a caller who is paging deep by offset that a far cheaper path exists.
+ *  Null in every other case, so the field simply is not there. */
+export function deepOffsetNotice(query: ParsedQuery) {
+  if (supportsCursor(query) || query.offset < DEEP_OFFSET_WARNING_AT) return null;
+  return (
+    'Offset paging re-scans every skipped row, so it slows down as offset grows. ' +
+    'For bulk downloads add sort=id and follow meta.nextCursor instead - it stays fast at any depth. See /api-docs#bulk.'
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -620,18 +705,30 @@ export function csvResponse(csv: string, filename: string) {
   });
 }
 
-/** Builds the meta.nextPage link. A caller that paged by offset keeps paging by
- *  offset: an unaligned offset does not map onto a page boundary, so switching
- *  to ?page= would hand back rows the caller has already seen. */
-export function nextPageUrl(request: Request, query: ParsedQuery, hasMore: boolean) {
+/** Builds the meta.nextPage link, in whichever paging mode the caller is using.
+ *  A caller that paged by offset keeps paging by offset: an unaligned offset
+ *  does not map onto a page boundary, so switching to ?page= would hand back
+ *  rows they have already seen. */
+export function nextPageUrl(
+  request: Request,
+  query: ParsedQuery,
+  hasMore: boolean,
+  nextCursor: string | null
+) {
   if (!hasMore) return null;
 
   const url = new URL(request.url);
-  if (query.usedOffset) {
+
+  if (nextCursor) {
+    url.searchParams.delete('offset');
+    url.searchParams.delete('page');
+    url.searchParams.set('cursor', nextCursor);
+  } else if (query.usedOffset) {
     url.searchParams.set('offset', String(query.offset + query.limit));
   } else {
     url.searchParams.delete('offset');
     url.searchParams.set('page', String(query.page + 1));
   }
+
   return url.toString();
 }
