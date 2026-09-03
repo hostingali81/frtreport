@@ -26,7 +26,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // Default range: today only (or pick a preset / custom dates below).
   DateTime _from = _istNow();
   DateTime _to = _istNow();
-  String _preset = 'today'; // today | month | lastMonth | custom
+  String _preset = 'today'; // today | yesterday | month | lastMonth | custom
   int _recentFilter = 0; // 0=All, 1=Outgoing, 2=Incoming
 
   // Filter dropdown values for the current range (from the API response) and the
@@ -98,6 +98,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
       if (p == 'today') {
         _from = today;
         _to = today;
+      } else if (p == 'yesterday') {
+        // Whole of the previous IST day — the shift most operators review first
+        // thing in the morning. DateTime normalises the month/year rollover.
+        final yesterday = today.subtract(const Duration(days: 1));
+        _from = yesterday;
+        _to = yesterday;
       } else if (p == 'month') {
         // 1st of the current month → today.
         _from = DateTime(today.year, today.month, 1);
@@ -135,6 +141,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               runSpacing: 8,
               children: [
                 _presetChip('Today', 'today'),
+                _presetChip('Yesterday', 'yesterday'),
                 _presetChip('This Month', 'month'),
                 _presetChip('Last Month', 'lastMonth'),
                 _presetChip('Custom', 'custom'),
