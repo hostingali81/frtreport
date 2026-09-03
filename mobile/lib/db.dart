@@ -222,4 +222,56 @@ class Db {
     });
     return Map<String, dynamic>.from(r as Map);
   }
+
+  // The already-fetched consumer contact, or null if it was never fetched.
+  //
+  // Mirrors getCachedContact() on the server, including its one subtlety: the
+  // report scraper pre-creates the complaints row with consumer data but never
+  // writes crew, so a row WITHOUT crew_mobile is a miss, not a hit. Only the
+  // on-tap FRT detail fetch fills crew in. Getting this wrong is what left the
+  // crew fields empty once before.
+  //
+  // A miss still needs /api/calling/contact — that route logs in to FRT, which
+  // needs credentials the app must never hold.
+  static Future<Map<String, dynamic>?> cachedContact(int dataid) async {
+    final c = await _sb
+        .from('complaints')
+        .select('dataid, consumer_name, consumer_mobile, consumer_address, '
+            'landmark, consumer_remarks, sub_station, assigned_crew, crew_mobile')
+        .eq('dataid', dataid)
+        .maybeSingle();
+    if (c == null || c['crew_mobile'] == null) return null;
+
+    return {
+      'dataid': c['dataid'],
+      'consumer_name': c['consumer_name'],
+      'mobile': c['consumer_mobile'],
+      'address': c['consumer_address'],
+      'landmark': c['landmark'],
+      'remarks': c['consumer_remarks'],
+      'substation': c['sub_station'],
+      'assigned_crew': c['assigned_crew'],
+      'crew_mobile': c['crew_mobile'],
+    };
+  }
+
+  // Record a post-call outcome. The RPC takes the operator from `profiles`, so
+  // the identity cannot be forged from the client and `call_logs` needs no
+  // INSERT grant. It also drops the FK link for a complaint the scraper has not
+  // stored yet (rather than losing the log) and releases this operator's claim,
+  // exactly as the route did.
+  static Future<Map<String, dynamic>> logCall(Map<String, dynamic> payload) async {
+    final duration = payload['duration_seconds'];
+    final r = await _sb.rpc('log_call', params: {
+      'p_dataid': payload['dataid'],
+      'p_call_status': payload['call_status'],
+      'p_complaint_number': payload['complaint_number'],
+      'p_problem_category': payload['problem_category'],
+      'p_notes': payload['notes'],
+      'p_duration_seconds': duration is int ? duration : int.tryParse('$duration'),
+      'p_connected': payload['connected'],
+      'p_is_incoming': payload['is_incoming'] ?? false,
+    });
+    return Map<String, dynamic>.from(r as Map);
+  }
 }

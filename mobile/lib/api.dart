@@ -143,8 +143,20 @@ class Api {
 
   static Future<Map<String, dynamic>> sync() => _get('/api/calling/sync');
 
-  static Future<Contact> contact(int dataid) async =>
-      Contact.fromJson((await _get('/api/calling/contact?dataid=$dataid'))['contact']);
+  // A contact that has already been fetched is a plain Supabase row, so read it
+  // directly; only a genuine cache miss needs the route, whose reason to exist
+  // is logging in to FRT.
+  static Future<Contact> contact(int dataid) async {
+    if (await Db.ready()) {
+      try {
+        final cached = await Db.cachedContact(dataid);
+        if (cached != null) return Contact.fromJson(cached);
+      } catch (_) {
+        // Fall through to the route rather than failing the sheet.
+      }
+    }
+    return Contact.fromJson((await _get('/api/calling/contact?dataid=$dataid'))['contact']);
+  }
 
   // One complaint by dataid — a single fast lookup for the incoming-call flow
   // (vs pulling the whole grid). Works for resolved complaints too.
@@ -179,7 +191,25 @@ class Api {
   }
 
   // Same POST with a ready payload — used by the offline outbox on retry.
+  //
+  // This one does NOT use _preferDirect. A blanket catch is fine for reads and
+  // for the idempotent claim, but a log insert must never run twice: if the
+  // direct write commits and only the response is lost, retrying through the
+  // route would file the operator's call a second time. So the fallback happens
+  // only when the server answered — a PostgrestException, or the RPC's own
+  // {success:false} — which means nothing was written. A socket error or
+  // timeout is ambiguous and propagates instead, leaving it to the offline
+  // outbox exactly as before.
   static Future<void> logRaw(Map<String, dynamic> payload) async {
+    if (await Db.ready()) {
+      try {
+        final r = await Db.logCall(payload);
+        if (r['success'] == true) return;
+      } on PostgrestException catch (_) {
+        // Refused by the server, so nothing landed — the route can retry and
+        // will also refresh an expired token on the way.
+      }
+    }
     await _post('/api/calling/log', payload);
   }
 
