@@ -1,23 +1,14 @@
-name: Warm Calling Stats (every 15 min)
+name: Warm Calling Stats (manual backstop)
 
-# Precomputes the Calling Report's preset ranges into the `reports` table so the
-# dashboard serves them from one row read instead of running get_calling_stats
-# live.
+# The scheduled warming now runs on pg_cron INSIDE the database -- see migration
+# 20260903180000. GitHub's scheduler cannot be relied on for short intervals on
+# this repo: frt-refresh.yml asks for every 5 minutes and its last 20 scheduled
+# runs averaged a 239-minute gap, and this workflow's own */15 schedule never
+# fired once. pg_cron has no scheduler to be throttled and no runner to boot.
 #
-# This used to ride along on the Vercel /api/cron route, driven by an external
-# pinger. The pinger was removed to cut Vercel usage and the precompute went
-# quiet with it — the rows were 12 days stale and every dashboard open paid the
-# live RPC. Running it here costs nothing: the repo is public, so Actions minutes
-# are free, and no Vercel function is invoked.
-#
-# 15 minutes is chosen against two limits: CALLING_STATS_MAX_AGE_MS (30 min, past
-# which a row is rejected as stale) and the free tier's disk-IO budget — the old
-# 2-minute cadence recomputing every preset is what throttled the database on
-# 2026-07-11. Presets that are still fresh are skipped inside warmCallingStats,
-# so a steady-state run is cheap.
+# Kept as a manual escape hatch: run it from the Actions tab if pg_cron is ever
+# disabled, or to force a refresh after changing the preset ranges.
 on:
-  schedule:
-    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 concurrency:
