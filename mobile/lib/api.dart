@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
+import 'db.dart';
 import 'models.dart';
 
 class ApiException implements Exception {
@@ -23,9 +24,31 @@ class ApiException implements Exception {
 
 // Thin client over the Next.js /api endpoints. Every call carries the Supabase
 // access token as a Bearer header (the backend's getSession() accepts it).
+//
+// The read-only calls below now go straight to Supabase through [Db] and keep
+// their /api route only as a fallback — see db.dart for why. What still has to
+// go through Vercel is anything needing a secret or a live FRT scrape: contact,
+// sync, the call log POST, reports, auth and admin.
 class Api {
   static SupabaseClient get _sb => Supabase.instance.client;
   static DateTime? _lastRefreshAttempt;
+
+  // Direct Supabase first, the HTTP route as the safety net: a missing policy,
+  // a deactivated profile or a database that has not had migration
+  // 20260903120000 applied all land back on the route the app always used.
+  static Future<T> _preferDirect<T>(
+    Future<T> Function() direct,
+    Future<T> Function() viaApi,
+  ) async {
+    if (await Db.ready()) {
+      try {
+        return await direct();
+      } catch (_) {
+        // Fall through to the API rather than failing the screen.
+      }
+    }
+    return viaApi();
+  }
 
   static Future<Map<String, String>> _headers() async {
     var session = _sb.auth.currentSession;
@@ -98,18 +121,25 @@ class Api {
   static Future<SessionUser> me() async => SessionUser.fromJson((await _get('/api/auth/me'))['user']);
 
   // Raw JSON rows — the caller caches these for offline use.
-  static Future<List<Map<String, dynamic>>> complaintsRaw({bool includeResolved = false}) async {
-    final j = await _get('/api/calling/complaints${includeResolved ? '?include_resolved=1' : ''}');
-    return (j['complaints'] as List).cast<Map<String, dynamic>>();
-  }
+  static Future<List<Map<String, dynamic>>> complaintsRaw({bool includeResolved = false}) =>
+      _preferDirect(
+        () => Db.liveComplaints(includeResolved: includeResolved),
+        () async {
+          final j = await _get('/api/calling/complaints${includeResolved ? '?include_resolved=1' : ''}');
+          return (j['complaints'] as List).cast<Map<String, dynamic>>();
+        },
+      );
 
   static Future<List<Complaint>> complaints() async =>
       (await complaintsRaw()).map(Complaint.fromJson).toList();
 
-  static Future<List<Map<String, dynamic>>> callerIdCache() async {
-    final j = await _get('/api/calling/contacts-cache');
-    return (j['contacts'] as List).cast<Map<String, dynamic>>();
-  }
+  static Future<List<Map<String, dynamic>>> callerIdCache() => _preferDirect(
+        Db.callerIdCache,
+        () async {
+          final j = await _get('/api/calling/contacts-cache');
+          return (j['contacts'] as List).cast<Map<String, dynamic>>();
+        },
+      );
 
   static Future<Map<String, dynamic>> sync() => _get('/api/calling/sync');
 
@@ -118,8 +148,13 @@ class Api {
 
   // One complaint by dataid — a single fast lookup for the incoming-call flow
   // (vs pulling the whole grid). Works for resolved complaints too.
-  static Future<Complaint> complaintById(int dataid) async =>
-      Complaint.fromJson((await _get('/api/calling/complaint?dataid=$dataid'))['complaint']);
+  static Future<Complaint> complaintById(int dataid) async => Complaint.fromJson(
+        await _preferDirect(
+          () => Db.complaintById(dataid),
+          () async => (await _get('/api/calling/complaint?dataid=$dataid'))['complaint']
+              as Map<String, dynamic>,
+        ),
+      );
 
   static Future<void> log({
     required int dataid,
@@ -149,21 +184,32 @@ class Api {
   }
 
   // Every past call attempt on this complaint (all operators), newest first.
-  static Future<List<Map<String, dynamic>>> callHistory(int dataid) async =>
-      ((await _get('/api/calling/log?dataid=$dataid'))['logs'] as List).cast<Map<String, dynamic>>();
+  static Future<List<Map<String, dynamic>>> callHistory(int dataid) => _preferDirect(
+        () => Db.callHistory(dataid),
+        () async =>
+            ((await _get('/api/calling/log?dataid=$dataid'))['logs'] as List).cast<Map<String, dynamic>>(),
+      );
 
   // All complaints (active + closed) linked to a phone number.
   // Used to enrich the caller-ID overlay with complaint history.
-  static Future<Map<String, dynamic>> callerLookup(String mobile) =>
-      _get('/api/calling/caller-lookup?mobile=$mobile');
+  static Future<Map<String, dynamic>> callerLookup(String mobile) => _preferDirect(
+        () => Db.callerLookup(mobile),
+        () => _get('/api/calling/caller-lookup?mobile=$mobile'),
+      );
 
   // Soft-claim before calling so two operators don't ring the same consumer.
   // Returns {'claimed': bool, 'claimed_by_name': ...} — advisory only.
-  static Future<Map<String, dynamic>> claim(int dataid) => _post('/api/calling/claim', {'dataid': dataid});
+  static Future<Map<String, dynamic>> claim(int dataid) => _preferDirect(
+        () => Db.claim(dataid),
+        () => _post('/api/calling/claim', {'dataid': dataid}),
+      );
 
   static Future<void> release(int dataid) async {
     try {
-      await _post('/api/calling/claim', {'dataid': dataid, 'release': true});
+      await _preferDirect(
+        () => Db.claim(dataid, release: true),
+        () => _post('/api/calling/claim', {'dataid': dataid, 'release': true}),
+      );
     } catch (_) {
       // Best effort — a stale claim expires on its own in ~3 minutes.
     }

@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../api.dart';
 import '../call_channel.dart';
+import '../db.dart';
 import '../models.dart';
 import '../storage.dart';
 import '../theme.dart';
@@ -143,7 +144,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
     );
-    if (ok == true) await Supabase.instance.client.auth.signOut();
+    if (ok == true) {
+      // Drop the cached "direct reads work for this user" probe so the next
+      // person to sign in is checked against their own profile.
+      Db.reset();
+      await Supabase.instance.client.auth.signOut();
+    }
   }
 
   @override

@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../alerts.dart';
 import '../api.dart';
+import '../db.dart';
 import '../call_channel.dart';
 import '../models.dart';
 import '../sla.dart';
@@ -21,7 +23,7 @@ class ComplaintsScreen extends StatefulWidget {
   State<ComplaintsScreen> createState() => _ComplaintsScreenState();
 }
 
-class _ComplaintsScreenState extends State<ComplaintsScreen> {
+class _ComplaintsScreenState extends State<ComplaintsScreen> with WidgetsBindingObserver {
   List<Complaint> _all = [];
   List<Complaint> _filtered = [];
   bool _loading = true;
@@ -38,31 +40,130 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
 
   Timer? _tick;
   Timer? _poll;
+  Timer? _realtimeDebounce;
+  RealtimeChannel? _channel;
+  bool _foreground = true;
   bool _resyncing = false;
   DateTime? _lastCallerIdFetch;
+
+  // The list used to be polled every 30s so a colleague's "on call" claim (it
+  // only lives ~3 min) and new complaints appeared quickly. That poll was the
+  // single largest source of Vercel function invocations, and it kept running
+  // with the app in the background. Supabase Realtime delivers the same events
+  // in about a second over one socket, at no per-event cost, so the timer is
+  // now only a backstop for a dropped subscription.
+  static const _backstopPoll = Duration(minutes: 5);
+  // Without Realtime — direct reads not yet enabled on this database, or the
+  // subscription failed — the old cadence is still the only way to see a claim
+  // inside its 3-minute life, so keep it rather than degrade the feature.
+  static const _fallbackPoll = Duration(seconds: 30);
+  // Collapse a burst of row changes — a grid sync rewrites ~40 rows at once and
+  // should cause one refetch, not forty.
+  static const _realtimeSettle = Duration(milliseconds: 800);
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
     _onboard();
-    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      // The tick only feeds the SLA countdowns — skip the whole-screen rebuild
-      // while there's nothing to count down.
-      if (mounted && _all.isNotEmpty) setState(() => _now = DateTime.now());
-    });
-    // Poll often so a colleague's "on call" claim (and new complaints) show up
-    // within seconds — the claim only lives ~3 min, so a 3-min poll used to miss
-    // it entirely. The heavy caller-ID cache fetch inside _load is throttled
-    // separately (see _fetchCallerIdCache), so this stays cheap.
-    _poll = Timer.periodic(const Duration(seconds: 30), (_) => _load());
+    _startTimers();
+    _subscribe();
   }
 
   @override
   void dispose() {
-    _tick?.cancel();
-    _poll?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _stopTimers();
+    _unsubscribe();
     super.dispose();
+  }
+
+  // Nothing on this screen is worth doing while it is off-screen: the SLA
+  // countdown has no one to count down to, and refreshing a list the operator
+  // cannot see is pure cost.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _foreground = true;
+      _startTimers();
+      _subscribe();
+      _load();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _foreground = false;
+      _stopTimers();
+      _unsubscribe();
+    }
+  }
+
+  void _startTimers() {
+    _tick ??= Timer.periodic(const Duration(seconds: 1), (_) {
+      // The tick only feeds the SLA countdowns — skip the whole-screen rebuild
+      // while there's nothing to count down.
+      if (mounted && _all.isNotEmpty) setState(() => _now = DateTime.now());
+    });
+    _restartPoll();
+  }
+
+  // Realtime carrying the updates turns this timer into a backstop; without it
+  // the timer *is* the update path, so it runs at the old cadence.
+  void _restartPoll() {
+    _poll?.cancel();
+    _poll = null;
+    // Tearing the channel down on the way to the background fires the status
+    // callback, which lands here — it must not resurrect the timer.
+    if (!_foreground) return;
+    _poll = Timer.periodic(_channel == null ? _fallbackPoll : _backstopPoll, (_) {
+      _load();
+      // Self-heal: the first attempt fails while offline, and a socket can drop
+      // later. Both Db.ready() and _subscribe() no-op when there is nothing to
+      // do, so this is free once the channel is up.
+      _subscribe();
+    });
+  }
+
+  void _stopTimers() {
+    _tick?.cancel();
+    _tick = null;
+    _poll?.cancel();
+    _poll = null;
+    _realtimeDebounce?.cancel();
+    _realtimeDebounce = null;
+  }
+
+  // One socket for the whole live queue. The payload is only a signal — the row
+  // it carries is queue state without the joined complaint data, so a change
+  // triggers a refetch of the view rather than a local patch.
+  Future<void> _subscribe() async {
+    if (_channel != null || !await Db.ready()) return;
+    if (!mounted) return;
+    _channel = Supabase.instance.client
+        .channel('public:live_complaints')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'live_complaints',
+          callback: (_) {
+            _realtimeDebounce?.cancel();
+            _realtimeDebounce = Timer(_realtimeSettle, () {
+              if (mounted) _load();
+            });
+          },
+        )
+        .subscribe((status, _) {
+          if (!mounted) return;
+          // A channel error means the table isn't published for Realtime (or the
+          // socket was refused) — drop back to polling so claims stay visible.
+          if (status != RealtimeSubscribeStatus.subscribed) _unsubscribe();
+          _restartPoll();
+        });
+    _restartPoll();
+  }
+
+  void _unsubscribe() {
+    final ch = _channel;
+    _channel = null;
+    if (ch != null) Supabase.instance.client.removeChannel(ch);
   }
 
   // First launch: ask for the calling permissions up front and explain the
