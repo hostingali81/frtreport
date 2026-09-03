@@ -1,0 +1,54 @@
+name: Warm Calling Stats (every 15 min)
+
+# Precomputes the Calling Report's preset ranges into the `reports` table so the
+# dashboard serves them from one row read instead of running get_calling_stats
+# live.
+#
+# This used to ride along on the Vercel /api/cron route, driven by an external
+# pinger. The pinger was removed to cut Vercel usage and the precompute went
+# quiet with it — the rows were 12 days stale and every dashboard open paid the
+# live RPC. Running it here costs nothing: the repo is public, so Actions minutes
+# are free, and no Vercel function is invoked.
+#
+# 15 minutes is chosen against two limits: CALLING_STATS_MAX_AGE_MS (30 min, past
+# which a row is rejected as stale) and the free tier's disk-IO budget — the old
+# 2-minute cadence recomputing every preset is what throttled the database on
+# 2026-07-11. Presets that are still fresh are skipped inside warmCallingStats,
+# so a steady-state run is cheap.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: warm-calling-stats
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # supabase-js >= 2.110 needs Node 22+ (native WebSocket); on 20 it
+          # throws "native WebSocket not found" at createClient().
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+          PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: 'true'
+        run: npm ci
+
+      - name: Warm preset stats
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+        run: npx tsx scripts/warm-calling-stats.ts
