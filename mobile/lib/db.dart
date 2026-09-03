@@ -255,6 +255,24 @@ class Db {
     };
   }
 
+  // How long ago the live grid was last pulled from FRT, or null if unknown.
+  //
+  // Filtered to the feed on purpose: live_complaints holds ~73k historical rows
+  // and has no index on last_synced_at, so an unfiltered ORDER BY would scan all
+  // of them. still_in_feed is indexed and those ~50 rows are exactly the ones a
+  // sync rewrites, so the answer is the same for a fraction of the work.
+  static Future<Duration?> gridAge() async {
+    final r = await _sb
+        .from('live_complaints')
+        .select('last_synced_at')
+        .eq('still_in_feed', true)
+        .order('last_synced_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+    final t = DateTime.tryParse('${r?['last_synced_at']}');
+    return t == null ? null : DateTime.now().toUtc().difference(t.toUtc());
+  }
+
   // Record a post-call outcome. The RPC takes the operator from `profiles`, so
   // the identity cannot be forged from the client and `call_logs` needs no
   // INSERT grant. It also drops the FK link for a complaint the scraper has not

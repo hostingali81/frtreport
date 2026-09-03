@@ -288,11 +288,29 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with WidgetsBinding
     }
   }
 
+  // How fresh the grid has to be for Refresh to skip the FRT pull. The refresh
+  // loop in frt-refresh.yml runs a cycle every ~5 minutes, so anything inside
+  // this window is already the current grid.
+  static const _gridFreshFor = Duration(minutes: 6);
+
   Future<void> _fetchLatest() async {
     if (_syncing) return;
     setState(() => _syncing = true);
     try {
-      await Api.sync();
+      // /api/calling/sync is a Vercel function that logs into FRT and pulls the
+      // grid. When the loop has just done that, calling it again spends an
+      // invocation to fetch rows Supabase already has — and this button was the
+      // app's single biggest remaining source of them, because a grid nobody was
+      // scheduling left operators pressing it constantly. So pull from FRT only
+      // when the grid has actually gone stale (loop down, or a complaint newer
+      // than the last cycle); otherwise just re-read, which costs nothing.
+      Duration? age;
+      try {
+        if (await Db.ready()) age = await Db.gridAge();
+      } catch (_) {
+        age = null; // Unknown — fall back to the real pull.
+      }
+      if (age == null || age > _gridFreshFor) await Api.sync();
       await _load();
       Haptics.success();
     } catch (e) {

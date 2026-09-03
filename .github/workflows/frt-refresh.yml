@@ -1,24 +1,33 @@
-name: FRT Refresh (backstop, every 5 min)
+name: FRT Refresh (self-looping, ~5 min cadence)
 
-# Backstop + fallback for the fast path. The primary refresh is now an external
-# pinger (cron-job.org) hitting the Vercel /api/cron route every ~2 min, which
-# replays the warm FRT session (report data + calling grid) with no browser.
+# Keeps the calling grid and today's report data fresh WITHOUT touching Vercel.
 #
-# This job exists for the two things Vercel cannot do reliably in its 60s limit:
-#   1. Browser (re)capture when the shared FRT session expires — refreshFrtSessions
-#      refreshes BOTH the report and calling sessions from ONE login (no ping-pong).
-#   2. A data fallback if the external pinger is ever down.
-# Runs today-scrape (report) then calling-sync (grid) in one runner; either one
-# recapturing keeps both sessions warm.
+# Why a loop instead of `cron: */5`: GitHub does not honour short schedules on
+# this repo. Measured 2026-09-03 over the last 20 scheduled runs of the previous
+# `*/5` version: gaps averaged 239 minutes (min 108, max 468) -- about 6 runs a
+# day instead of 288. Since the cron-job.org pinger was removed, that left
+# nothing reliably driving the refresh at all; the grid only looked fresh
+# because operators were pressing Refresh in the app, which costs a Vercel
+# invocation every time.
+#
+# So the schedule is only used to START a long job, and the cadence comes from a
+# loop inside it. Hourly-granularity schedules are honoured far more reliably
+# than minute-level ones, the job runs ~5.5h, and cancel-in-progress means a new
+# start simply replaces the running one -- so even a two-hour scheduler delay
+# leaves no gap in coverage.
+#
+# Cost: one runner held for ~5.5h at a time. The repo is public, so Actions
+# minutes are free, and this replaces per-cycle Vercel invocations rather than
+# adding any.
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '7 */4 * * *'
   workflow_dispatch:
     inputs:
-      max_retries:
-        description: 'Max session open attempts (default: 3)'
+      minutes:
+        description: 'How long to loop for (default 330)'
         required: false
-        default: '3'
+        default: '330'
 
 concurrency:
   group: frt-refresh
@@ -27,7 +36,9 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # GitHub's hard ceiling for a job is 360 minutes; leave room to finish the
+    # cycle in flight and shut down cleanly.
+    timeout-minutes: 350
 
     steps:
       - name: Checkout Code
@@ -36,6 +47,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
+          # supabase-js >= 2.110 needs Node 22+ (native WebSocket); on 20 it
+          # throws "native WebSocket not found" at createClient().
           node-version: '22'
           cache: 'npm'
 
@@ -45,22 +58,26 @@ jobs:
           # runner's preinstalled Google Chrome instead of downloading Chromium.
           PUPPETEER_SKIP_DOWNLOAD: 'true'
           PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: 'true'
+        # Installed once for the whole loop instead of once per five minutes --
+        # most of the old workflow's runtime was npm ci.
         run: npm ci
 
-      - name: Today Scrape (report data + keeps both sessions warm)
+      - name: Refresh loop
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
           FRT_USERNAME: ${{ secrets.FRT_USERNAME }}
           FRT_PASSWORD: ${{ secrets.FRT_PASSWORD }}
           FRT_LOGIN_TYPE: ${{ secrets.FRT_LOGIN_TYPE || vars.FRT_LOGIN_TYPE || '' }}
-          TODAY_SCRAPE_MAX_RETRIES: ${{ github.event.inputs.max_retries || '3' }}
+          # Today only each cycle, so a pass stays fast. saveToNewDb still writes
+          # any status change on today's complaints; older data is the Daily Full
+          # Scrape's job (full-scrape.yml).
+          TODAY_SCRAPE_LOOKBACK_DAYS: '0'
+          TODAY_SCRAPE_MAX_RETRIES: '2'
           TODAY_SCRAPE_RETRY_DELAY_MS: '10000'
           TODAY_SCRAPE_SESSION_RETRY_DELAY_MS: '30000'
-          # Today only each run (fast) — this backstop just keeps today fresh and
-          # both sessions warm. saveToNewDb still writes any status change on today's
-          # complaints; older data is handled by the Daily Full Scrape (full-scrape.yml, ~3 AM IST).
-          TODAY_SCRAPE_LOOKBACK_DAYS: '0'
+          CALLING_SYNC_MAX_RETRIES: '2'
+          CALLING_SYNC_RETRY_DELAY_MS: '15000'
           FRT_API_CONCURRENCY: '2'
           FRT_API_CHUNK_DAYS: '1'
           SUPABASE_LOOKUP_CONCURRENCY: '4'
@@ -68,19 +85,43 @@ jobs:
           SUPABASE_UPSERT_BATCH_SIZE: '250'
           SCRAPER_PROTOCOL_TIMEOUT_MS: '120000'
           SCRAPER_LOAD_TIMEOUT_MS: '60000'
-        run: npx tsx scripts/today-scrape.ts
+        run: |
+          set -u
+          RUN_MINUTES="${{ github.event.inputs.minutes || '330' }}"
+          CYCLE_SECONDS=300
+          DEADLINE=$(( $(date +%s) + RUN_MINUTES * 60 ))
+          cycle=0
 
-      - name: Calling Sync (live grid fallback)
-        # Run even if the report scrape failed — the grid still needs refreshing.
-        if: ${{ always() }}
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
-          FRT_USERNAME: ${{ secrets.FRT_USERNAME }}
-          FRT_PASSWORD: ${{ secrets.FRT_PASSWORD }}
-          FRT_LOGIN_TYPE: ${{ secrets.FRT_LOGIN_TYPE || vars.FRT_LOGIN_TYPE || '' }}
-          CALLING_SYNC_MAX_RETRIES: ${{ github.event.inputs.max_retries || '3' }}
-          CALLING_SYNC_RETRY_DELAY_MS: '15000'
-          SCRAPER_PROTOCOL_TIMEOUT_MS: '120000'
-          SCRAPER_LOAD_TIMEOUT_MS: '60000'
-        run: npx tsx scripts/calling-sync.ts
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            cycle=$(( cycle + 1 ))
+            started=$(date +%s)
+            echo "::group::cycle $cycle ($(date -u +%H:%M:%SZ))"
+
+            # The calling grid every cycle. This is the screen operators work
+            # from, and keeping it fresh here is exactly what stops them hitting
+            # Refresh -- which is a Vercel function call each time.
+            npx tsx scripts/calling-sync.ts \
+              || echo "::warning::calling-sync failed on cycle $cycle"
+
+            # Report data every third cycle (~15 min). Status changes do not need
+            # the grid's cadence, and this is the heavier of the two.
+            if [ $(( cycle % 3 )) -eq 1 ]; then
+              npx tsx scripts/today-scrape.ts \
+                || echo "::warning::today-scrape failed on cycle $cycle"
+            fi
+
+            echo "::endgroup::"
+
+            # A failure must not turn the loop into a hot spin, and a slow cycle
+            # must not stack up: pace from the START of the cycle.
+            elapsed=$(( $(date +%s) - started ))
+            sleep_for=$(( CYCLE_SECONDS - elapsed ))
+            if [ "$sleep_for" -gt 0 ]; then
+              # Do not sleep past the deadline; exit cleanly instead.
+              remaining=$(( DEADLINE - $(date +%s) ))
+              [ "$sleep_for" -gt "$remaining" ] && break
+              sleep "$sleep_for"
+            fi
+          done
+
+          echo "Completed $cycle cycles."
