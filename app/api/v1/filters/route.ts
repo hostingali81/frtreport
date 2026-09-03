@@ -71,7 +71,11 @@ export async function GET(request: Request) {
       .from('complaints')
       .select('feeder')
       .not('feeder', 'is', null)
-      .order('complaint_date', { ascending: false })
+      // NULLS FIRST to match idx_complaints_date_id (complaint_date DESC, id
+      // DESC) — see contacts-cache for the full story. Here it turns a parallel
+      // seq scan (27k buffers, 6.3k disk reads) into an index scan (8.2k
+      // buffers, none from disk). complaint_date has no nulls, so same rows.
+      .order('complaint_date', { ascending: false, nullsFirst: true })
       .limit(FEEDER_SAMPLE_SIZE);
 
     if (division) feederQuery = feederQuery.eq('division', division);

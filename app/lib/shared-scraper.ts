@@ -219,7 +219,9 @@ export async function getLastComplaintDate(): Promise<string | null> {
     const { data, error } = await supabase
         .from('complaints')
         .select('complaint_date')
-        .order('complaint_date', { ascending: false })
+        // NULLS FIRST so this uses idx_complaints_date_id — with the default
+        // NULLS LAST, fetching this single row costs a 60k-buffer scan.
+        .order('complaint_date', { ascending: false, nullsFirst: true })
         .limit(1)
         .maybeSingle();
 
@@ -239,7 +241,8 @@ export async function loadFromNewDb() {
         const { data, error } = await supabase
             .from('complaints')
             .select('complaint_number, division, sub_division, sub_station, consumer_name, consumer_mobile, consumer_address, complaint_type, complaint_sub_type, status, closed_status, closed_by, complaint_date, closed_date, closing_remarks, area_type, feeder')
-            .order('complaint_date', { ascending: false })
+            // NULLS FIRST to match idx_complaints_date_id (see serverActions).
+            .order('complaint_date', { ascending: false, nullsFirst: true })
             .range(from, from + batchSize - 1);
 
         if (error || !data || data.length === 0) break;

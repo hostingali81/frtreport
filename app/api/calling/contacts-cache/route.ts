@@ -17,11 +17,19 @@ export async function GET() {
     // Fetch the most recent 1000 contacts from the optimized complaints table
     // (active AND recently-closed, so caller ID also works for resolved cases).
     // The mobile app caches these to show Caller ID for known numbers.
+    //
+    // nullsFirst is required for this to use an index. `idx_complaints_date_id`
+    // is (complaint_date DESC, id DESC), and a DESC btree column orders NULLS
+    // FIRST — so PostgREST's default NULLS LAST could not use it and this query
+    // was doing a parallel seq scan of all 188k rows on every call: 27k buffers,
+    // 6.3k read from disk, ~6s, every 5 minutes per handset. Matching the index
+    // makes it an index scan: 761 buffers, no disk reads, ~99ms. complaint_date
+    // has no nulls (0 of 188,690), so the results are identical.
     const { data: contacts, error } = await supabase
       .from('complaints')
       .select('dataid, consumer_mobile, consumer_name, consumer_remarks, complaint_number, complaint_sub_type, sub_station, status, complaint_date')
       .not('consumer_mobile', 'is', null)
-      .order('complaint_date', { ascending: false })
+      .order('complaint_date', { ascending: false, nullsFirst: true })
       .limit(1000);
 
     if (error) throw new Error(error.message);

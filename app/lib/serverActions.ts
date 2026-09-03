@@ -36,7 +36,11 @@ export async function getComplaintsData() {
       const { data, error } = await supabase
         .from('complaints')
         .select('complaint_number, division, sub_division, sub_station, consumer_name, consumer_mobile, consumer_address, complaint_type, complaint_sub_type, status, closed_status, closed_by, complaint_date, closed_date, closing_remarks, area_type, feeder')
-        .order('complaint_date', { ascending: false })
+        // NULLS FIRST matches idx_complaints_date_id (complaint_date DESC, id
+        // DESC); the default NULLS LAST cannot use it, so every .range() batch
+        // re-sorted the whole 188k-row table. complaint_date has no nulls, so
+        // the rows and their order are unchanged.
+        .order('complaint_date', { ascending: false, nullsFirst: true })
         .range(from, to);
       
       if (error) {
