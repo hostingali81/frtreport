@@ -17,6 +17,10 @@ import autoTable from 'jspdf-autotable';
 // Rows per export round trip. A mapped row is ~580 bytes, so 5k slices stay
 // under the serverless response size limit and well inside the time budget.
 const EXPORT_CHUNK_SIZE = 5000;
+// How many date windows an export is split across so their keyset walks can run
+// at the same time. Kept deliberately small: each window is another concurrent
+// RPC against the same (shared, IO-budgeted) database.
+const EXPORT_PARALLEL_WINDOWS = 4;
 
 // Excel has no native chart API in ExcelJS, so report charts are painted on a
 // canvas and embedded as images. Greys + black outlines only, to match the
@@ -529,9 +533,12 @@ export default function Home() {
   // response used to die on the server (memory/60s budget) for wide filters
   // like Nov-to-now, and the client saw the platform's HTML error page as
   // "Unexpected token 'A'".
-  const fetchAllRowsChunked = async (
+  // Walks one slice of the export dataset, keyset-paginated. `window` narrows
+  // the date range so several of these can run at once (see splitExportRange).
+  const fetchRowWindow = async (
     key: string,
-    options: { refresh?: boolean; onProgress?: (fetched: number) => void } = {}
+    window: { fromDate: string | null; toDate: string | null } | null,
+    options: { refresh?: boolean; onChunk?: (fetched: number) => void } = {}
   ): Promise<any[]> => {
     const rows: any[] = [];
     let cursor: { date: string; id: number } | null = null;
@@ -540,6 +547,12 @@ export default function Home() {
       const params = new URLSearchParams(key);
       params.set('pageSize', String(EXPORT_CHUNK_SIZE));
       if (options.refresh) params.set('refresh', '1');
+      if (window) {
+        if (window.fromDate) params.set('fromDate', window.fromDate);
+        else params.delete('fromDate');
+        if (window.toDate) params.set('toDate', window.toDate);
+        else params.delete('toDate');
+      }
       if (cursor) {
         params.set('afterDate', cursor.date);
         params.set('afterId', String(cursor.id));
@@ -561,13 +574,120 @@ export default function Home() {
         throw new Error(result?.error || `Failed to fetch rows for export (HTTP ${response.status})`);
       }
 
-      for (const row of result.data || []) rows.push(row);
-      options.onProgress?.(rows.length);
+      const page = result.data || [];
+      for (const row of page) rows.push(row);
+      options.onChunk?.(page.length);
 
       if (!result.nextCursor) break;
       cursor = result.nextCursor;
     }
 
+    return rows;
+  };
+
+  // Keyset pagination is serial by construction - every slice needs the cursor
+  // the previous slice returned - so a whole-table export is ~25 round trips
+  // one after another. The stats RPC already carries per-IST-day counts for
+  // exactly this filter set, so the range can be cut into equal-sized windows
+  // that walk concurrently.
+  //
+  // The windows tile the timeline with no gap and no overlap: window k ends at
+  // 23:59:59 on its last day and window k+1 starts at 00:00:00 the NEXT
+  // calendar day (not the next day that happens to have rows), and every window
+  // is clamped to the caller's own bounds. Stats that are stale - narrower or
+  // wider than the live filter - can therefore only make the windows uneven,
+  // never drop, duplicate, or smuggle in a row the filter excludes.
+  const splitExportRange = (key: string): Array<{ fromDate: string | null; toDate: string | null }> | null => {
+    const daily = stats?.daily ?? [];
+    if (daily.length < 2) return null;
+
+    const total = daily.reduce((acc, day) => acc + day.n, 0);
+    // One or two round trips either way; not worth fanning out.
+    if (total < EXPORT_CHUNK_SIZE * 2) return null;
+
+    const days = daily.filter(day => day.n > 0).slice().sort((a, b) => a.d.localeCompare(b.d));
+    if (days.length < 2) return null;
+
+    const perWindow = Math.ceil(total / EXPORT_PARALLEL_WINDOWS);
+    const lastDayOfWindow: string[] = [];
+    let running = 0;
+    for (let i = 0; i < days.length; i++) {
+      running += days[i].n;
+      if (running >= perWindow && i < days.length - 1) {
+        lastDayOfWindow.push(days[i].d);
+        running = 0;
+      }
+    }
+    if (lastDayOfWindow.length === 0) return null;
+
+    const dayAfter = (day: string) => {
+      const [y, m, d] = day.split('-').map(Number);
+      const next = new Date(Date.UTC(y, m - 1, d + 1));
+      return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
+    };
+
+    // Same reading the API's toISTTimestamp() gives these params, so window
+    // bounds and filter bounds are comparable.
+    const boundMs = (value: string | null, edge: 'start' | 'end') => {
+      if (!value) return null;
+      if (/[zZ]$/.test(value) || /[+-]\d{2}:\d{2}$/.test(value)) return Date.parse(value);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return Date.parse(`${value}T${edge === 'start' ? '00:00:00' : '23:59:59'}+05:30`);
+      }
+      return Date.parse(`${value}:00+05:30`);
+    };
+
+    const params = new URLSearchParams(key);
+    const originalFrom = params.get('fromDate');
+    const originalTo = params.get('toDate');
+    const fromLimit = boundMs(originalFrom, 'start');
+    const toLimit = boundMs(originalTo, 'end');
+
+    const windows: Array<{ fromDate: string | null; toDate: string | null }> = [];
+    for (let i = 0; i <= lastDayOfWindow.length; i++) {
+      let fromDate = i === 0 ? originalFrom : `${dayAfter(lastDayOfWindow[i - 1])}T00:00:00+05:30`;
+      let toDate = i === lastDayOfWindow.length ? originalTo : `${lastDayOfWindow[i]}T23:59:59+05:30`;
+
+      const startMs = boundMs(fromDate, 'start');
+      const endMs = boundMs(toDate, 'end');
+      if (fromLimit !== null && (startMs === null || startMs < fromLimit)) fromDate = originalFrom;
+      if (toLimit !== null && (endMs === null || endMs > toLimit)) toDate = originalTo;
+
+      const clampedStart = boundMs(fromDate, 'start');
+      const clampedEnd = boundMs(toDate, 'end');
+      if (clampedStart !== null && clampedEnd !== null && clampedStart > clampedEnd) continue;
+      windows.push({ fromDate, toDate });
+    }
+
+    return windows.length > 1 ? windows : null;
+  };
+
+  const fetchAllRowsChunked = async (
+    key: string,
+    options: { refresh?: boolean; onProgress?: (fetched: number) => void } = {}
+  ): Promise<any[]> => {
+    let fetched = 0;
+    const onChunk = (count: number) => {
+      fetched += count;
+      options.onProgress?.(fetched);
+    };
+
+    const windows = splitExportRange(key);
+    if (!windows) {
+      return fetchRowWindow(key, null, { refresh: options.refresh, onChunk });
+    }
+
+    const parts = await Promise.all(
+      windows.map(window => fetchRowWindow(key, window, { refresh: options.refresh, onChunk }))
+    );
+
+    // Windows run oldest-first; each one's own rows come back newest-first, so
+    // walk the windows in reverse to keep the whole export in the same
+    // complaint_date DESC order the single serial walk produced.
+    const rows: any[] = [];
+    for (let i = parts.length - 1; i >= 0; i--) {
+      for (const row of parts[i]) rows.push(row);
+    }
     return rows;
   };
 
@@ -2974,26 +3094,52 @@ export default function Home() {
     // Excel a real date value. ExcelJS serialises a Date with getTime(), i.e.
     // as UTC, so anchor the parsed wall clock to UTC or the sheet drifts by the
     // browser's timezone offset.
-    const toExcelDate = (dateStr: string) => {
-      const d = parsePossibleDate(dateStr);
-      if (!d) return '';
-      return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()));
-    };
+    const utcAnchored = (d: Date | null) =>
+      d ? new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes())) : '';
 
     const DATE_TIME_FMT = 'dd/mm/yyyy hh:mm AM/PM';
     const DATE_FMT = 'dd/mm/yyyy';
-
-    // Day bucket keyed as YYYY-MM-DD so plain string sorting is chronological.
-    const dayKeyOf = (dateStr: string) => {
-      const d = parsePossibleDate(dateStr);
-      if (!d) return null;
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    };
 
     const dayKeyToDate = (key: string) => {
       const [y, m, d] = key.split('-').map(Number);
       return new Date(Date.UTC(y, m - 1, d));
     };
+
+    // Every summary sheet is a roll-up of the same rows, and the sheets that
+    // group by the same key (all four Division sheets, all four Sub Division
+    // sheets, ...) can share one bucket. Building them in the single pass that
+    // also writes the data sheet replaces ~30 full walks of the row set - the
+    // dominant cost of a large export - with one.
+    type Bucket = {
+      total: number; closed: number; controlRoom: number; frt: number;
+      within: number; beyond: number;
+    };
+    const bucketOf = (map: Map<string, Bucket>, key: string) => {
+      let b = map.get(key);
+      if (!b) {
+        b = { total: 0, closed: 0, controlRoom: 0, frt: 0, within: 0, beyond: 0 };
+        map.set(key, b);
+      }
+      return b;
+    };
+    const pendingOf = (b: Bucket) => Math.max(0, b.total - b.closed);
+
+    const divisionAgg = new Map<string, Bucket>();   // sheets 3, 6, 13, 15
+    const subDivAgg = new Map<string, Bucket>();     // sheets 10, 12, 14, 16
+    const subStnAgg = new Map<string, Bucket>();     // sheets 7, 9, 11, 17
+    const dayAgg = new Map<string, Bucket>();        // sheets 4, 8
+    const statusAgg = new Map<string, number>();     // sheet 5
+    const areaAgg = new Map<string, { within: number; beyond: number }>(); // sheet 18
+    const monthAreaAgg = new Map<string, { label: string; areaStats: Map<string, { total: number; count: number }> }>(); // sheet 19
+    const resolvedAreaTypes = new Set<string>();
+    let resolvedCount = 0;
+    const grandAgg: Bucket = { total: 0, closed: 0, controlRoom: 0, frt: 0, within: 0, beyond: 0 };
+    // The cover lists the values actually present, so blanks are dropped here
+    // rather than folded into 'Unknown' the way the roll-ups do.
+    const seenDivisions = new Set<string>();
+    const seenStatuses = new Set<string>();
+    const seenClosedStatuses = new Set<string>();
+    const sortedKeys = (set: Set<string>) => Array.from(set).sort();
 
     // Cover / Summary sheet
     const wsCover = wb.addWorksheet('1. Cover Page', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1, showGridLines: false }] });
@@ -3005,14 +3151,12 @@ export default function Home() {
 
     const statusApplied = statusFilter ? statusFilter : 'All';
     const closedStatusApplied = closedStatusFilter ? closedStatusFilter : 'All';
-    const uniqueDivisions = Array.from(new Set(rows.map(r => String((r as any)['Division'] || '').trim()).filter(Boolean))).sort();
-    const uniqueStatuses = Array.from(new Set(rows.map(r => String((r as any)['Status'] || '').trim()).filter(Boolean))).sort();
-    const uniqueClosedStatuses = Array.from(new Set(rows.map(r => String((r as any)['Closed Status'] || '').trim()).filter(Boolean))).sort();
     const shiftSuffix = selectedShift ? ` | Shift: ${selectedShift}` : '';
     addTitle(wsCover, 'FRT Barabanki - Supply Complaint Report', `Generated: ${generatedAt}${shiftSuffix}`);
     wsCover.addRow([]);
     // Label in column A, value in column B - the old cover crammed long lists
-    // into A and they ran under the 42-wide column.
+    // into A and they ran under the 42-wide column. The rows themselves are
+    // filled in below, once the aggregation pass has the numbers.
     const coverSection = (label: string) => {
       const row = wsCover.addRow([label]);
       row.height = 20;
@@ -3027,21 +3171,26 @@ export default function Home() {
       row.getCell(2).alignment = { vertical: 'top', wrapText: true };
       if (numFmt) row.getCell(2).numFmt = numFmt;
     };
-    coverSection('Overview');
-    coverEntry('Total Complaints (filtered)', rows.length, '#,##0');
-    coverEntry('Period', periodText);
-    coverEntry('Shift', selectedShift || 'All');
-    coverEntry('Status filter', statusApplied);
-    coverEntry('Closed Status filter', closedStatusApplied);
-    wsCover.addRow([]);
-    coverSection('Coverage');
-    coverEntry('Distinct Divisions', uniqueDivisions.length, '#,##0');
-    coverEntry('Divisions', uniqueDivisions.join(', ') || '-');
-    coverEntry('Distinct Statuses', uniqueStatuses.length, '#,##0');
-    coverEntry('Statuses', uniqueStatuses.join(', ') || '-');
-    coverEntry('Closed Statuses', uniqueClosedStatuses.join(', ') || '-');
-    wsCover.addRow([]);
-    coverSection('Quick Navigation');
+    const fillCoverSummary = () => {
+      const uniqueDivisions = sortedKeys(seenDivisions);
+      const uniqueStatuses = sortedKeys(seenStatuses);
+      const uniqueClosedStatuses = sortedKeys(seenClosedStatuses);
+      coverSection('Overview');
+      coverEntry('Total Complaints (filtered)', rows.length, '#,##0');
+      coverEntry('Period', periodText);
+      coverEntry('Shift', selectedShift || 'All');
+      coverEntry('Status filter', statusApplied);
+      coverEntry('Closed Status filter', closedStatusApplied);
+      wsCover.addRow([]);
+      coverSection('Coverage');
+      coverEntry('Distinct Divisions', uniqueDivisions.length, '#,##0');
+      coverEntry('Divisions', uniqueDivisions.join(', ') || '-');
+      coverEntry('Distinct Statuses', uniqueStatuses.length, '#,##0');
+      coverEntry('Statuses', uniqueStatuses.join(', ') || '-');
+      coverEntry('Closed Statuses', uniqueClosedStatuses.join(', ') || '-');
+      wsCover.addRow([]);
+      coverSection('Quick Navigation');
+    };
     const navLinks = [
       { text: 'All Complaints - Complete Data', sheet: '2. All Complaints Data' },
       { text: 'Division-wise Summary', sheet: '3. Division Summary' },
@@ -3062,15 +3211,17 @@ export default function Home() {
       { text: 'Area Type - Within/Beyond Analysis', sheet: '18. Area Type Breakdown' },
       { text: 'Average Resolution Time (Minutes) by Area Type', sheet: '19. Avg Res Time Area Type' },
     ];
-    navLinks.forEach(link => {
-      const row = wsCover.addRow([link.text]);
-      const cell = row.getCell(1);
-      cell.value = { text: link.text, hyperlink: `#'${link.sheet}'!A1` };
-      cell.font = { color: { argb: theme.link }, underline: true };
-      cell.alignment = { vertical: 'middle' };
-    });
-    wsCover.getColumn(1).width = 42;
-    wsCover.getColumn(2).width = 80;
+    const fillCoverNav = () => {
+      navLinks.forEach(link => {
+        const row = wsCover.addRow([link.text]);
+        const cell = row.getCell(1);
+        cell.value = { text: link.text, hyperlink: `#'${link.sheet}'!A1` };
+        cell.font = { color: { argb: theme.link }, underline: true };
+        cell.alignment = { vertical: 'middle' };
+      });
+      wsCover.getColumn(1).width = 42;
+      wsCover.getColumn(2).width = 80;
+    };
 
 
     // Sheet 1: Bulk Data
@@ -3093,21 +3244,114 @@ export default function Home() {
     const bodyStart = headerRowIndex + 1;
     const statusColIndex = headers.indexOf('Status') + 1; // 1-based
 
-    // Status cell colors are applied in the single styling pass below
+    // Status cell colors are applied in the single styling pass below.
+    // This loop writes the data sheet AND feeds every summary roll-up, so each
+    // row is visited once and its two timestamps are parsed once - the old code
+    // re-parsed them up to five times per row across the sheets.
     const statusClasses: Array<'closed' | 'pending' | 'other'> = [];
+    // Header -> column index resolved once; doing it per row turned into a
+    // linear scan of the header list for every cell of every row.
+    const plainHeaderCols = headers
+      .map((h, i): [string, number] => [h, i])
+      .filter(([h]) => h !== 'Resolution Time' && h !== 'Resolution Time (Minutes)'
+        && h !== 'Complaint Date and Time' && h !== 'Closed Date');
+    const complaintDateHeaderIdx = headers.indexOf('Complaint Date and Time');
+    const closedDateHeaderIdx = headers.indexOf('Closed Date');
+    const resTimeHeaderIdx = headers.indexOf('Resolution Time');
+    const resMinsHeaderIdx = headers.indexOf('Resolution Time (Minutes)');
+
     for (const r of rows) {
-      const minutes = computeResolutionTimeMinutes(r);
-      const rowVals = headers.map(h => {
-        if (h === 'Resolution Time') return minutes === null ? '' : formatDuration(minutes * 60000);
-        if (h === 'Resolution Time (Minutes)') return minutes === null ? '' : minutes;
-        if (h === 'Complaint Date and Time' || h === 'Closed Date') return toExcelDate(String((r as any)[h] ?? ''));
-        return String((r as any)[h] ?? '');
-      });
+      const row = r as any;
+      const openDate = parsePossibleDate(String(row['Complaint Date and Time'] ?? row['Complaint Date'] ?? ''));
+      const closeDate = parsePossibleDate(String(row['Closed Date'] ?? ''));
+      let minutes: number | null = null;
+      if (openDate && closeDate) {
+        const diffMs = closeDate.getTime() - openDate.getTime();
+        if (Number.isFinite(diffMs) && diffMs > 0) minutes = Math.floor(diffMs / 60000);
+      }
+
+      // Prefilled, not sparse: a hole would reach addRow as a null cell, which
+      // eachCell skips, and the row would print with a gap in its borders.
+      const rowVals: any[] = new Array(headers.length).fill('');
+      for (const [h, i] of plainHeaderCols) rowVals[i] = String(row[h] ?? '');
+      if (complaintDateHeaderIdx >= 0) rowVals[complaintDateHeaderIdx] = utcAnchored(openDate);
+      if (closedDateHeaderIdx >= 0) rowVals[closedDateHeaderIdx] = utcAnchored(closeDate);
+      if (resTimeHeaderIdx >= 0) rowVals[resTimeHeaderIdx] = minutes === null ? '' : formatDuration(minutes * 60000);
+      if (resMinsHeaderIdx >= 0) rowVals[resMinsHeaderIdx] = minutes === null ? '' : minutes;
       wsData.addRow(rowVals);
 
-      const statusStr = String((r as any)['Status'] ?? '').trim().toLowerCase();
-      statusClasses.push(isClosedRow(r) ? 'closed' : statusStr.includes('pending') ? 'pending' : 'other');
+      const statusRaw = String(row['Status'] ?? '').trim();
+      const statusLower = statusRaw.toLowerCase();
+      const closed = isClosedRow(row);
+      statusClasses.push(closed ? 'closed' : statusLower.includes('pending') ? 'pending' : 'other');
+
+      const divisionRaw = String(row['Division'] ?? '').trim();
+      const subDivisionRaw = String(row['Sub Division'] ?? '').trim();
+      const subStationRaw = String(row['Sub Station'] ?? '').trim();
+      const closedStatusRaw = String(row['Closed Status'] ?? '').trim();
+      const areaTypeRaw = String(row['Area Type'] ?? '').trim();
+      if (divisionRaw) seenDivisions.add(divisionRaw);
+      if (statusRaw) seenStatuses.add(statusRaw);
+      if (closedStatusRaw) seenClosedStatuses.add(closedStatusRaw);
+
+      const division = divisionRaw || 'Unknown';
+      const subDivisionKey = `${division}|${subDivisionRaw || 'Unknown'}`;
+      const subStationKey = `${subDivisionKey}|${subStationRaw || 'Unknown'}`;
+      const dayKey = openDate
+        ? `${openDate.getFullYear()}-${String(openDate.getMonth() + 1).padStart(2, '0')}-${String(openDate.getDate()).padStart(2, '0')}`
+        : 'Unknown';
+      const closedBy = String(row['Closed By'] ?? '').trim().toUpperCase();
+      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
+      const within = closedStatusRaw === 'Closed Within';
+      const beyond = closedStatusRaw === 'Closed Beyond';
+
+      for (const bucket of [
+        bucketOf(divisionAgg, division),
+        bucketOf(subDivAgg, subDivisionKey),
+        bucketOf(subStnAgg, subStationKey),
+        bucketOf(dayAgg, dayKey),
+        grandAgg,
+      ]) {
+        bucket.total += 1;
+        if (closed) {
+          bucket.closed += 1;
+          if (isControlRoom) bucket.controlRoom += 1;
+          else bucket.frt += 1;
+        }
+        if (within) bucket.within += 1;
+        else if (beyond) bucket.beyond += 1;
+      }
+
+      const statusKey = statusRaw || 'Unknown';
+      statusAgg.set(statusKey, (statusAgg.get(statusKey) || 0) + 1);
+
+      const areaType = areaTypeRaw || 'Unknown';
+      let area = areaAgg.get(areaType);
+      if (!area) { area = { within: 0, beyond: 0 }; areaAgg.set(areaType, area); }
+      if (within) area.within += 1;
+      else if (beyond) area.beyond += 1;
+
+      if (minutes !== null && openDate) {
+        resolvedCount += 1;
+        resolvedAreaTypes.add(areaType);
+        const monthKey = `${openDate.getFullYear()}-${String(openDate.getMonth() + 1).padStart(2, '0')}`;
+        let month = monthAreaAgg.get(monthKey);
+        if (!month) {
+          month = {
+            label: `${openDate.toLocaleString('en-US', { month: 'short' })}-${openDate.getFullYear()}`,
+            areaStats: new Map<string, { total: number; count: number }>(),
+          };
+          monthAreaAgg.set(monthKey, month);
+        }
+        let stats = month.areaStats.get(areaType);
+        if (!stats) { stats = { total: 0, count: 0 }; month.areaStats.set(areaType, stats); }
+        stats.total += minutes;
+        stats.count += 1;
+      }
     }
+
+    fillCoverSummary();
+    fillCoverNav();
 
     // Column widths and formatting
     const widthMap: Record<string, number> = {
@@ -3184,12 +3428,14 @@ export default function Home() {
     // Sheet 2: Summary by Division
     const wsSummary = wb.addWorksheet('3. Division Summary', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsSummary, 'Division-wise Complaint Summary', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
-    const { rows: divRows, grand } = divisionTotals(rows);
+    const divRows = Array.from(divisionAgg.entries())
+      .map(([division, b]) => ({ division, ...b }))
+      .sort((a, b) => b.total - a.total);
     const sumHeaders = ['Division', 'Total', 'Closed', 'Pending'];
     wsSummary.addRow(sumHeaders);
     styleHeaderRow(wsSummary, 3);
-    divRows.forEach(r => wsSummary.addRow([r.division, r.total, r.closed, r.pending]));
-    wsSummary.addRow(['Grand Total', grand.total, grand.closed, grand.pending]);
+    divRows.forEach(r => wsSummary.addRow([r.division, r.total, r.closed, pendingOf(r)]));
+    wsSummary.addRow(['Grand Total', grandAgg.total, grandAgg.closed, pendingOf(grandAgg)]);
     // Style columns, widths
     wsSummary.getColumn(1).width = 36;
     wsSummary.getColumn(2).width = 16;
@@ -3202,22 +3448,15 @@ export default function Home() {
     addTitle(wsDate, 'Date-wise Total Complaint Count', periodSubtitle);
     wsDate.addRow(['Date', 'Total Complaints']);
     styleHeaderRow(wsDate, 3);
-    // Bucket on YYYY-MM-DD so the rows really do sort chronologically: the old
-    // comparator rebuilt the date from the wrong capture groups (pa[0] is the
-    // whole match), got Invalid Date every time and left the days unsorted.
-    // The cell itself is a real date so Excel can sort and filter it as one.
-    const dateMap = new Map<string, number>();
-    let undatedCount = 0;
-    for (const r of rows) {
-      const key = dayKeyOf(String((r as any)['Complaint Date and Time'] || ''));
-      if (!key) {
-        undatedCount += 1;
-        continue;
-      }
-      dateMap.set(key, (dateMap.get(key) || 0) + 1);
-    }
-    const byDate = Array.from(dateMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    byDate.forEach(([d, c]) => wsDate.addRow([dayKeyToDate(d), c]));
+    // Buckets are keyed YYYY-MM-DD so the rows really do sort chronologically:
+    // the old comparator rebuilt the date from the wrong capture groups (pa[0]
+    // is the whole match), got Invalid Date every time and left the days
+    // unsorted. The cell is a real date so Excel can sort and filter it as one.
+    const byDate = Array.from(dayAgg.entries())
+      .filter(([key]) => key !== 'Unknown')
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    byDate.forEach(([d, b]) => wsDate.addRow([dayKeyToDate(d), b.total]));
+    const undatedCount = dayAgg.get('Unknown')?.total || 0;
     if (undatedCount) wsDate.addRow(['Unknown', undatedCount]);
     wsDate.addRow(['Grand Total', rows.length]);
     wsDate.getColumn(1).width = 20;
@@ -3229,12 +3468,7 @@ export default function Home() {
     // Sheet 4: Status Breakdown
     const wsStatus = wb.addWorksheet('5. Status Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsStatus, 'Complaint Status Breakdown', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
-    const statusMap = new Map<string, number>();
-    for (const r of rows) {
-      const s = String((r as any)['Status'] || '').trim() || 'Unknown';
-      statusMap.set(s, (statusMap.get(s) || 0) + 1);
-    }
-    const statusArr = Array.from(statusMap.entries()).sort((a, b) => b[1] - a[1]);
+    const statusArr = Array.from(statusAgg.entries()).sort((a, b) => b[1] - a[1]);
     wsStatus.addRow(['Status', 'Count', 'Share %']);
     styleHeaderRow(wsStatus, 3);
     statusArr.forEach(([name, count]) => {
@@ -3257,60 +3491,10 @@ export default function Home() {
     const wsDivBreakdown = wb.addWorksheet('6. Division Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsDivBreakdown, 'Division-wise Closed Complaints (Control Room vs FRT)', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
 
-    // Calculate division-wise breakdown
-    const divBreakdownMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
-    for (const r of rows) {
-      const division = String(r['Division'] ?? '').trim() || 'Unknown';
-      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
-      const isClosed = isClosedRow(r);
-      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-
-      const entry = divBreakdownMap.get(division) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
-      entry.total += 1;
-      if (isClosed) {
-        entry.closed += 1;
-        if (isControlRoom) {
-          entry.controlRoom += 1;
-        } else {
-          entry.frt += 1;
-        }
-      }
-      divBreakdownMap.set(division, entry);
-    }
-
-    // Calculate pending
-    for (const [k, v] of divBreakdownMap) {
-      v.pending = Math.max(0, v.total - v.closed);
-      divBreakdownMap.set(k, v);
-    }
-
-    const divBreakdownRows = Array.from(divBreakdownMap.entries())
-      .map(([div, stats]) => ({ division: div, ...stats }))
-      .sort((a, b) => b.total - a.total);
-
-    // Calculate grand totals
-    const grandBreakdown = rows.reduce((acc, r) => {
-      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
-      const isClosed = isClosedRow(r);
-      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-
-      acc.total += 1;
-      if (isClosed) {
-        acc.closed += 1;
-        if (isControlRoom) {
-          acc.controlRoom += 1;
-        } else {
-          acc.frt += 1;
-        }
-      }
-      return acc;
-    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
-    grandBreakdown.pending = Math.max(0, grandBreakdown.total - grandBreakdown.closed);
-
     wsDivBreakdown.addRow(['Division', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']);
     styleHeaderRow(wsDivBreakdown, 3);
-    divBreakdownRows.forEach(r => wsDivBreakdown.addRow([r.division, r.total, r.closed, r.controlRoom, r.frt, r.pending]));
-    wsDivBreakdown.addRow(['Grand Total', grandBreakdown.total, grandBreakdown.closed, grandBreakdown.controlRoom, grandBreakdown.frt, grandBreakdown.pending]);
+    divRows.forEach(r => wsDivBreakdown.addRow([r.division, r.total, r.closed, r.controlRoom, r.frt, pendingOf(r)]));
+    wsDivBreakdown.addRow(['Grand Total', grandAgg.total, grandAgg.closed, grandAgg.controlRoom, grandAgg.frt, pendingOf(grandAgg)]);
 
     wsDivBreakdown.getColumn(1).width = 36;
     wsDivBreakdown.getColumn(2).width = 14;
@@ -3325,71 +3509,21 @@ export default function Home() {
     const wsDetailedBreakdown = wb.addWorksheet('7. Detailed Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsDetailedBreakdown, 'Detailed Closed Breakdown (Division / Sub Division / Sub Station)', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
 
-    // Calculate detailed breakdown
-    const detailedMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
-    for (const r of rows) {
-      const division = String(r['Division'] ?? '').trim() || 'Unknown';
-      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
-      const subStation = String(r['Sub Station'] ?? '').trim() || 'Unknown';
-      const key = `${division}|${subDivision}|${subStation}`;
-
-      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
-      const isClosed = isClosedRow(r);
-      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-
-      const entry = detailedMap.get(key) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
-      entry.total += 1;
-      if (isClosed) {
-        entry.closed += 1;
-        if (isControlRoom) {
-          entry.controlRoom += 1;
-        } else {
-          entry.frt += 1;
-        }
-      }
-      detailedMap.set(key, entry);
-    }
-
-    // Calculate pending
-    for (const [k, v] of detailedMap) {
-      v.pending = Math.max(0, v.total - v.closed);
-      detailedMap.set(k, v);
-    }
-
-    const detailedRows = Array.from(detailedMap.entries())
-      .map(([key, stats]) => {
-        const [division, subDivision, subStation] = key.split('|');
-        return { ...stats, division, subDivision, subStation };
-      })
-      .sort((a, b) => {
-        if (a.division !== b.division) return a.division.localeCompare(b.division);
-        if (a.subDivision !== b.subDivision) return a.subDivision.localeCompare(b.subDivision);
-        return a.subStation.localeCompare(b.subStation);
-      });
-
-    // Calculate grand totals
-    const grandDetailed = rows.reduce((acc, r) => {
-      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
-      const isClosed = isClosedRow(r);
-      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-
-      acc.total += 1;
-      if (isClosed) {
-        acc.closed += 1;
-        if (isControlRoom) {
-          acc.controlRoom += 1;
-        } else {
-          acc.frt += 1;
-        }
-      }
-      return acc;
-    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
-    grandDetailed.pending = Math.max(0, grandDetailed.total - grandDetailed.closed);
+    // Shared with sheets 9, 11 and 17 - same key, same buckets.
+    const subStnRows = Array.from(subStnAgg.entries()).map(([key, b]) => {
+      const [division, subDivision, subStation] = key.split('|');
+      return { ...b, division, subDivision, subStation };
+    });
+    const detailedRows = subStnRows.slice().sort((a, b) => {
+      if (a.division !== b.division) return a.division.localeCompare(b.division);
+      if (a.subDivision !== b.subDivision) return a.subDivision.localeCompare(b.subDivision);
+      return a.subStation.localeCompare(b.subStation);
+    });
 
     wsDetailedBreakdown.addRow(['Division', 'Sub Division', 'Sub Station', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']);
     styleHeaderRow(wsDetailedBreakdown, 3);
-    detailedRows.forEach(r => wsDetailedBreakdown.addRow([r.division, r.subDivision, r.subStation, r.total, r.closed, r.controlRoom, r.frt, r.pending]));
-    wsDetailedBreakdown.addRow(['Grand Total', '', '', grandDetailed.total, grandDetailed.closed, grandDetailed.controlRoom, grandDetailed.frt, grandDetailed.pending]);
+    detailedRows.forEach(r => wsDetailedBreakdown.addRow([r.division, r.subDivision, r.subStation, r.total, r.closed, r.controlRoom, r.frt, pendingOf(r)]));
+    wsDetailedBreakdown.addRow(['Grand Total', '', '', grandAgg.total, grandAgg.closed, grandAgg.controlRoom, grandAgg.frt, pendingOf(grandAgg)]);
 
     wsDetailedBreakdown.getColumn(1).width = 24;
     wsDetailedBreakdown.getColumn(2).width = 24;
@@ -3406,68 +3540,21 @@ export default function Home() {
     const wsDateBreakdown = wb.addWorksheet('8. Date-wise Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsDateBreakdown, 'Date-wise Closed Complaints (Control Room vs FRT)', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
 
-    // Calculate date-wise breakdown
-    const dateBreakdownMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
-    for (const r of rows) {
-      const date = dayKeyOf(String(r['Complaint Date and Time'] || '')) || 'Unknown';
-
-      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
-      const isClosed = isClosedRow(r);
-      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-
-      const entry = dateBreakdownMap.get(date) || { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
-      entry.total += 1;
-      if (isClosed) {
-        entry.closed += 1;
-        if (isControlRoom) {
-          entry.controlRoom += 1;
-        } else {
-          entry.frt += 1;
-        }
-      }
-      dateBreakdownMap.set(date, entry);
-    }
-
-    // Calculate pending
-    for (const [k, v] of dateBreakdownMap) {
-      v.pending = Math.max(0, v.total - v.closed);
-      dateBreakdownMap.set(k, v);
-    }
-
-    const dateBreakdownRows = Array.from(dateBreakdownMap.entries())
-      .map(([date, stats]) => ({ date, ...stats }))
+    const dateBreakdownRows = Array.from(dayAgg.entries())
+      .map(([date, b]) => ({ date, ...b }))
       .sort((a, b) => {
         if (a.date === 'Unknown') return 1;
         if (b.date === 'Unknown') return -1;
         return a.date.localeCompare(b.date);
       });
 
-    // Calculate grand totals
-    const grandDateBreakdown = rows.reduce((acc, r) => {
-      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
-      const isClosed = isClosedRow(r);
-      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-
-      acc.total += 1;
-      if (isClosed) {
-        acc.closed += 1;
-        if (isControlRoom) {
-          acc.controlRoom += 1;
-        } else {
-          acc.frt += 1;
-        }
-      }
-      return acc;
-    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
-    grandDateBreakdown.pending = Math.max(0, grandDateBreakdown.total - grandDateBreakdown.closed);
-
     wsDateBreakdown.addRow(['Date', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']);
     styleHeaderRow(wsDateBreakdown, 3);
     dateBreakdownRows.forEach(r => wsDateBreakdown.addRow([
       r.date === 'Unknown' ? 'Unknown' : dayKeyToDate(r.date),
-      r.total, r.closed, r.controlRoom, r.frt, r.pending,
+      r.total, r.closed, r.controlRoom, r.frt, pendingOf(r),
     ]));
-    wsDateBreakdown.addRow(['Grand Total', grandDateBreakdown.total, grandDateBreakdown.closed, grandDateBreakdown.controlRoom, grandDateBreakdown.frt, grandDateBreakdown.pending]);
+    wsDateBreakdown.addRow(['Grand Total', grandAgg.total, grandAgg.closed, grandAgg.controlRoom, grandAgg.frt, pendingOf(grandAgg)]);
 
     wsDateBreakdown.getColumn(1).width = 20;
     wsDateBreakdown.getColumn(1).numFmt = DATE_FMT;
@@ -3482,24 +3569,11 @@ export default function Home() {
     // Sheet 8: Top Sub Stations
     const wsTopSS = wb.addWorksheet('9. Sub Station Wise Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsTopSS, 'Sub Station-wise Total Complaint Count', `Total: ${rows.length.toLocaleString('en-US')} complaints   |   ${periodSubtitle}`);
-    const ssMap = new Map<string, number>();
-    for (const r of rows) {
-      const division = String(r['Division'] || '').trim() || 'Unknown';
-      const subDivision = String(r['Sub Division'] || '').trim() || 'Unknown';
-      const subStation = String(r['Sub Station'] || '').trim() || 'Unknown';
-      const key = `${division}|${subDivision}|${subStation}`;
-      ssMap.set(key, (ssMap.get(key) || 0) + 1);
-    }
-    const topSS = Array.from(ssMap.entries())
-      .map(([key, count]) => {
-        const [division, subDivision, subStation] = key.split('|');
-        return { count, division, subDivision, subStation };
-      })
-      .sort((a, b) => b.count - a.count);
+    const topSS = subStnRows.slice().sort((a, b) => b.total - a.total);
     wsTopSS.addRow(['Division', 'Sub Division', 'Sub Station', 'Total Complaints']);
     styleHeaderRow(wsTopSS, 3);
-    topSS.forEach(r => wsTopSS.addRow([r.division, r.subDivision, r.subStation, r.count]));
-    wsTopSS.addRow(['Grand Total', '', '', topSS.reduce((acc, r) => acc + r.count, 0)]);
+    topSS.forEach(r => wsTopSS.addRow([r.division, r.subDivision, r.subStation, r.total]));
+    wsTopSS.addRow(['Grand Total', '', '', grandAgg.total]);
     wsTopSS.getColumn(1).width = 24;
     wsTopSS.getColumn(2).width = 24;
     wsTopSS.getColumn(3).width = 28;
@@ -3509,36 +3583,17 @@ export default function Home() {
     // Sheet 9: Sub Division Summary
     const wsSubDivSummary = wb.addWorksheet('10. Sub Division Summary', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsSubDivSummary, 'Sub Division-wise Summary', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
-    const subDivMap = new Map<string, { division: string; total: number; closed: number; pending: number }>();
-    for (const r of rows) {
-      const division = String(r['Division'] ?? '').trim() || 'Unknown';
-      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
-      const key = `${division}|${subDivision}`;
-      const entry = subDivMap.get(key) || { division, total: 0, closed: 0, pending: 0 };
-      entry.total += 1;
-      if (isClosedRow(r)) entry.closed += 1;
-      subDivMap.set(key, entry);
-    }
-    for (const [k, v] of subDivMap) {
-      v.pending = Math.max(0, v.total - v.closed);
-      subDivMap.set(k, v);
-    }
-    const subDivRows = Array.from(subDivMap.entries())
-      .map(([key, v]) => {
-        const [, subDivision] = key.split('|');
-        return { subDivision, ...v };
+    // Shared with sheets 12, 14 and 16 - same key, same buckets.
+    const subDivRows = Array.from(subDivAgg.entries())
+      .map(([key, b]) => {
+        const [division, subDivision] = key.split('|');
+        return { ...b, division, subDivision };
       })
       .sort((a, b) => b.total - a.total);
-    const grandSubDiv = rows.reduce((acc, r) => {
-      acc.total += 1;
-      if (isClosedRow(r)) acc.closed += 1;
-      return acc;
-    }, { total: 0, closed: 0 });
-    const grandSubDivPending = Math.max(0, grandSubDiv.total - grandSubDiv.closed);
     wsSubDivSummary.addRow(['Division', 'Sub Division', 'Total', 'Closed', 'Pending']);
     styleHeaderRow(wsSubDivSummary, 3);
-    subDivRows.forEach(r => wsSubDivSummary.addRow([r.division, r.subDivision, r.total, r.closed, r.pending]));
-    wsSubDivSummary.addRow(['Grand Total', '', grandSubDiv.total, grandSubDiv.closed, grandSubDivPending]);
+    subDivRows.forEach(r => wsSubDivSummary.addRow([r.division, r.subDivision, r.total, r.closed, pendingOf(r)]));
+    wsSubDivSummary.addRow(['Grand Total', '', grandAgg.total, grandAgg.closed, pendingOf(grandAgg)]);
     wsSubDivSummary.getColumn(1).width = 24;
     wsSubDivSummary.getColumn(2).width = 24;
     wsSubDivSummary.getColumn(3).width = 14;
@@ -3549,37 +3604,11 @@ export default function Home() {
     // Sheet 10: Sub Station Summary
     const wsSubStnSummary = wb.addWorksheet('11. Sub Station Summary', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsSubStnSummary, 'Sub Station-wise Summary', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
-    const subStnMap = new Map<string, { division: string; subDivision: string; total: number; closed: number; pending: number }>();
-    for (const r of rows) {
-      const division = String(r['Division'] ?? '').trim() || 'Unknown';
-      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
-      const subStation = String(r['Sub Station'] ?? '').trim() || 'Unknown';
-      const key = `${division}|${subDivision}|${subStation}`;
-      const entry = subStnMap.get(key) || { division, subDivision, total: 0, closed: 0, pending: 0 };
-      entry.total += 1;
-      if (isClosedRow(r)) entry.closed += 1;
-      subStnMap.set(key, entry);
-    }
-    for (const [k, v] of subStnMap) {
-      v.pending = Math.max(0, v.total - v.closed);
-      subStnMap.set(k, v);
-    }
-    const subStnRows = Array.from(subStnMap.entries())
-      .map(([key, v]) => {
-        const [division, subDivision, subStation] = key.split('|');
-        return { ...v, division, subDivision, subStation };
-      })
-      .sort((a, b) => b.total - a.total);
-    const grandSubStn = rows.reduce((acc, r) => {
-      acc.total += 1;
-      if (isClosedRow(r)) acc.closed += 1;
-      return acc;
-    }, { total: 0, closed: 0 });
-    const grandSubStnPending = Math.max(0, grandSubStn.total - grandSubStn.closed);
+    const subStnByTotal = subStnRows.slice().sort((a, b) => b.total - a.total);
     wsSubStnSummary.addRow(['Division', 'Sub Division', 'Sub Station', 'Total', 'Closed', 'Pending']);
     styleHeaderRow(wsSubStnSummary, 3);
-    subStnRows.forEach(r => wsSubStnSummary.addRow([r.division, r.subDivision, r.subStation, r.total, r.closed, r.pending]));
-    wsSubStnSummary.addRow(['Grand Total', '', '', grandSubStn.total, grandSubStn.closed, grandSubStnPending]);
+    subStnByTotal.forEach(r => wsSubStnSummary.addRow([r.division, r.subDivision, r.subStation, r.total, r.closed, pendingOf(r)]));
+    wsSubStnSummary.addRow(['Grand Total', '', '', grandAgg.total, grandAgg.closed, pendingOf(grandAgg)]);
     wsSubStnSummary.getColumn(1).width = 24;
     wsSubStnSummary.getColumn(2).width = 24;
     wsSubStnSummary.getColumn(3).width = 28;
@@ -3591,50 +3620,10 @@ export default function Home() {
     // Sheet 11: Sub Division Closed Breakdown
     const wsSubDivBreak = wb.addWorksheet('12. Sub Div Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsSubDivBreak, 'Sub Division - FRT vs Control Room', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
-    const subDivBreakdownMap = new Map<string, { division: string; total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
-    for (const r of rows) {
-      const division = String(r['Division'] ?? '').trim() || 'Unknown';
-      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
-      const key = `${division}|${subDivision}`;
-      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
-      const isClosed = isClosedRow(r);
-      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-      const entry = subDivBreakdownMap.get(key) || { division, total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 };
-      entry.total += 1;
-      if (isClosed) {
-        entry.closed += 1;
-        if (isControlRoom) entry.controlRoom += 1;
-        else entry.frt += 1;
-      }
-      subDivBreakdownMap.set(key, entry);
-    }
-    for (const [k, v] of subDivBreakdownMap) {
-      v.pending = Math.max(0, v.total - v.closed);
-      subDivBreakdownMap.set(k, v);
-    }
-    const subDivBreakRows = Array.from(subDivBreakdownMap.entries())
-      .map(([key, stats]) => {
-        const [division, subDivision] = key.split('|');
-        return { ...stats, division, subDivision };
-      })
-      .sort((a, b) => b.total - a.total);
-    const grandSubDivBreak = rows.reduce((acc, r) => {
-      const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
-      const isClosed = isClosedRow(r);
-      const isControlRoom = closedBy.includes('CONTROL_ROOM_1') || closedBy.includes('CONTROL_ROOM_2');
-      acc.total += 1;
-      if (isClosed) {
-        acc.closed += 1;
-        if (isControlRoom) acc.controlRoom += 1;
-        else acc.frt += 1;
-      }
-      return acc;
-    }, { total: 0, closed: 0, controlRoom: 0, frt: 0, pending: 0 });
-    grandSubDivBreak.pending = Math.max(0, grandSubDivBreak.total - grandSubDivBreak.closed);
     wsSubDivBreak.addRow(['Division', 'Sub Division', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']);
     styleHeaderRow(wsSubDivBreak, 3);
-    subDivBreakRows.forEach(r => wsSubDivBreak.addRow([r.division, r.subDivision, r.total, r.closed, r.controlRoom, r.frt, r.pending]));
-    wsSubDivBreak.addRow(['Grand Total', '', grandSubDivBreak.total, grandSubDivBreak.closed, grandSubDivBreak.controlRoom, grandSubDivBreak.frt, grandSubDivBreak.pending]);
+    subDivRows.forEach(r => wsSubDivBreak.addRow([r.division, r.subDivision, r.total, r.closed, r.controlRoom, r.frt, pendingOf(r)]));
+    wsSubDivBreak.addRow(['Grand Total', '', grandAgg.total, grandAgg.closed, grandAgg.controlRoom, grandAgg.frt, pendingOf(grandAgg)]);
     wsSubDivBreak.getColumn(1).width = 24;
     wsSubDivBreak.getColumn(2).width = 24;
     wsSubDivBreak.getColumn(3).width = 12;
@@ -3647,17 +3636,10 @@ export default function Home() {
     // Sheet 12: Division Count
     const wsDivCount = wb.addWorksheet('13. Division Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsDivCount, 'Division-wise Total Complaint Count', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
-    const divCountMap = new Map<string, number>();
-    for (const r of rows) {
-      const s = String(r['Division'] || '').trim() || 'Unknown';
-      divCountMap.set(s, (divCountMap.get(s) || 0) + 1);
-    }
-    const divCountRows = Array.from(divCountMap.entries()).sort((a, b) => b[1] - a[1]);
     wsDivCount.addRow(['Division', 'Total Complaints']);
     styleHeaderRow(wsDivCount, 3);
-    divCountRows.forEach(([name, count]) => wsDivCount.addRow([name, count]));
-    const divCountSum = divCountRows.reduce((acc, [, c]) => acc + (c as number), 0);
-    wsDivCount.addRow(['Grand Total', divCountSum]);
+    divRows.forEach(r => wsDivCount.addRow([r.division, r.total]));
+    wsDivCount.addRow(['Grand Total', grandAgg.total]);
     wsDivCount.getColumn(1).width = 36;
     wsDivCount.getColumn(2).width = 20;
     finishTable(wsDivCount, 3, 1);
@@ -3665,24 +3647,10 @@ export default function Home() {
     // Sheet 13: Sub Division Count
     const wsSubDivCount = wb.addWorksheet('14. Sub Division Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsSubDivCount, 'Sub Division-wise Total Complaint Count', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
-    const subDivCountMap = new Map<string, number>();
-    for (const r of rows) {
-      const division = String(r['Division'] || '').trim() || 'Unknown';
-      const subDivision = String(r['Sub Division'] || '').trim() || 'Unknown';
-      const key = `${division}|${subDivision}`;
-      subDivCountMap.set(key, (subDivCountMap.get(key) || 0) + 1);
-    }
-    const subDivCountRows = Array.from(subDivCountMap.entries())
-      .map(([key, count]) => {
-        const [division, subDivision] = key.split('|');
-        return { count, division, subDivision };
-      })
-      .sort((a, b) => b.count - a.count);
     wsSubDivCount.addRow(['Division', 'Sub Division', 'Total Complaints']);
     styleHeaderRow(wsSubDivCount, 3);
-    subDivCountRows.forEach(r => wsSubDivCount.addRow([r.division, r.subDivision, r.count]));
-    const subDivCountSum = subDivCountRows.reduce((acc, r) => acc + r.count, 0);
-    wsSubDivCount.addRow(['Grand Total', '', subDivCountSum]);
+    subDivRows.forEach(r => wsSubDivCount.addRow([r.division, r.subDivision, r.total]));
+    wsSubDivCount.addRow(['Grand Total', '', grandAgg.total]);
     wsSubDivCount.getColumn(1).width = 24;
     wsSubDivCount.getColumn(2).width = 24;
     wsSubDivCount.getColumn(3).width = 20;
@@ -3691,30 +3659,10 @@ export default function Home() {
     // Sheet 14: Closed Status Division
     const wsClosedStatusDiv = wb.addWorksheet('15. Closed Status Division', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsClosedStatusDiv, 'Within/Beyond Status - Division-wise', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
-    const csMapDiv = new Map<string, { total: number; closedWithin: number; closedBeyond: number }>();
-    for (const r of rows) {
-      const division = String(r['Division'] ?? '').trim() || 'Unknown';
-      const closedStatus = String(r['Closed Status'] ?? '').trim();
-      const entry = csMapDiv.get(division) || { total: 0, closedWithin: 0, closedBeyond: 0 };
-      entry.total += 1;
-      if (closedStatus === 'Closed Within') entry.closedWithin += 1;
-      else if (closedStatus === 'Closed Beyond') entry.closedBeyond += 1;
-      csMapDiv.set(division, entry);
-    }
-    const csRowsDiv = Array.from(csMapDiv.entries())
-      .map(([div, stats]) => ({ division: div, ...stats }))
-      .sort((a, b) => b.total - a.total);
-    const csGrandDiv = rows.reduce((acc, r) => {
-      const closedStatus = String(r['Closed Status'] ?? '').trim();
-      acc.total += 1;
-      if (closedStatus === 'Closed Within') acc.closedWithin += 1;
-      else if (closedStatus === 'Closed Beyond') acc.closedBeyond += 1;
-      return acc;
-    }, { total: 0, closedWithin: 0, closedBeyond: 0 });
     wsClosedStatusDiv.addRow(['Division', 'Total', 'Closed Within', 'Closed Beyond']);
     styleHeaderRow(wsClosedStatusDiv, 3);
-    csRowsDiv.forEach(r => wsClosedStatusDiv.addRow([r.division, r.total, r.closedWithin, r.closedBeyond]));
-    wsClosedStatusDiv.addRow(['Grand Total', csGrandDiv.total, csGrandDiv.closedWithin, csGrandDiv.closedBeyond]);
+    divRows.forEach(r => wsClosedStatusDiv.addRow([r.division, r.total, r.within, r.beyond]));
+    wsClosedStatusDiv.addRow(['Grand Total', grandAgg.total, grandAgg.within, grandAgg.beyond]);
     wsClosedStatusDiv.getColumn(1).width = 36;
     wsClosedStatusDiv.getColumn(2).width = 14;
     wsClosedStatusDiv.getColumn(3).width = 18;
@@ -3724,35 +3672,10 @@ export default function Home() {
     // Sheet 15: Closed Status Sub Division
     const wsClosedStatusSubDiv = wb.addWorksheet('16. Closed Status Sub Div', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsClosedStatusSubDiv, 'Within/Beyond Status - Sub Division-wise', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
-    const csMapSubDiv = new Map<string, { total: number; closedWithin: number; closedBeyond: number }>();
-    for (const r of rows) {
-      const division = String(r['Division'] ?? '').trim() || 'Unknown';
-      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
-      const key = `${division}|${subDivision}`;
-      const closedStatus = String(r['Closed Status'] ?? '').trim();
-      const entry = csMapSubDiv.get(key) || { total: 0, closedWithin: 0, closedBeyond: 0 };
-      entry.total += 1;
-      if (closedStatus === 'Closed Within') entry.closedWithin += 1;
-      else if (closedStatus === 'Closed Beyond') entry.closedBeyond += 1;
-      csMapSubDiv.set(key, entry);
-    }
-    const csRowsSubDiv = Array.from(csMapSubDiv.entries())
-      .map(([key, stats]) => {
-        const [division, subDivision] = key.split('|');
-        return { division, subDivision, ...stats };
-      })
-      .sort((a, b) => b.total - a.total);
-    const csGrandSubDiv = rows.reduce((acc, r) => {
-      const closedStatus = String(r['Closed Status'] ?? '').trim();
-      acc.total += 1;
-      if (closedStatus === 'Closed Within') acc.closedWithin += 1;
-      else if (closedStatus === 'Closed Beyond') acc.closedBeyond += 1;
-      return acc;
-    }, { total: 0, closedWithin: 0, closedBeyond: 0 });
     wsClosedStatusSubDiv.addRow(['Division', 'Sub Division', 'Total', 'Closed Within', 'Closed Beyond']);
     styleHeaderRow(wsClosedStatusSubDiv, 3);
-    csRowsSubDiv.forEach(r => wsClosedStatusSubDiv.addRow([r.division, r.subDivision, r.total, r.closedWithin, r.closedBeyond]));
-    wsClosedStatusSubDiv.addRow(['Grand Total', '', csGrandSubDiv.total, csGrandSubDiv.closedWithin, csGrandSubDiv.closedBeyond]);
+    subDivRows.forEach(r => wsClosedStatusSubDiv.addRow([r.division, r.subDivision, r.total, r.within, r.beyond]));
+    wsClosedStatusSubDiv.addRow(['Grand Total', '', grandAgg.total, grandAgg.within, grandAgg.beyond]);
     wsClosedStatusSubDiv.getColumn(1).width = 24;
     wsClosedStatusSubDiv.getColumn(2).width = 24;
     wsClosedStatusSubDiv.getColumn(3).width = 14;
@@ -3763,36 +3686,10 @@ export default function Home() {
     // Sheet 16: Closed Status Sub Station
     const wsClosedStatusSubStn = wb.addWorksheet('17. Closed Status Sub Stn', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsClosedStatusSubStn, 'Within/Beyond Status - Sub Station-wise', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
-    const csMapSubStn = new Map<string, { total: number; closedWithin: number; closedBeyond: number }>();
-    for (const r of rows) {
-      const division = String(r['Division'] ?? '').trim() || 'Unknown';
-      const subDivision = String(r['Sub Division'] ?? '').trim() || 'Unknown';
-      const subStation = String(r['Sub Station'] ?? '').trim() || 'Unknown';
-      const key = `${division}|${subDivision}|${subStation}`;
-      const closedStatus = String(r['Closed Status'] ?? '').trim();
-      const entry = csMapSubStn.get(key) || { total: 0, closedWithin: 0, closedBeyond: 0 };
-      entry.total += 1;
-      if (closedStatus === 'Closed Within') entry.closedWithin += 1;
-      else if (closedStatus === 'Closed Beyond') entry.closedBeyond += 1;
-      csMapSubStn.set(key, entry);
-    }
-    const csRowsSubStn = Array.from(csMapSubStn.entries())
-      .map(([key, stats]) => {
-        const [division, subDivision, subStation] = key.split('|');
-        return { division, subDivision, subStation, ...stats };
-      })
-      .sort((a, b) => b.total - a.total);
-    const csGrandSubStn = rows.reduce((acc, r) => {
-      const closedStatus = String(r['Closed Status'] ?? '').trim();
-      acc.total += 1;
-      if (closedStatus === 'Closed Within') acc.closedWithin += 1;
-      else if (closedStatus === 'Closed Beyond') acc.closedBeyond += 1;
-      return acc;
-    }, { total: 0, closedWithin: 0, closedBeyond: 0 });
     wsClosedStatusSubStn.addRow(['Division', 'Sub Division', 'Sub Station', 'Total', 'Closed Within', 'Closed Beyond']);
     styleHeaderRow(wsClosedStatusSubStn, 3);
-    csRowsSubStn.forEach(r => wsClosedStatusSubStn.addRow([r.division, r.subDivision, r.subStation, r.total, r.closedWithin, r.closedBeyond]));
-    wsClosedStatusSubStn.addRow(['Grand Total', '', '', csGrandSubStn.total, csGrandSubStn.closedWithin, csGrandSubStn.closedBeyond]);
+    subStnByTotal.forEach(r => wsClosedStatusSubStn.addRow([r.division, r.subDivision, r.subStation, r.total, r.within, r.beyond]));
+    wsClosedStatusSubStn.addRow(['Grand Total', '', '', grandAgg.total, grandAgg.within, grandAgg.beyond]);
     wsClosedStatusSubStn.getColumn(1).width = 24;
     wsClosedStatusSubStn.getColumn(2).width = 24;
     wsClosedStatusSubStn.getColumn(3).width = 28;
@@ -3804,16 +3701,7 @@ export default function Home() {
     // Sheet 18: Area Type Breakdown
     const wsAreaType = wb.addWorksheet('18. Area Type Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsAreaType, 'Area Type - Within/Beyond Analysis', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
-    const atMap = new Map<string, { within: number; beyond: number }>();
-    for (const r of rows) {
-      const areaType = String(r['Area Type'] ?? '').trim() || 'Unknown';
-      const closedStatus = String(r['Closed Status'] ?? '').trim();
-      const entry = atMap.get(areaType) || { within: 0, beyond: 0 };
-      if (closedStatus === 'Closed Within') entry.within += 1;
-      else if (closedStatus === 'Closed Beyond') entry.beyond += 1;
-      atMap.set(areaType, entry);
-    }
-    const atRows = Array.from(atMap.entries())
+    const atRows = Array.from(areaAgg.entries())
       .map(([area, stats]) => ({
         area,
         within: stats.within,
@@ -3821,16 +3709,10 @@ export default function Home() {
         total: stats.within + stats.beyond
       }))
       .sort((a, b) => b.total - a.total);
-    const atGrand = rows.reduce((acc, r) => {
-      const closedStatus = String(r['Closed Status'] ?? '').trim();
-      if (closedStatus === 'Closed Within') acc.within += 1;
-      else if (closedStatus === 'Closed Beyond') acc.beyond += 1;
-      return acc;
-    }, { within: 0, beyond: 0 });
     wsAreaType.addRow(['Area Type', 'Closed Within', 'Closed Beyond', 'Total']);
     styleHeaderRow(wsAreaType, 3);
     atRows.forEach(r => wsAreaType.addRow([r.area, r.within, r.beyond, r.total]));
-    wsAreaType.addRow(['Grand Total', atGrand.within, atGrand.beyond, atGrand.within + atGrand.beyond]);
+    wsAreaType.addRow(['Grand Total', grandAgg.within, grandAgg.beyond, grandAgg.within + grandAgg.beyond]);
     wsAreaType.getColumn(1).width = 36;
     wsAreaType.getColumn(2).width = 18;
     wsAreaType.getColumn(3).width = 18;
@@ -3839,26 +3721,13 @@ export default function Home() {
 
     // Sheet 19: Average Resolution Time by Area Type
     const wsAreaTypeAvg = wb.addWorksheet('19. Avg Res Time Area Type', { views: [{ state: 'frozen', xSplit: 0, ySplit: 4, showGridLines: false }] });
-    const areaTypeResolutionRows: Array<{ monthKey: string; monthLabel: string; areaType: string; minutes: number }> = [];
-    const areaTypesSet = new Set<string>();
-    for (const r of rows) {
-      const minutes = computeResolutionTimeMinutes(r);
-      const open = parsePossibleDate(String(r['Complaint Date and Time'] || r['Complaint Date'] || ''));
-      if (minutes === null || !open) continue;
-      const areaType = String(r['Area Type'] ?? '').trim() || 'Unknown';
-      const monthKey = `${open.getFullYear()}-${String(open.getMonth() + 1).padStart(2, '0')}`;
-      const monthLabel = `${open.toLocaleString('en-US', { month: 'short' })}-${open.getFullYear()}`;
-      areaTypeResolutionRows.push({ monthKey, monthLabel, areaType, minutes });
-      areaTypesSet.add(areaType);
-    }
-
     addTitle(
       wsAreaTypeAvg,
       'Average Resolution Time (Minutes) by Area Type',
-      `Closed complaints with valid resolution time: ${areaTypeResolutionRows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`
+      `Closed complaints with valid resolution time: ${resolvedCount.toLocaleString('en-US')}   |   ${periodSubtitle}`
     );
 
-    const areaTypes = Array.from(areaTypesSet).sort((a, b) => {
+    const areaTypes = Array.from(resolvedAreaTypes).sort((a, b) => {
       if (a === 'Unknown' && b !== 'Unknown') return 1;
       if (b === 'Unknown' && a !== 'Unknown') return -1;
       return a.localeCompare(b);
@@ -3869,16 +3738,6 @@ export default function Home() {
       wsAreaTypeAvg.getCell('A3').font = { italic: true, color: { argb: theme.metaColor } };
       wsAreaTypeAvg.getColumn(1).width = 80;
     } else {
-      const monthAreaStats = new Map<string, { label: string; areaStats: Map<string, { total: number; count: number }> }>();
-      for (const entry of areaTypeResolutionRows) {
-        const monthEntry = monthAreaStats.get(entry.monthKey) || { label: entry.monthLabel, areaStats: new Map<string, { total: number; count: number }>() };
-        const stats = monthEntry.areaStats.get(entry.areaType) || { total: 0, count: 0 };
-        stats.total += entry.minutes;
-        stats.count += 1;
-        monthEntry.areaStats.set(entry.areaType, stats);
-        monthAreaStats.set(entry.monthKey, monthEntry);
-      }
-
       wsAreaTypeAvg.getCell(3, 1).value = 'Month';
       wsAreaTypeAvg.getCell(3, 2).value = 'AREA TYPE';
       wsAreaTypeAvg.mergeCells(3, 1, 4, 1);
@@ -3902,7 +3761,7 @@ export default function Home() {
       wsAreaTypeAvg.getRow(3).height = 24;
       wsAreaTypeAvg.getRow(4).height = 22;
 
-      const monthRows = Array.from(monthAreaStats.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+      const monthRows = Array.from(monthAreaAgg.entries()).sort((a, b) => b[0].localeCompare(a[0]));
       monthRows.forEach(([, monthEntry]) => {
         const rowValues: Array<string | number | null> = [monthEntry.label];
         areaTypes.forEach(areaType => {
