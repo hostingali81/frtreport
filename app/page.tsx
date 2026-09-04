@@ -2869,57 +2869,76 @@ export default function Home() {
       lastModifiedBy: 'FRT Report Dashboard',
     } as any;
 
-    // Theme and helpers (declare before first use)
+    // Theme and helpers (declare before first use). One graphite header band,
+    // hairline rules and no body fills: banded rows fought the status colours
+    // on screen and printed as grey mush.
     const theme = {
-      headerFill: 'FF2563EB',       // Tailwind blue-600
+      headerFill: 'FF1F2937',       // gray-800
       headerFont: 'FFFFFFFF',
-      altFill: 'FFF8FAFC',          // slate-50
-      border: { style: 'thin', color: { argb: 'FFCBD5E1' } }, // slate-300
+      border: { style: 'thin', color: { argb: 'FFD1D5DB' } },        // gray-300 hairline
+      totalRule: { style: 'medium', color: { argb: 'FF1F2937' } },   // rules off a total row
       titleColor: 'FF111827',       // gray-900
-      metaColor: 'FF374151',        // gray-700
-      success: 'FF059669',          // emerald-600
-      info: 'FF2563EB',             // blue-600
-      warning: 'FFF59E0B',          // amber-500
+      metaColor: 'FF6B7280',        // gray-500
+      closedText: 'FF15803D',       // green-700
+      pendingText: 'FFB91C1C',      // red-700
+      otherText: 'FFB45309',        // amber-700
+      link: 'FF1D4ED8',
     } as const;
 
-    const addTitle = (ws: any, title: string, subtitle?: string) => {
-      ws.mergeCells('A1', 'H1');
+    const bodyBorder = {
+      top: theme.border,
+      left: theme.border,
+      bottom: theme.border,
+      right: theme.border,
+    };
+
+    const addTitle = (ws: any, title: string, subtitle?: string, span = 8) => {
+      const lastCol = ws.getColumn(span).letter;
+      ws.mergeCells(`A1:${lastCol}1`);
       const t = ws.getCell('A1');
       t.value = title;
-      t.font = { size: 18, bold: true, color: { argb: theme.titleColor } };
+      t.font = { size: 16, bold: true, color: { argb: theme.titleColor } };
       t.alignment = { vertical: 'middle', horizontal: 'left' };
-      ws.getRow(1).height = 26;
-      ws.mergeCells('A2', 'H2');
+      ws.getRow(1).height = 24;
+      ws.mergeCells(`A2:${lastCol}2`);
       const s = ws.getCell('A2');
       s.value = subtitle || '';
-      s.font = { size: 11, color: { argb: theme.metaColor } };
+      s.font = { size: 10, color: { argb: theme.metaColor } };
       s.alignment = { vertical: 'middle', horizontal: 'left' };
-      ws.getRow(2).height = 20;
+      ws.getRow(2).height = 18;
     };
 
     const styleHeaderRow = (ws: any, rowNumber: number) => {
       const row = ws.getRow(rowNumber);
+      row.height = 24;
       row.eachCell((cell: any) => {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.headerFill } };
         cell.font = { bold: true, color: { argb: theme.headerFont } };
-        cell.border = {
-          top: theme.border,
-          left: theme.border,
-          bottom: theme.border,
-          right: theme.border,
-        };
+        cell.border = bodyBorder;
         cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
       });
     };
 
-    const setAlternatingRows = (ws: any, startRow: number, endRow: number) => {
-      for (let r = startRow; r <= endRow; r++) {
-        if ((r - startRow) % 2 === 1) {
-          ws.getRow(r).eachCell((cell: any) => {
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.altFill } };
-          });
-        }
+    // One pass per summary sheet: hairline grid, labels left / figures centred
+    // with a thousands separator, the Grand Total ruled off in bold, and the
+    // header repeated on every printed page.
+    const finishTable = (ws: any, headerRow: number, labelCols: number) => {
+      const end = ws.lastRow.number;
+      for (let r = headerRow + 1; r <= end; r++) {
+        ws.getRow(r).eachCell((cell: any, col: number) => {
+          cell.border = r === end ? { ...bodyBorder, top: theme.totalRule } : bodyBorder;
+          cell.alignment = { vertical: 'middle', horizontal: col <= labelCols ? 'left' : 'center' };
+          if (col > labelCols && typeof cell.value === 'number' && !cell.numFmt) cell.numFmt = '#,##0';
+          if (r === end) cell.font = { bold: true, color: { argb: theme.titleColor } };
+        });
       }
+      ws.pageSetup = {
+        ...(ws.pageSetup || {}),
+        printTitlesRow: `${headerRow}:${headerRow}`,
+        fitToPage: true,
+        fitToWidth: 1,
+        fitToHeight: 0,
+      };
     };
 
     // Helper to convert datetime-local to 12-hour format
@@ -2939,41 +2958,50 @@ export default function Home() {
     // Period subtitle for all sheets
     const periodSubtitle = fromDT || toDT ? `Period: ${fromDT ? convertTo12Hour(fromDT) : 'Start'} -> ${toDT ? convertTo12Hour(toDT) : 'Now'}` : 'Period: All Data';
 
-    // Helper function to format date with time in 12-hour AM/PM format
-    const formatDateTime = (dateStr: string) => {
-      if (!dateStr) return '';
+    // One generation stamp for every sheet: DD/MM/YYYY in IST, like the data.
+    // The cover used to print the browser locale, so it read 09/04 while the
+    // data sheet right next to it read 04/09.
+    const generatedAt = `${new Date().toLocaleString('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: true,
+    }).replace(',', '').replace(/\s*(am|pm)$/i, (m) => ` ${m.trim().toUpperCase()}`)} IST`;
 
-      // Try multiple formats
-      // Format 1: DD/MM/YYYY HH:MM (24-hour)
-      let match = dateStr.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{1,2}):(\d{2})/i);
-      if (match) {
-        const date = match[1];
-        let hours = parseInt(match[2]);
-        const minutes = match[3];
+    // The API hands rows out as en-US strings - MM/DD/YYYY hh:mm AM/PM in IST.
+    // The old formatter matched the 24-hour branch first and re-derived AM/PM
+    // from an hour that was ALREADY 12-hour, so every 1-11 PM stamp came out as
+    // AM (and 12 AM as PM). Parse once with the shared parser instead and hand
+    // Excel a real date value. ExcelJS serialises a Date with getTime(), i.e.
+    // as UTC, so anchor the parsed wall clock to UTC or the sheet drifts by the
+    // browser's timezone offset.
+    const toExcelDate = (dateStr: string) => {
+      const d = parsePossibleDate(dateStr);
+      if (!d) return '';
+      return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()));
+    };
 
-        // Convert to 12-hour format
-        const period = hours >= 12 ? 'PM' : 'AM';
-        hours = hours % 12 || 12;
+    const DATE_TIME_FMT = 'dd/mm/yyyy hh:mm AM/PM';
+    const DATE_FMT = 'dd/mm/yyyy';
 
-        return `${date} ${hours}:${minutes} ${period}`;
-      }
+    // Day bucket keyed as YYYY-MM-DD so plain string sorting is chronological.
+    const dayKeyOf = (dateStr: string) => {
+      const d = parsePossibleDate(dateStr);
+      if (!d) return null;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
 
-      // Format 2: DD/MM/YYYY HH:MM AM/PM (already in 12-hour)
-      match = dateStr.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{1,2}:\d{2})\s*(AM|PM)/i);
-      if (match) {
-        return `${match[1]} ${match[2]} ${match[3]}`;
-      }
-
-      return dateStr;
+    const dayKeyToDate = (key: string) => {
+      const [y, m, d] = key.split('-').map(Number);
+      return new Date(Date.UTC(y, m - 1, d));
     };
 
     // Cover / Summary sheet
-    const wsCover = wb.addWorksheet('1. Cover Page', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1 }] });
+    const wsCover = wb.addWorksheet('1. Cover Page', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1, showGridLines: false }] });
     // Fix periodText definition
     const periodParts: string[] = [];
-    if (fromDT) periodParts.push(`From: ${new Date(fromDT).toLocaleString()}`);
-    if (toDT) periodParts.push(`To: ${new Date(toDT).toLocaleString()}`);
-    const periodText = periodParts.length ? periodParts.join(' - ') : 'All Time';
+    if (fromDT) periodParts.push(`From ${convertTo12Hour(fromDT)}`);
+    if (toDT) periodParts.push(`To ${convertTo12Hour(toDT)}`);
+    const periodText = periodParts.length ? periodParts.join('  ->  ') : 'All Time';
 
     const statusApplied = statusFilter ? statusFilter : 'All';
     const closedStatusApplied = closedStatusFilter ? closedStatusFilter : 'All';
@@ -2981,23 +3009,39 @@ export default function Home() {
     const uniqueStatuses = Array.from(new Set(rows.map(r => String((r as any)['Status'] || '').trim()).filter(Boolean))).sort();
     const uniqueClosedStatuses = Array.from(new Set(rows.map(r => String((r as any)['Closed Status'] || '').trim()).filter(Boolean))).sort();
     const shiftSuffix = selectedShift ? ` | Shift: ${selectedShift}` : '';
-    addTitle(wsCover, 'FRT Barabanki - Supply Complaint Report', `Generated: ${new Date().toLocaleString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})${shiftSuffix}`);
+    addTitle(wsCover, 'FRT Barabanki - Supply Complaint Report', `Generated: ${generatedAt}${shiftSuffix}`);
     wsCover.addRow([]);
-    wsCover.addRow(['Overview']);
-    wsCover.getRow(4).font = { bold: true, size: 12 };
-    wsCover.addRow(['Total Complaints (filtered)', rows.length]);
-    wsCover.addRow([periodText]);
-    wsCover.addRow([`Filters: Status="${statusApplied}"`]);
+    // Label in column A, value in column B - the old cover crammed long lists
+    // into A and they ran under the 42-wide column.
+    const coverSection = (label: string) => {
+      const row = wsCover.addRow([label]);
+      row.height = 20;
+      row.getCell(1).font = { bold: true, size: 12, color: { argb: theme.titleColor } };
+      row.getCell(1).border = { bottom: theme.totalRule };
+      row.getCell(2).border = { bottom: theme.totalRule };
+    };
+    const coverEntry = (label: string, value: string | number, numFmt?: string) => {
+      const row = wsCover.addRow([label, value]);
+      row.getCell(1).font = { color: { argb: theme.metaColor } };
+      row.getCell(2).font = { bold: true, color: { argb: theme.titleColor } };
+      row.getCell(2).alignment = { vertical: 'top', wrapText: true };
+      if (numFmt) row.getCell(2).numFmt = numFmt;
+    };
+    coverSection('Overview');
+    coverEntry('Total Complaints (filtered)', rows.length, '#,##0');
+    coverEntry('Period', periodText);
+    coverEntry('Shift', selectedShift || 'All');
+    coverEntry('Status filter', statusApplied);
+    coverEntry('Closed Status filter', closedStatusApplied);
     wsCover.addRow([]);
-    wsCover.addRow(['Distinct Divisions', uniqueDivisions.length]);
-    wsCover.addRow([uniqueDivisions.join(', ') || '-']);
+    coverSection('Coverage');
+    coverEntry('Distinct Divisions', uniqueDivisions.length, '#,##0');
+    coverEntry('Divisions', uniqueDivisions.join(', ') || '-');
+    coverEntry('Distinct Statuses', uniqueStatuses.length, '#,##0');
+    coverEntry('Statuses', uniqueStatuses.join(', ') || '-');
+    coverEntry('Closed Statuses', uniqueClosedStatuses.join(', ') || '-');
     wsCover.addRow([]);
-    wsCover.addRow(['Distinct Statuses', uniqueStatuses.length]);
-    wsCover.addRow([uniqueStatuses.join(', ') || '-']);
-    wsCover.addRow([]);
-    wsCover.addRow([]);
-    wsCover.addRow(['Quick Navigation']);
-    wsCover.getRow(wsCover.lastRow.number).font = { bold: true, size: 12, color: { argb: theme.info } };
+    coverSection('Quick Navigation');
     const navLinks = [
       { text: 'All Complaints - Complete Data', sheet: '2. All Complaints Data' },
       { text: 'Division-wise Summary', sheet: '3. Division Summary' },
@@ -3022,7 +3066,7 @@ export default function Home() {
       const row = wsCover.addRow([link.text]);
       const cell = row.getCell(1);
       cell.value = { text: link.text, hyperlink: `#'${link.sheet}'!A1` };
-      cell.font = { color: { argb: 'FF0563C1' }, underline: true };
+      cell.font = { color: { argb: theme.link }, underline: true };
       cell.alignment = { vertical: 'middle' };
     });
     wsCover.getColumn(1).width = 42;
@@ -3030,8 +3074,8 @@ export default function Home() {
 
 
     // Sheet 1: Bulk Data
-    const wsData = wb.addWorksheet('2. All Complaints Data', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsData, 'All Complaints - Complete Data', `Generated: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}   |   ${periodSubtitle}`);
+    const wsData = wb.addWorksheet('2. All Complaints Data', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsData, 'All Complaints - Complete Data', `Generated: ${generatedAt}   |   ${periodSubtitle}`);
 
     const baseHeaders = Object.keys(rows[0]);
     const headers = (() => {
@@ -3049,28 +3093,14 @@ export default function Home() {
     const bodyStart = headerRowIndex + 1;
     const statusColIndex = headers.indexOf('Status') + 1; // 1-based
 
-    // Make time bold in date columns
-    const toRichDateTime = (val: string) => {
-      const timeMatch = val.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
-      if (!timeMatch) return val;
-      const datepart = val.substring(0, val.indexOf(timeMatch[1]));
-      return {
-        richText: [
-          { text: datepart },
-          { font: { bold: true, size: 11 }, text: timeMatch[1] }
-        ]
-      };
-    };
-
     // Status cell colors are applied in the single styling pass below
     const statusClasses: Array<'closed' | 'pending' | 'other'> = [];
     for (const r of rows) {
       const minutes = computeResolutionTimeMinutes(r);
       const rowVals = headers.map(h => {
         if (h === 'Resolution Time') return minutes === null ? '' : formatDuration(minutes * 60000);
-        if (h === 'Resolution Time (Minutes)') return minutes;
-        if (h === 'Complaint Date and Time') return toRichDateTime(formatDateTime(String((r as any)[h] ?? '')));
-        if (h === 'Closed Date') return toRichDateTime(formatDateTime(String((r as any)[h] ?? '')));
+        if (h === 'Resolution Time (Minutes)') return minutes === null ? '' : minutes;
+        if (h === 'Complaint Date and Time' || h === 'Closed Date') return toExcelDate(String((r as any)[h] ?? ''));
         return String((r as any)[h] ?? '');
       });
       wsData.addRow(rowVals);
@@ -3082,13 +3112,13 @@ export default function Home() {
     // Column widths and formatting
     const widthMap: Record<string, number> = {
       'Complaint Number': 20,
-      'Complaint Date and Time': 24,
+      'Complaint Date and Time': 22,
       'Division': 18,
       'Sub Division': 18,
       'Sub Station': 18,
       'Status': 18,
       'Closed By': 18,
-      'Closed Date': 18,
+      'Closed Date': 22,
       'Closing Remarks': 40,
       'Resolution Time': 14,
       'Resolution Time (Minutes)': 22,
@@ -3101,66 +3131,59 @@ export default function Home() {
         column.alignment = { wrapText: true, vertical: 'top' };
       }
       if (h === 'Resolution Time (Minutes)') {
-        column.numFmt = '0';
+        column.numFmt = '#,##0';
         column.alignment = { vertical: 'middle', horizontal: 'center' };
       }
+      if (h === 'Complaint Date and Time' || h === 'Closed Date') {
+        column.numFmt = DATE_TIME_FMT;
+      }
     });
-    // borders + alt rows + status colors in one pass. Shared style objects
-    // instead of per-cell property assignment: ExcelJS allocates a style per
-    // cell otherwise, and dedupes shared references at write time.
+    // Borders + column formats + status colour in one pass. Shared style objects
+    // instead of per-cell property assignment: ExcelJS allocates a style per cell
+    // otherwise, and dedupes shared references at write time. Assigning cell.style
+    // replaces the column numFmt, so every variant repeats the format it needs.
+    // No body fills - status reads as bold coloured text instead, which survives
+    // printing and does not band the sheet.
     const bodyEnd = wsData.lastRow.number;
-    const fullBorder = {
-      top: theme.border,
-      left: theme.border,
-      bottom: theme.border,
-      right: theme.border,
-    };
-    const altRowFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.altFill } };
-    // [0] = normal row, [1] = alternating row (alt fill wins over any base fill)
-    const stylePair = (style: Record<string, unknown>): Record<string, unknown>[] => [
-      { border: fullBorder, ...style },
-      { border: fullBorder, ...style, fill: altRowFill },
-    ];
-    const defaultCellStyles = stylePair({ alignment: { vertical: 'middle' } });
-    const remarksCellStyles = stylePair({ alignment: { wrapText: true, vertical: 'top' } });
-    const minutesCellStyles = stylePair({ alignment: { vertical: 'middle', horizontal: 'center' }, numFmt: '0' });
-    const statusCellStyles: Record<'closed' | 'pending' | 'other', Record<string, unknown>[]> = {
-      closed: stylePair({
-        alignment: { vertical: 'middle' },
-        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }, // light green
-        font: { bold: true, color: { argb: 'FF065F46' } }, // dark green text
-      }),
-      pending: stylePair({
-        alignment: { vertical: 'middle' },
-        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFECACA' } }, // light red
-        font: { bold: true, color: { argb: 'FF991B1B' } }, // dark red text
-      }),
-      other: stylePair({
-        alignment: { vertical: 'middle' },
-        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } }, // light amber
-        font: { bold: true, color: { argb: 'FF92400E' } }, // dark amber text
-      }),
+    const defaultCellStyle = { border: bodyBorder, alignment: { vertical: 'middle' } };
+    const remarksCellStyle = { border: bodyBorder, alignment: { wrapText: true, vertical: 'top' } };
+    const minutesCellStyle = { border: bodyBorder, alignment: { vertical: 'middle', horizontal: 'center' }, numFmt: '#,##0' };
+    const dateCellStyle = { border: bodyBorder, alignment: { vertical: 'middle', horizontal: 'center' }, numFmt: DATE_TIME_FMT };
+    const statusCellStyles: Record<'closed' | 'pending' | 'other', Record<string, unknown>> = {
+      closed: { border: bodyBorder, alignment: { vertical: 'middle' }, font: { bold: true, color: { argb: theme.closedText } } },
+      pending: { border: bodyBorder, alignment: { vertical: 'middle' }, font: { bold: true, color: { argb: theme.pendingText } } },
+      other: { border: bodyBorder, alignment: { vertical: 'middle' }, font: { bold: true, color: { argb: theme.otherText } } },
     };
     const remarksColNumber = headers.indexOf('Closing Remarks') + 1;
     const minutesColNumber = headers.indexOf('Resolution Time (Minutes)') + 1;
+    const complaintDateColNumber = headers.indexOf('Complaint Date and Time') + 1;
+    const closedDateColNumber = headers.indexOf('Closed Date') + 1;
     for (let r = bodyStart; r <= bodyEnd; r++) {
-      const alt = (r - bodyStart) % 2;
       const statusStyleForRow = statusCellStyles[statusClasses[r - bodyStart]];
       wsData.getRow(r).eachCell((cell: any, colNumber: number) => {
-        if (colNumber === statusColIndex) cell.style = statusStyleForRow[alt];
-        else if (colNumber === remarksColNumber) cell.style = remarksCellStyles[alt];
-        else if (colNumber === minutesColNumber) cell.style = minutesCellStyles[alt];
-        else cell.style = defaultCellStyles[alt];
+        if (colNumber === statusColIndex) cell.style = statusStyleForRow;
+        else if (colNumber === remarksColNumber) cell.style = remarksCellStyle;
+        else if (colNumber === minutesColNumber) cell.style = minutesCellStyle;
+        else if (colNumber === complaintDateColNumber || colNumber === closedDateColNumber) cell.style = dateCellStyle;
+        else cell.style = defaultCellStyle;
       });
     }
     wsData.autoFilter = {
       from: { row: headerRowIndex, column: 1 },
       to: { row: headerRowIndex, column: headers.length },
     };
+    wsData.pageSetup = {
+      ...(wsData.pageSetup || {}),
+      orientation: 'landscape',
+      printTitlesRow: `${headerRowIndex}:${headerRowIndex}`,
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+    };
 
     // Sheet 2: Summary by Division
-    const wsSummary = wb.addWorksheet('3. Division Summary', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsSummary, 'Division-wise Complaint Summary', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsSummary = wb.addWorksheet('3. Division Summary', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsSummary, 'Division-wise Complaint Summary', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
     const { rows: divRows, grand } = divisionTotals(rows);
     const sumHeaders = ['Division', 'Total', 'Closed', 'Pending'];
     wsSummary.addRow(sumHeaders);
@@ -3172,72 +3195,40 @@ export default function Home() {
     wsSummary.getColumn(2).width = 16;
     wsSummary.getColumn(3).width = 16;
     wsSummary.getColumn(4).width = 16;
-    // Borders and alternating fill
-    const sumEnd = wsSummary.lastRow.number;
-    for (let r = 3; r <= sumEnd; r++) {
-      wsSummary.getRow(r).eachCell((cell: any) => {
-        cell.border = {
-          top: theme.border,
-          left: theme.border,
-          bottom: theme.border,
-          right: theme.border,
-        };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col === 1 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsSummary, 4, sumEnd);
-    // Make Grand Total bold and colored
-    const gtRow = wsSummary.getRow(sumEnd);
-    gtRow.eachCell((cell: any, idx: number) => {
-      cell.font = { bold: true, color: { argb: idx === 4 ? theme.warning : theme.titleColor } };
-    });
+    finishTable(wsSummary, 3, 1);
 
     // Sheet 3: Date-wise Counts
-    const wsDate = wb.addWorksheet('4. Date-wise Total Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
+    const wsDate = wb.addWorksheet('4. Date-wise Total Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
     addTitle(wsDate, 'Date-wise Total Complaint Count', periodSubtitle);
     wsDate.addRow(['Date', 'Total Complaints']);
     styleHeaderRow(wsDate, 3);
+    // Bucket on YYYY-MM-DD so the rows really do sort chronologically: the old
+    // comparator rebuilt the date from the wrong capture groups (pa[0] is the
+    // whole match), got Invalid Date every time and left the days unsorted.
+    // The cell itself is a real date so Excel can sort and filter it as one.
     const dateMap = new Map<string, number>();
+    let undatedCount = 0;
     for (const r of rows) {
-      const s = String((r as any)['Complaint Date and Time'] || '');
-      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
-      const key = m ? m[1] : 'Unknown';
+      const key = dayKeyOf(String((r as any)['Complaint Date and Time'] || ''));
+      if (!key) {
+        undatedCount += 1;
+        continue;
+      }
       dateMap.set(key, (dateMap.get(key) || 0) + 1);
     }
-    const byDate = Array.from(dateMap.entries()).sort((a, b) => {
-      const pa = a[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const pb = b[0].match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
-      const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
-      return da.getTime() - db.getTime();
-    });
-    byDate.forEach(([d, c]) => wsDate.addRow([d, c]));
-    const dateTotal = byDate.reduce((acc, [, c]) => acc + (c as number), 0);
-    wsDate.addRow(['Grand Total', dateTotal]);
+    const byDate = Array.from(dateMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    byDate.forEach(([d, c]) => wsDate.addRow([dayKeyToDate(d), c]));
+    if (undatedCount) wsDate.addRow(['Unknown', undatedCount]);
+    wsDate.addRow(['Grand Total', rows.length]);
     wsDate.getColumn(1).width = 20;
+    wsDate.getColumn(1).numFmt = DATE_FMT;
     wsDate.getColumn(2).width = 22;
-    const dateEnd = wsDate.lastRow.number;
-    for (let r = 3; r <= dateEnd; r++) {
-      wsDate.getRow(r).eachCell((cell: any) => {
-        cell.border = {
-          top: theme.border,
-          left: theme.border,
-          bottom: theme.border,
-          right: theme.border,
-        };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col === 1 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsDate, 4, dateEnd);
-    const dateGt = wsDate.getRow(dateEnd);
-    dateGt.eachCell((cell: any, idx: number) => {
-      cell.font = { bold: true, color: { argb: idx === 2 ? theme.info : theme.titleColor } };
-    });
+    finishTable(wsDate, 3, 1);
     wsDate.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: 2 } };
 
     // Sheet 4: Status Breakdown
-    const wsStatus = wb.addWorksheet('5. Status Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsStatus, 'Complaint Status Breakdown', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsStatus = wb.addWorksheet('5. Status Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsStatus, 'Complaint Status Breakdown', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
     const statusMap = new Map<string, number>();
     for (const r of rows) {
       const s = String((r as any)['Status'] || '').trim() || 'Unknown';
@@ -3254,28 +3245,17 @@ export default function Home() {
     wsStatus.getColumn(1).width = 40;
     wsStatus.getColumn(2).width = 16;
     wsStatus.getColumn(3).width = 12;
-    const stEnd = wsStatus.lastRow.number;
-    for (let r = 3; r <= stEnd; r++) {
-      wsStatus.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col === 1 ? 'left' : 'center') };
-        if (cell.col === 3 && r > 3) {
-          cell.numFmt = '0.0%';
-          // share was in percent already (0-100); convert to fraction for display
-          const v = typeof cell.value === 'number' ? cell.value / 100 : cell.value;
-          cell.value = v;
-        }
-      });
+    // Share was stored as 0-100; Excel's percent format wants a fraction.
+    for (let r = 4; r <= wsStatus.lastRow.number; r++) {
+      const shareCell = wsStatus.getCell(r, 3);
+      if (typeof shareCell.value === 'number') shareCell.value = shareCell.value / 100;
+      shareCell.numFmt = '0.0%';
     }
-    setAlternatingRows(wsStatus, 4, stEnd);
-    const stGt = wsStatus.getRow(stEnd);
-    stGt.eachCell((cell: any, idx: number) => {
-      cell.font = { bold: true, color: { argb: idx === 2 ? theme.info : theme.titleColor } };
-    });
+    finishTable(wsStatus, 3, 1);
 
     // Sheet 5: Division Breakdown (Control Room vs FRT)
-    const wsDivBreakdown = wb.addWorksheet('6. Division Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsDivBreakdown, 'Division-wise Closed Complaints (Control Room vs FRT)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsDivBreakdown = wb.addWorksheet('6. Division Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsDivBreakdown, 'Division-wise Closed Complaints (Control Room vs FRT)', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
 
     // Calculate division-wise breakdown
     const divBreakdownMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
@@ -3339,22 +3319,11 @@ export default function Home() {
     wsDivBreakdown.getColumn(5).width = 14;
     wsDivBreakdown.getColumn(6).width = 14;
 
-    const divBreakEnd = wsDivBreakdown.lastRow.number;
-    for (let r = 3; r <= divBreakEnd; r++) {
-      wsDivBreakdown.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col === 1 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsDivBreakdown, 4, divBreakEnd);
-    const divBreakGt = wsDivBreakdown.getRow(divBreakEnd);
-    divBreakGt.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: theme.titleColor } };
-    });
+    finishTable(wsDivBreakdown, 3, 1);
 
     // Sheet 6: Detailed Breakdown (Division + Sub Division + Sub Station)
-    const wsDetailedBreakdown = wb.addWorksheet('7. Detailed Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsDetailedBreakdown, 'Detailed Closed Breakdown (Division / Sub Division / Sub Station)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsDetailedBreakdown = wb.addWorksheet('7. Detailed Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsDetailedBreakdown, 'Detailed Closed Breakdown (Division / Sub Division / Sub Station)', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
 
     // Calculate detailed breakdown
     const detailedMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
@@ -3431,29 +3400,16 @@ export default function Home() {
     wsDetailedBreakdown.getColumn(7).width = 12;
     wsDetailedBreakdown.getColumn(8).width = 12;
 
-    const detailedEnd = wsDetailedBreakdown.lastRow.number;
-    for (let r = 3; r <= detailedEnd; r++) {
-      wsDetailedBreakdown.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col <= 3 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsDetailedBreakdown, 4, detailedEnd);
-    const detailedGt = wsDetailedBreakdown.getRow(detailedEnd);
-    detailedGt.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: theme.titleColor } };
-    });
+    finishTable(wsDetailedBreakdown, 3, 3);
 
     // Sheet 7: Date-wise Breakdown (Control Room vs FRT)
-    const wsDateBreakdown = wb.addWorksheet('8. Date-wise Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsDateBreakdown, 'Date-wise Closed Complaints (Control Room vs FRT)', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsDateBreakdown = wb.addWorksheet('8. Date-wise Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsDateBreakdown, 'Date-wise Closed Complaints (Control Room vs FRT)', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
 
     // Calculate date-wise breakdown
     const dateBreakdownMap = new Map<string, { total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
     for (const r of rows) {
-      const s = String(r['Complaint Date and Time'] || '');
-      const m = s.match(/(\d{2}\/\d{2}\/\d{4})/);
-      const date = m ? m[1] : 'Unknown';
+      const date = dayKeyOf(String(r['Complaint Date and Time'] || '')) || 'Unknown';
 
       const closedBy = String(r['Closed By'] ?? '').trim().toUpperCase();
       const isClosed = isClosedRow(r);
@@ -3481,11 +3437,9 @@ export default function Home() {
     const dateBreakdownRows = Array.from(dateBreakdownMap.entries())
       .map(([date, stats]) => ({ date, ...stats }))
       .sort((a, b) => {
-        const pa = a.date.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-        const pb = b.date.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-        const da = pa ? new Date(`${pa[2]}-${pa[1]}-${pa[0]}`) : new Date(0);
-        const db = pb ? new Date(`${pb[2]}-${pb[1]}-${pb[0]}`) : new Date(0);
-        return da.getTime() - db.getTime();
+        if (a.date === 'Unknown') return 1;
+        if (b.date === 'Unknown') return -1;
+        return a.date.localeCompare(b.date);
       });
 
     // Calculate grand totals
@@ -3509,32 +3463,25 @@ export default function Home() {
 
     wsDateBreakdown.addRow(['Date', 'Total', 'Closed', 'Control Room', 'FRT', 'Pending']);
     styleHeaderRow(wsDateBreakdown, 3);
-    dateBreakdownRows.forEach(r => wsDateBreakdown.addRow([r.date, r.total, r.closed, r.controlRoom, r.frt, r.pending]));
+    dateBreakdownRows.forEach(r => wsDateBreakdown.addRow([
+      r.date === 'Unknown' ? 'Unknown' : dayKeyToDate(r.date),
+      r.total, r.closed, r.controlRoom, r.frt, r.pending,
+    ]));
     wsDateBreakdown.addRow(['Grand Total', grandDateBreakdown.total, grandDateBreakdown.closed, grandDateBreakdown.controlRoom, grandDateBreakdown.frt, grandDateBreakdown.pending]);
 
     wsDateBreakdown.getColumn(1).width = 20;
+    wsDateBreakdown.getColumn(1).numFmt = DATE_FMT;
     wsDateBreakdown.getColumn(2).width = 14;
     wsDateBreakdown.getColumn(3).width = 14;
     wsDateBreakdown.getColumn(4).width = 18;
     wsDateBreakdown.getColumn(5).width = 14;
     wsDateBreakdown.getColumn(6).width = 14;
 
-    const dateBreakEnd = wsDateBreakdown.lastRow.number;
-    for (let r = 3; r <= dateBreakEnd; r++) {
-      wsDateBreakdown.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col === 1 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsDateBreakdown, 4, dateBreakEnd);
-    const dateBreakGt = wsDateBreakdown.getRow(dateBreakEnd);
-    dateBreakGt.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: theme.titleColor } };
-    });
+    finishTable(wsDateBreakdown, 3, 1);
 
     // Sheet 8: Top Sub Stations
-    const wsTopSS = wb.addWorksheet('9. Sub Station Wise Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsTopSS, 'Sub Station-wise Total Complaint Count', `Total: ${rows.length} complaints   |   ${periodSubtitle}`);
+    const wsTopSS = wb.addWorksheet('9. Sub Station Wise Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsTopSS, 'Sub Station-wise Total Complaint Count', `Total: ${rows.length.toLocaleString('en-US')} complaints   |   ${periodSubtitle}`);
     const ssMap = new Map<string, number>();
     for (const r of rows) {
       const division = String(r['Division'] || '').trim() || 'Unknown';
@@ -3552,22 +3499,16 @@ export default function Home() {
     wsTopSS.addRow(['Division', 'Sub Division', 'Sub Station', 'Total Complaints']);
     styleHeaderRow(wsTopSS, 3);
     topSS.forEach(r => wsTopSS.addRow([r.division, r.subDivision, r.subStation, r.count]));
+    wsTopSS.addRow(['Grand Total', '', '', topSS.reduce((acc, r) => acc + r.count, 0)]);
     wsTopSS.getColumn(1).width = 24;
     wsTopSS.getColumn(2).width = 24;
     wsTopSS.getColumn(3).width = 28;
     wsTopSS.getColumn(4).width = 18;
-    const ssEnd = wsTopSS.lastRow.number;
-    for (let r = 3; r <= ssEnd; r++) {
-      wsTopSS.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col <= 3 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsTopSS, 4, ssEnd);
+    finishTable(wsTopSS, 3, 3);
 
     // Sheet 9: Sub Division Summary
-    const wsSubDivSummary = wb.addWorksheet('10. Sub Division Summary', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsSubDivSummary, 'Sub Division-wise Summary', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsSubDivSummary = wb.addWorksheet('10. Sub Division Summary', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsSubDivSummary, 'Sub Division-wise Summary', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
     const subDivMap = new Map<string, { division: string; total: number; closed: number; pending: number }>();
     for (const r of rows) {
       const division = String(r['Division'] ?? '').trim() || 'Unknown';
@@ -3603,22 +3544,11 @@ export default function Home() {
     wsSubDivSummary.getColumn(3).width = 14;
     wsSubDivSummary.getColumn(4).width = 14;
     wsSubDivSummary.getColumn(5).width = 14;
-    const subDivSumEnd = wsSubDivSummary.lastRow.number;
-    for (let r = 3; r <= subDivSumEnd; r++) {
-      wsSubDivSummary.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col <= 2 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsSubDivSummary, 4, subDivSumEnd);
-    const subDivGt = wsSubDivSummary.getRow(subDivSumEnd);
-    subDivGt.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: theme.titleColor } };
-    });
+    finishTable(wsSubDivSummary, 3, 2);
 
     // Sheet 10: Sub Station Summary
-    const wsSubStnSummary = wb.addWorksheet('11. Sub Station Summary', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsSubStnSummary, 'Sub Station-wise Summary', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsSubStnSummary = wb.addWorksheet('11. Sub Station Summary', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsSubStnSummary, 'Sub Station-wise Summary', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
     const subStnMap = new Map<string, { division: string; subDivision: string; total: number; closed: number; pending: number }>();
     for (const r of rows) {
       const division = String(r['Division'] ?? '').trim() || 'Unknown';
@@ -3656,22 +3586,11 @@ export default function Home() {
     wsSubStnSummary.getColumn(4).width = 12;
     wsSubStnSummary.getColumn(5).width = 12;
     wsSubStnSummary.getColumn(6).width = 12;
-    const subStnSumEnd = wsSubStnSummary.lastRow.number;
-    for (let r = 3; r <= subStnSumEnd; r++) {
-      wsSubStnSummary.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col <= 3 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsSubStnSummary, 4, subStnSumEnd);
-    const subStnGt = wsSubStnSummary.getRow(subStnSumEnd);
-    subStnGt.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: theme.titleColor } };
-    });
+    finishTable(wsSubStnSummary, 3, 3);
 
     // Sheet 11: Sub Division Closed Breakdown
-    const wsSubDivBreak = wb.addWorksheet('12. Sub Div Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsSubDivBreak, 'Sub Division - FRT vs Control Room', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsSubDivBreak = wb.addWorksheet('12. Sub Div Closed Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsSubDivBreak, 'Sub Division - FRT vs Control Room', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
     const subDivBreakdownMap = new Map<string, { division: string; total: number; closed: number; controlRoom: number; frt: number; pending: number }>();
     for (const r of rows) {
       const division = String(r['Division'] ?? '').trim() || 'Unknown';
@@ -3723,22 +3642,11 @@ export default function Home() {
     wsSubDivBreak.getColumn(5).width = 16;
     wsSubDivBreak.getColumn(6).width = 12;
     wsSubDivBreak.getColumn(7).width = 12;
-    const subDivBreakEnd = wsSubDivBreak.lastRow.number;
-    for (let r = 3; r <= subDivBreakEnd; r++) {
-      wsSubDivBreak.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col <= 2 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsSubDivBreak, 4, subDivBreakEnd);
-    const subDivBreakGt = wsSubDivBreak.getRow(subDivBreakEnd);
-    subDivBreakGt.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: theme.titleColor } };
-    });
+    finishTable(wsSubDivBreak, 3, 2);
 
     // Sheet 12: Division Count
-    const wsDivCount = wb.addWorksheet('13. Division Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsDivCount, 'Division-wise Total Complaint Count', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsDivCount = wb.addWorksheet('13. Division Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsDivCount, 'Division-wise Total Complaint Count', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
     const divCountMap = new Map<string, number>();
     for (const r of rows) {
       const s = String(r['Division'] || '').trim() || 'Unknown';
@@ -3752,22 +3660,11 @@ export default function Home() {
     wsDivCount.addRow(['Grand Total', divCountSum]);
     wsDivCount.getColumn(1).width = 36;
     wsDivCount.getColumn(2).width = 20;
-    const divCountEnd = wsDivCount.lastRow.number;
-    for (let r = 3; r <= divCountEnd; r++) {
-      wsDivCount.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col === 1 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsDivCount, 4, divCountEnd);
-    const divCountGt = wsDivCount.getRow(divCountEnd);
-    divCountGt.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: theme.titleColor } };
-    });
+    finishTable(wsDivCount, 3, 1);
 
     // Sheet 13: Sub Division Count
-    const wsSubDivCount = wb.addWorksheet('14. Sub Division Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsSubDivCount, 'Sub Division-wise Total Complaint Count', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsSubDivCount = wb.addWorksheet('14. Sub Division Count', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsSubDivCount, 'Sub Division-wise Total Complaint Count', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
     const subDivCountMap = new Map<string, number>();
     for (const r of rows) {
       const division = String(r['Division'] || '').trim() || 'Unknown';
@@ -3789,22 +3686,11 @@ export default function Home() {
     wsSubDivCount.getColumn(1).width = 24;
     wsSubDivCount.getColumn(2).width = 24;
     wsSubDivCount.getColumn(3).width = 20;
-    const subDivCountEnd = wsSubDivCount.lastRow.number;
-    for (let r = 3; r <= subDivCountEnd; r++) {
-      wsSubDivCount.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col <= 2 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsSubDivCount, 4, subDivCountEnd);
-    const subDivCountGt = wsSubDivCount.getRow(subDivCountEnd);
-    subDivCountGt.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: theme.titleColor } };
-    });
+    finishTable(wsSubDivCount, 3, 2);
 
     // Sheet 14: Closed Status Division
-    const wsClosedStatusDiv = wb.addWorksheet('15. Closed Status Division', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsClosedStatusDiv, 'Within/Beyond Status - Division-wise', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsClosedStatusDiv = wb.addWorksheet('15. Closed Status Division', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsClosedStatusDiv, 'Within/Beyond Status - Division-wise', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
     const csMapDiv = new Map<string, { total: number; closedWithin: number; closedBeyond: number }>();
     for (const r of rows) {
       const division = String(r['Division'] ?? '').trim() || 'Unknown';
@@ -3833,22 +3719,11 @@ export default function Home() {
     wsClosedStatusDiv.getColumn(2).width = 14;
     wsClosedStatusDiv.getColumn(3).width = 18;
     wsClosedStatusDiv.getColumn(4).width = 18;
-    const csEndDiv = wsClosedStatusDiv.lastRow.number;
-    for (let r = 3; r <= csEndDiv; r++) {
-      wsClosedStatusDiv.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col === 1 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsClosedStatusDiv, 4, csEndDiv);
-    const csDivGt = wsClosedStatusDiv.getRow(csEndDiv);
-    csDivGt.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: theme.titleColor } };
-    });
+    finishTable(wsClosedStatusDiv, 3, 1);
 
     // Sheet 15: Closed Status Sub Division
-    const wsClosedStatusSubDiv = wb.addWorksheet('16. Closed Status Sub Div', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsClosedStatusSubDiv, 'Within/Beyond Status - Sub Division-wise', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsClosedStatusSubDiv = wb.addWorksheet('16. Closed Status Sub Div', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsClosedStatusSubDiv, 'Within/Beyond Status - Sub Division-wise', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
     const csMapSubDiv = new Map<string, { total: number; closedWithin: number; closedBeyond: number }>();
     for (const r of rows) {
       const division = String(r['Division'] ?? '').trim() || 'Unknown';
@@ -3883,22 +3758,11 @@ export default function Home() {
     wsClosedStatusSubDiv.getColumn(3).width = 14;
     wsClosedStatusSubDiv.getColumn(4).width = 18;
     wsClosedStatusSubDiv.getColumn(5).width = 18;
-    const csEndSubDiv = wsClosedStatusSubDiv.lastRow.number;
-    for (let r = 3; r <= csEndSubDiv; r++) {
-      wsClosedStatusSubDiv.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col <= 2 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsClosedStatusSubDiv, 4, csEndSubDiv);
-    const csSubDivGt = wsClosedStatusSubDiv.getRow(csEndSubDiv);
-    csSubDivGt.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: theme.titleColor } };
-    });
+    finishTable(wsClosedStatusSubDiv, 3, 2);
 
     // Sheet 16: Closed Status Sub Station
-    const wsClosedStatusSubStn = wb.addWorksheet('17. Closed Status Sub Stn', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsClosedStatusSubStn, 'Within/Beyond Status - Sub Station-wise', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsClosedStatusSubStn = wb.addWorksheet('17. Closed Status Sub Stn', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsClosedStatusSubStn, 'Within/Beyond Status - Sub Station-wise', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
     const csMapSubStn = new Map<string, { total: number; closedWithin: number; closedBeyond: number }>();
     for (const r of rows) {
       const division = String(r['Division'] ?? '').trim() || 'Unknown';
@@ -3935,22 +3799,11 @@ export default function Home() {
     wsClosedStatusSubStn.getColumn(4).width = 12;
     wsClosedStatusSubStn.getColumn(5).width = 16;
     wsClosedStatusSubStn.getColumn(6).width = 16;
-    const csEndSubStn = wsClosedStatusSubStn.lastRow.number;
-    for (let r = 3; r <= csEndSubStn; r++) {
-      wsClosedStatusSubStn.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col <= 3 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsClosedStatusSubStn, 4, csEndSubStn);
-    const csSubStnGt = wsClosedStatusSubStn.getRow(csEndSubStn);
-    csSubStnGt.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: theme.titleColor } };
-    });
+    finishTable(wsClosedStatusSubStn, 3, 3);
 
     // Sheet 18: Area Type Breakdown
-    const wsAreaType = wb.addWorksheet('18. Area Type Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3 }] });
-    addTitle(wsAreaType, 'Area Type - Within/Beyond Analysis', `Total Complaints: ${rows.length}   |   ${periodSubtitle}`);
+    const wsAreaType = wb.addWorksheet('18. Area Type Breakdown', { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, showGridLines: false }] });
+    addTitle(wsAreaType, 'Area Type - Within/Beyond Analysis', `Total Complaints: ${rows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`);
     const atMap = new Map<string, { within: number; beyond: number }>();
     for (const r of rows) {
       const areaType = String(r['Area Type'] ?? '').trim() || 'Unknown';
@@ -3982,21 +3835,10 @@ export default function Home() {
     wsAreaType.getColumn(2).width = 18;
     wsAreaType.getColumn(3).width = 18;
     wsAreaType.getColumn(4).width = 14;
-    const atEnd = wsAreaType.lastRow.number;
-    for (let r = 3; r <= atEnd; r++) {
-      wsAreaType.getRow(r).eachCell((cell: any) => {
-        cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-        cell.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : (cell.col === 1 ? 'left' : 'center') };
-      });
-    }
-    setAlternatingRows(wsAreaType, 4, atEnd);
-    const atGt = wsAreaType.getRow(atEnd);
-    atGt.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: theme.titleColor } };
-    });
+    finishTable(wsAreaType, 3, 1);
 
     // Sheet 19: Average Resolution Time by Area Type
-    const wsAreaTypeAvg = wb.addWorksheet('19. Avg Res Time Area Type', { views: [{ state: 'frozen', xSplit: 0, ySplit: 4 }] });
+    const wsAreaTypeAvg = wb.addWorksheet('19. Avg Res Time Area Type', { views: [{ state: 'frozen', xSplit: 0, ySplit: 4, showGridLines: false }] });
     const areaTypeResolutionRows: Array<{ monthKey: string; monthLabel: string; areaType: string; minutes: number }> = [];
     const areaTypesSet = new Set<string>();
     for (const r of rows) {
@@ -4013,7 +3855,7 @@ export default function Home() {
     addTitle(
       wsAreaTypeAvg,
       'Average Resolution Time (Minutes) by Area Type',
-      `Closed complaints with valid resolution time: ${areaTypeResolutionRows.length}   |   ${periodSubtitle}`
+      `Closed complaints with valid resolution time: ${areaTypeResolutionRows.length.toLocaleString('en-US')}   |   ${periodSubtitle}`
     );
 
     const areaTypes = Array.from(areaTypesSet).sort((a, b) => {
@@ -4051,9 +3893,9 @@ export default function Home() {
       for (let rowNum = 3; rowNum <= 4; rowNum++) {
         for (let colNum = 1; colNum <= avgHeaderLastCol; colNum++) {
           const cell = wsAreaTypeAvg.getCell(rowNum, colNum);
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9EAD3' } };
-          cell.font = { bold: true, color: { argb: theme.titleColor }, size: rowNum === 3 ? 13 : 11 };
-          cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.headerFill } };
+          cell.font = { bold: true, color: { argb: theme.headerFont }, size: rowNum === 3 ? 12 : 11 };
+          cell.border = bodyBorder;
           cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
         }
       }
@@ -4079,15 +3921,19 @@ export default function Home() {
 
       const avgBodyStart = 5;
       const avgBodyEnd = wsAreaTypeAvg.lastRow.number;
-      for (let r = 3; r <= avgBodyEnd; r++) {
-        wsAreaTypeAvg.getRow(r).eachCell((cell: any) => {
-          cell.border = { top: theme.border, left: theme.border, bottom: theme.border, right: theme.border };
-          if (r >= avgBodyStart) {
-            cell.alignment = { vertical: 'middle', horizontal: 'center' };
-          }
+      for (let r = avgBodyStart; r <= avgBodyEnd; r++) {
+        wsAreaTypeAvg.getRow(r).eachCell((cell: any, col: number) => {
+          cell.border = bodyBorder;
+          cell.alignment = { vertical: 'middle', horizontal: col === 1 ? 'left' : 'center' };
         });
       }
-      setAlternatingRows(wsAreaTypeAvg, avgBodyStart, avgBodyEnd);
+      wsAreaTypeAvg.pageSetup = {
+        ...(wsAreaTypeAvg.pageSetup || {}),
+        printTitlesRow: '3:4',
+        fitToPage: true,
+        fitToWidth: 1,
+        fitToHeight: 0,
+      };
     }
 
     // File name
