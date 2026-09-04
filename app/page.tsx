@@ -18,9 +18,16 @@ import autoTable from 'jspdf-autotable';
 // under the serverless response size limit and well inside the time budget.
 const EXPORT_CHUNK_SIZE = 5000;
 // How many date windows an export is split across so their keyset walks can run
-// at the same time. Kept deliberately small: each window is another concurrent
-// RPC against the same (shared, IO-budgeted) database.
-const EXPORT_PARALLEL_WINDOWS = 4;
+// at the same time. Measured against the live database (190k rows, Sep 2026):
+// one page of 5000 takes ~4s, two concurrent pages also ~4s, but FOUR concurrent
+// pages take 14-20s each and start dying on the Postgres statement timeout. The
+// database has about two queries' worth of useful concurrency, so asking for
+// more is slower than asking for less, and eventually fails outright.
+const EXPORT_PARALLEL_WINDOWS = 2;
+// A page that trips the statement timeout is transient - the same page usually
+// succeeds once the database is not busy. Losing it would throw away the whole
+// export, so retry a few times, backing off to let the load drain.
+const EXPORT_CHUNK_RETRIES = 3;
 
 // Excel has no native chart API in ExcelJS, so report charts are painted on a
 // canvas and embedded as images. Greys + black outlines only, to match the
@@ -558,20 +565,42 @@ export default function Home() {
         params.set('afterId', String(cursor.id));
       }
 
-      const response = await fetch(`/api/complaints?${params.toString()}`);
-      const body = await response.text();
+      let result: any = null;
+      let lastError = '';
+      for (let attempt = 0; attempt <= EXPORT_CHUNK_RETRIES; attempt++) {
+        if (attempt > 0) {
+          await new Promise(resolve => setTimeout(resolve, 800 * attempt));
+        }
 
-      let result: any;
-      try {
-        result = JSON.parse(body);
-      } catch {
-        throw new Error(
-          `Server returned a non-JSON response (HTTP ${response.status}) after ${rows.length} rows: ${body.slice(0, 120)}`
-        );
+        let response: Response;
+        let body: string;
+        try {
+          response = await fetch(`/api/complaints?${params.toString()}`);
+          body = await response.text();
+        } catch (err: any) {
+          lastError = err?.message || 'network error';
+          continue;
+        }
+
+        let parsed: any;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          lastError = `Server returned a non-JSON response (HTTP ${response.status}): ${body.slice(0, 120)}`;
+          continue;
+        }
+
+        if (!response.ok || !parsed.success) {
+          lastError = parsed?.error || `HTTP ${response.status}`;
+          continue;
+        }
+
+        result = parsed;
+        break;
       }
 
-      if (!response.ok || !result.success) {
-        throw new Error(result?.error || `Failed to fetch rows for export (HTTP ${response.status})`);
+      if (!result) {
+        throw new Error(`Failed to fetch rows for export after ${rows.length} rows: ${lastError}`);
       }
 
       const page = result.data || [];
