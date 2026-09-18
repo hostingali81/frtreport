@@ -240,7 +240,7 @@ export async function loadFromNewDb() {
     while (true) {
         const { data, error } = await supabase
             .from('complaints')
-            .select('complaint_number, division, sub_division, sub_station, consumer_name, consumer_mobile, consumer_address, complaint_type, complaint_sub_type, status, closed_status, closed_by, complaint_date, closed_date, closing_remarks, area_type, feeder')
+            .select('complaint_number, division, sub_division, sub_station, consumer_name, consumer_mobile, consumer_address, complaint_type, complaint_sub_type, status, closed_status, closed_by, complaint_date, closed_date, closing_remarks, area_type, feeder, soc, account_number')
             // NULLS FIRST to match idx_complaints_date_id (see serverActions).
             .order('complaint_date', { ascending: false, nullsFirst: true })
             .range(from, from + batchSize - 1);
@@ -299,7 +299,9 @@ export async function loadFromNewDb() {
             'Closed Date': formatDT(row.closed_date),
             'Closing Remarks': row.closing_remarks,
             'Area Type': row.area_type,
-            'Feeder': row.feeder
+            'Feeder': row.feeder,
+            'SOC': row.soc,
+            'Account Number': row.account_number
         })),
         total: count || 0,
         lastScrapedAt,
@@ -380,7 +382,9 @@ export async function saveToNewDb(
             closed_date: toISTISOString(closedDate),
             closing_remarks: row['Closing Remarks'],
             area_type: row['Area Type'],
-            feeder: row['Feeder'] || null
+            feeder: row['Feeder'] || null,
+            soc: row['SOC'] || null,
+            account_number: row['Account Number'] || null
         };
 
         return { ...record, content_hash: createHash('md5').update(JSON.stringify(record)).digest('hex') };
@@ -549,7 +553,9 @@ export async function insertOnlyNewDb(
             closed_date: toISTISOString(closedDate),
             closing_remarks: row['Closing Remarks'],
             area_type: row['Area Type'],
-            feeder: row['Feeder'] || null
+            feeder: row['Feeder'] || null,
+            soc: row['SOC'] || null,
+            account_number: row['Account Number'] || null
         };
 
         return { ...record, content_hash: createHash('md5').update(JSON.stringify(record)).digest('hex') };

@@ -71,6 +71,7 @@ export default function TrendCharts({ stats }: TrendChartsProps) {
   const dailyTrendChartRef = useRef<HTMLCanvasElement>(null);
   const beyondChartRef = useRef<HTMLCanvasElement>(null);
   const areaTypeChartRef = useRef<HTMLCanvasElement>(null);
+  const socChartRef = useRef<HTMLCanvasElement>(null);
   const divisionChartRef = useRef<HTMLCanvasElement>(null);
   const subStationChartRef = useRef<HTMLCanvasElement>(null);
 
@@ -89,6 +90,7 @@ export default function TrendCharts({ stats }: TrendChartsProps) {
     const divisionData = stats.byDivision.map(({ k, n }) => [k, n] as [string, number]);
     const subStationData = stats.bySubStation.slice(0, 15).map(({ k, n }) => [k, n] as [string, number]);
     const areaTypeData = stats.byAreaType.map(({ k, n }) => [k, n] as [string, number]);
+    const socData = (stats.bySoc || []).map(({ k, n }) => [k, n] as [string, number]);
 
     instances.current.forEach((c) => c.destroy());
     instances.current = [];
@@ -303,7 +305,61 @@ export default function TrendCharts({ stats }: TrendChartsProps) {
       }
     }
 
-    // 5. Divisions — one series, one color (slot 1); the bar length is the data.
+    // 5. Source of complaint (SOC) — part-to-whole, which channel complaints
+    // arrive through (helpline, IVRS, app, chatbot, social media...).
+    if (socChartRef.current && socData.length > 0) {
+      const ctx = socChartRef.current.getContext('2d');
+      if (ctx) {
+        const socTotal = socData.reduce((sum, [, n]) => sum + n, 0);
+        track(new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: socData.map(([name]) => name),
+            datasets: [{
+              data: socData.map(([, count]) => count),
+              backgroundColor: socData.map((_, i) => CAT[i % CAT.length]),
+              borderColor: SURFACE,
+              borderWidth: 2,
+              hoverBorderColor: SURFACE,
+              hoverBorderWidth: 2,
+              hoverOffset: 4
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '64%',
+            plugins: {
+              legend: {
+                position: 'bottom',
+                labels: {
+                  usePointStyle: true, boxWidth: 8, boxHeight: 8, color: INK.secondary, font: { size: 11 },
+                  generateLabels: (chart: any) =>
+                    chart.data.labels.map((label: string, i: number) => ({
+                      text: `${label} (${nfmt(chart.data.datasets[0].data[i])})`,
+                      fillStyle: chart.data.datasets[0].backgroundColor[i],
+                      strokeStyle: SURFACE,
+                      pointStyle: 'circle',
+                      fontColor: INK.secondary,
+                      index: i
+                    }))
+                }
+              },
+              tooltip: {
+                ...TOOLTIP,
+                callbacks: {
+                  label: (context: any) =>
+                    ` ${context.label}: ${nfmt(context.parsed)} (${((context.parsed / socTotal) * 100).toFixed(1)}%)`
+                }
+              }
+            }
+          },
+          plugins: [doughnutCenter('Total')]
+        }));
+      }
+    }
+
+    // 6. Divisions — one series, one color (slot 1); the bar length is the data.
     if (divisionChartRef.current && divisionData.length > 0) {
       const ctx = divisionChartRef.current.getContext('2d');
       if (ctx) {
@@ -340,7 +396,7 @@ export default function TrendCharts({ stats }: TrendChartsProps) {
       }
     }
 
-    // 6. Top substations — ranked, one color; counts at the bar end.
+    // 7. Top substations — ranked, one color; counts at the bar end.
     if (subStationChartRef.current && subStationData.length > 0) {
       const ctx = subStationChartRef.current.getContext('2d');
       if (ctx) {
@@ -423,6 +479,22 @@ export default function TrendCharts({ stats }: TrendChartsProps) {
         height={300}
       >
         <canvas ref={areaTypeChartRef}></canvas>
+      </ChartCard>
+
+      <ChartCard
+        title="Source of Complaint"
+        subtitle="Which channel complaints are lodged through"
+        height={300}
+      >
+        {(stats.bySoc || []).length > 0 ? (
+          <canvas ref={socChartRef}></canvas>
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-gray-400 font-medium text-sm text-center px-4">
+              No SOC data yet for this selection — re-scrape to backfill.
+            </p>
+          </div>
+        )}
       </ChartCard>
 
       <ChartCard

@@ -34,7 +34,9 @@ const SORT_COLUMNS: Record<string, string> = {
   'Sub Division': 'sub_division',
   'Sub Station': 'sub_station',
   'Closed By': 'closed_by',
-  'Closing Remarks': 'closing_remarks'
+  'Closing Remarks': 'closing_remarks',
+  'SOC': 'soc',
+  'Account Number': 'account_number'
 };
 
 function getISTDateParts(date: Date) {
@@ -344,7 +346,7 @@ export async function GET(request: Request) {
 
   let query = supabase
     .from('complaints')
-    .select('complaint_number, division, sub_division, sub_station, consumer_name, consumer_mobile, consumer_address, complaint_type, complaint_sub_type, status, closed_status, closed_by, complaint_date, closed_date, closing_remarks, area_type, feeder, id', { count: 'exact' })
+    .select('complaint_number, division, sub_division, sub_station, consumer_name, consumer_mobile, consumer_address, complaint_type, complaint_sub_type, status, closed_status, closed_by, complaint_date, closed_date, closing_remarks, area_type, feeder, soc, account_number, id', { count: 'exact' })
     .order(sortColumn, { ascending: sortAscending })
     .order('id', { ascending: false });
 
@@ -387,7 +389,9 @@ export async function GET(request: Request) {
         'Closed Date': formatDT(row.closed_date),
         'Closing Remarks': row.closing_remarks,
         'Area Type': row.area_type,
-        'Feeder': row.feeder
+        'Feeder': row.feeder,
+        'SOC': row.soc,
+        'Account Number': row.account_number
       };
     }),
     total: count || 0,

@@ -46,6 +46,17 @@ export interface RepeatConsumer {
   complaints: Record<string, string>[];
 }
 
+export interface RepeatAccount {
+  accountNumber: string;
+  mobile: string;
+  name: string;
+  address: string;
+  total: number;
+  pending: number;
+  closed: number;
+  complaints: Record<string, string>[];
+}
+
 // Shape of the get_complaints_stats RPC payload (served by /api/complaints/stats).
 export interface ChartStats {
   total: number;
@@ -58,6 +69,10 @@ export interface ChartStats {
   // (scraped before the FRT report exposed the column) are excluded, so
   // sum(n) < total is expected.
   byFeeder?: { k: string; ss: string; n: number; pending: number; beyond: number; resSum: number; resN: number }[];
+  // Source-of-complaint distribution (phone / CONSUMER APP / IVRS / CHATBOT /
+  // Twitter handles / Email). Excludes the 'Unknown' bucket for the same
+  // reason byFeeder does: rows scraped before this column existed dominate it.
+  bySoc?: { k: string; n: number }[];
   beyondByDivision: { k: string; n: number }[];
   daily: { d: string; n: number; cr: number; frt: number; resSum: number; resN: number }[];
   months: { key: string; label: string; total: number; beyond: number; resSum: number; resN: number }[];
@@ -66,6 +81,7 @@ export interface ChartStats {
   monthDivision: { m: string; k: string; n: number; resSum: number; resN: number }[];
   repeatMobile: RepeatConsumer[];
   repeatNameAddr: RepeatConsumer[];
+  repeatAccount?: RepeatAccount[];
 }
 
 interface DataContextType {

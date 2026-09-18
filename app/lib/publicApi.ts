@@ -25,6 +25,8 @@ export const COMPLAINT_FIELDS = [
   'sub_division',
   'sub_station',
   'feeder',
+  'soc',
+  'account_number',
   'area_type',
   'complaint_type',
   'complaint_sub_type',
@@ -96,6 +98,7 @@ export const EQUALITY_FILTERS: Array<{ column: string; aliases: string[] }> = [
   { column: 'complaint_sub_type', aliases: ['complaintSubType', 'complaint_sub_type', 'complaintsubtype'] },
   { column: 'complaint_number', aliases: ['complaintNumber', 'complaint_number', 'complaintNo', 'complaintno'] },
   { column: 'consumer_mobile', aliases: ['mobile', 'consumerMobile', 'consumer_mobile'] },
+  { column: 'account_number', aliases: ['accountNumber', 'account_number', 'accountno'] },
   { column: 'dataid', aliases: ['dataid', 'dataId'] }
 ];
 

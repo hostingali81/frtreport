@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { FiSmartphone, FiMapPin, FiActivity, FiX, FiList } from 'react-icons/fi';
-import type { ChartStats, RepeatConsumer } from '../context/DataContext';
+import { FiSmartphone, FiMapPin, FiActivity, FiX, FiList, FiHash } from 'react-icons/fi';
+import type { ChartStats, RepeatConsumer, RepeatAccount } from '../context/DataContext';
 
 interface ConsumerInsightsProps {
     stats: ChartStats;
@@ -9,9 +9,9 @@ interface ConsumerInsightsProps {
 const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ stats }) => {
     const [limit, setLimit] = useState(10);
     const [selectedConsumer, setSelectedConsumer] = useState<{
-        type: 'mobile' | 'address';
+        type: 'mobile' | 'address' | 'account';
         key: string;
-        details: RepeatConsumer;
+        details: RepeatConsumer | RepeatAccount;
         complaints: Record<string, string>[];
     } | null>(null);
 
@@ -19,11 +19,21 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ stats }) => {
     // complaint history embedded, sorted by total desc).
     const byMobile = stats.repeatMobile;
     const byNameAddress = stats.repeatNameAddr;
+    const byAccount = stats.repeatAccount || [];
 
     const handleRowClick = (type: 'mobile' | 'address', item: RepeatConsumer) => {
         setSelectedConsumer({
             type,
             key: type === 'mobile' ? item.mobile : `${item.name}|${item.address}`,
+            details: item,
+            complaints: item.complaints || []
+        });
+    };
+
+    const handleAccountRowClick = (item: RepeatAccount) => {
+        setSelectedConsumer({
+            type: 'account',
+            key: item.accountNumber,
             details: item,
             complaints: item.complaints || []
         });
@@ -60,7 +70,7 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ stats }) => {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-8">
                 {/* Card 1: By Mobile */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden flex flex-col h-full">
                     <div className="p-6 bg-gradient-to-r from-purple-50 to-indigo-50 border-b border-purple-100">
@@ -204,6 +214,79 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ stats }) => {
                         </div>
                     )}
                 </div>
+
+                {/* Card 3: By Account Number */}
+                <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden flex flex-col h-full">
+                    <div className="p-6 bg-gradient-to-r from-teal-50 to-cyan-50 border-b border-teal-100">
+                        <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                            <span className="p-2 bg-teal-100 text-teal-700 rounded-lg"><FiHash /></span>
+                            Top Repeaters by Account Number
+                        </h3>
+                        <p className="text-sm text-gray-500 mt-1 pl-11">Consolidated by consumer electricity account number</p>
+                    </div>
+
+                    <div className="flex-1 overflow-auto p-0">
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider sticky top-0 z-10">
+                                <tr>
+                                    <th className="px-6 py-3 font-semibold">Rank</th>
+                                    <th className="px-6 py-3 font-semibold">Details</th>
+                                    <th className="px-6 py-3 font-semibold text-center">Complaints</th>
+                                    <th className="px-6 py-3 font-semibold text-center">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {byAccount.slice(0, limit).map((item, idx) => (
+                                    <tr
+                                        key={idx}
+                                        onClick={() => handleAccountRowClick(item)}
+                                        className="hover:bg-teal-50 transition-colors cursor-pointer group"
+                                    >
+                                        <td className="px-6 py-4 text-center w-16 font-bold text-gray-400 group-hover:text-teal-600">#{idx + 1}</td>
+                                        <td className="px-6 py-4">
+                                            <div className="font-bold text-gray-900 font-mono text-base group-hover:text-teal-700 transition-colors flex items-center gap-2">
+                                                {item.accountNumber}
+                                                <FiList className="opacity-0 group-hover:opacity-100 text-teal-500" size={14} />
+                                            </div>
+                                            <div className="text-sm text-gray-600 truncate max-w-[200px]" title={item.name}>{item.name}</div>
+                                            <div className="text-xs text-blue-500 mt-1 flex items-center gap-1">
+                                                <FiSmartphone size={10} /> {item.mobile}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="flex flex-col items-center">
+                                                <span className={`px-2 py-1 rounded-full text-xs font-bold border ${getBadgeColor(item.total)}`}>
+                                                    {item.total} Total
+                                                </span>
+                                                {renderProgressBar(item.total, byAccount[0]?.total || 1, 'bg-teal-500')}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-center text-xs">
+                                            <div className="space-y-1">
+                                                <div className="text-red-600 font-medium">{item.pending} Pending</div>
+                                                <div className="text-green-600 font-medium">{item.closed} Closed</div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                                {byAccount.length === 0 && (
+                                    <tr>
+                                        <td colSpan={4} className="px-6 py-8 text-center text-gray-500 italic">
+                                            No repeat patterns found by account number.
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                    {byAccount.length > limit && (
+                        <div className="p-4 border-t border-gray-100 bg-gray-50 text-center">
+                            <button onClick={() => setLimit(l => l + 10)} className="text-teal-600 hover:text-teal-800 active:text-teal-900 font-medium text-sm transition active:scale-95">
+                                Show More
+                            </button>
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* Drill-down Modal */}
@@ -220,6 +303,8 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ stats }) => {
                                 <p className="text-gray-400 text-sm mt-1">
                                     {selectedConsumer.type === 'mobile' ? (
                                         <>Mobile: <span className="text-white font-mono">{selectedConsumer.key}</span> • {selectedConsumer.details.name}</>
+                                    ) : selectedConsumer.type === 'account' ? (
+                                        <>Account: <span className="text-white font-mono">{selectedConsumer.key}</span> • {selectedConsumer.details.name}</>
                                     ) : (
                                         <>Consumer: <span className="text-white">{selectedConsumer.details.name}</span> • {selectedConsumer.details.address}</>
                                     )}
@@ -255,7 +340,8 @@ const ConsumerInsights: React.FC<ConsumerInsightsProps> = ({ stats }) => {
                                             <td className="px-6 py-4 text-sm text-gray-700">
                                                 <div className="font-semibold">{c['Division']}</div>
                                                 <div className="text-xs text-gray-500">{c['Sub Station']}</div>
-                                                {c['Feeder'] && <div className="text-xs text-amber-600">Feeder: {c['Feeder']}</div>}
+                                                {c['Feeder'] && c['Feeder'] !== 'Unknown' && <div className="text-xs text-amber-600">Feeder: {c['Feeder']}</div>}
+                                                {c['SOC'] && c['SOC'] !== 'Unknown' && <div className="text-xs text-teal-600">Source: {c['SOC']}</div>}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                                                 {c['Complaint Date and Time']}

@@ -28,6 +28,7 @@ const FILTER_PARAMS: Row[] = [
   { name: 'complaintSubType', type: 'string', detail: 'e.g. No Supply, Major Power Failure, Distribution Transformer.' },
   { name: 'complaintNumber', type: 'string', detail: 'One or more complaint numbers.' },
   { name: 'mobile', type: 'string', detail: 'Consumer mobile number. Also accepted as consumerMobile.' },
+  { name: 'accountNumber', type: 'string', detail: 'Consumer electricity account number. Also accepted as account_number.' },
   { name: 'dataid', type: 'integer', detail: 'The record id used by the upstream FRT system.' }
 ];
 
@@ -71,6 +72,8 @@ const FIELDS: Row[] = [
   { name: 'sub_division', type: 'string', detail: 'Sub-division under the division.' },
   { name: 'sub_station', type: 'string', detail: '33/11 KV sub-station the supply comes from.' },
   { name: 'feeder', type: 'string', detail: '11 KV feeder. The same feeder name can exist under two sub-stations.' },
+  { name: 'soc', type: 'string', detail: 'Source of complaint - a phone number, or CONSUMER APP, IVRS, CHATBOT.' },
+  { name: 'account_number', type: 'string', detail: "Consumer's electricity account number. Blank on some complaints." },
   { name: 'area_type', type: 'string', detail: 'Urban, Rural, Industrial or Class1.' },
   { name: 'complaint_type', type: 'string', detail: 'Top-level category.' },
   { name: 'complaint_sub_type', type: 'string', detail: 'Specific fault category.' },
@@ -364,6 +367,8 @@ export default async function ApiDocsPage() {
       "sub_division": "EDSD-RAMSANEHI GHAT",
       "sub_station": "33/11 KV DULAADEPUR",
       "feeder": "Katwa Sadak",
+      "soc": "CONSUMER APP",
+      "account_number": "4198996244",
       "area_type": "Rural",
       "complaint_type": "Supply Related",
       "complaint_sub_type": "No Supply",

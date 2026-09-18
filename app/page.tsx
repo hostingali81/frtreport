@@ -5388,6 +5388,7 @@ export default function Home() {
                           'Consumer Name',
                           'Consumer Mobile',
                           'Consumer Address',
+                          'Account Number',
                           'Complaint Type',
                           'Complaint Sub Type',
                           'Status',
@@ -5400,6 +5401,7 @@ export default function Home() {
                           'Sub Division',
                           'Sub Station',
                           'Feeder',
+                          'SOC',
                           'Closed By',
                           'Closing Remarks'
                         ];
@@ -5431,6 +5433,7 @@ export default function Home() {
                         'Consumer Name',
                         'Consumer Mobile',
                         'Consumer Address',
+                        'Account Number',
                         'Complaint Type',
                         'Complaint Sub Type',
                         'Status',
@@ -5443,6 +5446,7 @@ export default function Home() {
                         'Sub Division',
                         'Sub Station',
                         'Feeder',
+                        'SOC',
                         'Closed By',
                         'Closing Remarks'
                       ];
