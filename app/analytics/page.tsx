@@ -2,7 +2,7 @@
 
 import { ReactNode, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FiActivity, FiArrowLeft, FiClock, FiDatabase, FiLoader, FiPhoneCall, FiRefreshCw, FiRepeat, FiTool, FiTrendingUp, FiZap } from 'react-icons/fi';
+import { FiActivity, FiArrowLeft, FiClock, FiDatabase, FiLoader, FiMessageSquare, FiPhoneCall, FiRefreshCw, FiRepeat, FiTool, FiTrendingUp, FiZap } from 'react-icons/fi';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import FilterBar from '../components/FilterBar';
@@ -22,8 +22,9 @@ const ConsumerInsights = dynamic(() => import('../components/ConsumerInsights'),
 const FeederReport = dynamic(() => import('../components/FeederReport'), { ssr: false, loading: () => <LoadingSkeleton /> });
 const CallingReport = dynamic(() => import('../components/CallingReport'), { ssr: false, loading: () => <LoadingSkeleton /> });
 const FieldReport = dynamic(() => import('../components/FieldReport'), { ssr: false, loading: () => <LoadingSkeleton /> });
+const RemarksAnalysis = dynamic(() => import('../components/RemarksAnalysis'), { ssr: false, loading: () => <LoadingSkeleton /> });
 
-type TabId = 'trends' | 'deep' | 'months' | 'consumers' | 'feeders' | 'calling' | 'field';
+type TabId = 'trends' | 'deep' | 'months' | 'consumers' | 'feeders' | 'remarks' | 'calling' | 'field';
 
 const TABS: { id: TabId; label: string; icon: ReactNode }[] = [
   { id: 'deep', label: 'Deep Analysis', icon: <FiActivity /> },
@@ -31,6 +32,7 @@ const TABS: { id: TabId; label: string; icon: ReactNode }[] = [
   { id: 'trends', label: 'Trends', icon: <FiTrendingUp /> },
   { id: 'months', label: 'Month Comparison', icon: <FiDatabase /> },
   { id: 'consumers', label: 'Repeat Consumers', icon: <FiRepeat /> },
+  { id: 'remarks', label: 'Remarks Analysis', icon: <FiMessageSquare /> },
   { id: 'calling', label: 'Calling Report', icon: <FiPhoneCall /> },
   { id: 'field', label: 'Field Report', icon: <FiTool /> }
 ];
@@ -228,6 +230,7 @@ export default function AnalyticsPage() {
             {activeTab === 'months' && <MonthComparison stats={stats} />}
             {activeTab === 'consumers' && <ConsumerInsights stats={stats} />}
             {activeTab === 'feeders' && <FeederReport stats={stats} />}
+            {activeTab === 'remarks' && <RemarksAnalysis />}
           </div>
         )}
       </div>
