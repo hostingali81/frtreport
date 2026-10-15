@@ -79,6 +79,11 @@ class _DetailSheetState extends State<DetailSheet> {
   bool _callTracked = false;
   bool _exact = false; // duration came from the device call log
   bool _connected = false;
+  // When the consumer call was placed. The device call log is searched by
+  // number, so without this a repeat call could read the PREVIOUS call's row
+  // (written minutes ago) before the OS has written this one — and save that
+  // call's talk time and Connected verdict against this attempt.
+  DateTime? _dialedAt;
 
   String? _claimedByOther;
 
@@ -233,6 +238,7 @@ class _DetailSheetState extends State<DetailSheet> {
     Haptics.medium();
     final perms = await CallChannel.ensureCallPermissions();
     _perms = perms;
+    _dialedAt = DateTime.now();
 
     if (perms.phoneState) {
       try {
@@ -375,7 +381,11 @@ class _DetailSheetState extends State<DetailSheet> {
       await Future.delayed(Duration(milliseconds: 800 + attempt * 700));
       final entry = await CallChannel.lastOutgoingCall(mobile);
       if (entry == null) continue;
-      if (DateTime.now().millisecondsSinceEpoch - entry.dateMillis > 30 * 60 * 1000) continue;
+      // The row for THIS call starts at or after the tap (small slack for clock
+      // rounding / SIM-picker timing); anything older is an earlier call.
+      final since = (_dialedAt ?? DateTime.now().subtract(const Duration(minutes: 30)))
+          .subtract(const Duration(seconds: 10));
+      if (entry.dateMillis < since.millisecondsSinceEpoch) continue;
       if (!mounted) return;
       setState(() {
         _exact = true;
@@ -514,6 +524,14 @@ class _DetailSheetState extends State<DetailSheet> {
     try {
       await Api.logRaw(payload);
     } on ApiException catch (e) {
+      // A permanent rejection (bad payload) needs the operator's attention. A
+      // transient one — server 5xx, auth mid-refresh, rate limit — is the same
+      // situation as no internet: keep the log on the phone and let the outbox
+      // retry it, instead of leaving the operator stuck on a failing Save.
+      if (e.retryable) {
+        await _queueOffline(payload, 'Server busy — log saved on the phone, will sync');
+        return;
+      }
       Haptics.error();
       if (mounted) {
         setState(() {
@@ -524,14 +542,7 @@ class _DetailSheetState extends State<DetailSheet> {
       return;
     } catch (_) {
       // Network down — keep it in the outbox; it syncs on the next refresh.
-      _logged = true;
-      await Store.queueLog(payload);
-      await Store.removeDraft(widget.complaint.dataid);
-      Haptics.success();
-      if (mounted) {
-        showSnack(context, 'No internet — log saved on the phone, will sync');
-        Navigator.pop(context, 'logged');
-      }
+      await _queueOffline(payload, 'No internet — log saved on the phone, will sync');
       return;
     }
     _logged = true;
@@ -540,6 +551,17 @@ class _DetailSheetState extends State<DetailSheet> {
     if (mounted) {
       showSnack(context, 'Call logged');
       // The complaints screen sees the 'logged' result and refreshes.
+      Navigator.pop(context, 'logged');
+    }
+  }
+
+  Future<void> _queueOffline(Map<String, dynamic> payload, String message) async {
+    _logged = true;
+    await Store.queueLog(payload);
+    await Store.removeDraft(widget.complaint.dataid);
+    Haptics.success();
+    if (mounted) {
+      showSnack(context, message);
       Navigator.pop(context, 'logged');
     }
   }

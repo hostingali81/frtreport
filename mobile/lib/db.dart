@@ -51,7 +51,14 @@ class Db {
 
   static Future<bool> _runProbe(String uid) async {
     try {
-      final row = await _sb.from('profiles').select('id, active').eq('id', uid).maybeSingle();
+      // Every read waits on this probe, so a hung connection must not stall them
+      // all — on timeout it counts as a failure and the /api routes take over.
+      final row = await _sb
+          .from('profiles')
+          .select('id, active')
+          .eq('id', uid)
+          .maybeSingle()
+          .timeout(const Duration(seconds: 15));
       final ok = row != null && row['active'] == true;
       if (ok) {
         _readyFor = uid;

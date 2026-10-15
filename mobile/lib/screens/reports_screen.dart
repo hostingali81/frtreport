@@ -43,21 +43,27 @@ class _ReportsScreenState extends State<ReportsScreen> {
     _load();
   }
 
+  // Tapping Today → This Month quickly starts two requests; the month one is
+  // slower, but whichever finishes last would win and show the wrong range
+  // under the selected chip. Only the newest request may apply its result.
+  int _loadSeq = 0;
+
   Future<void> _load() async {
+    final seq = ++_loadSeq;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final d = await Api.reports(from: _fmt.format(_from), to: _fmt.format(_to), filters: _filters);
-      if (!mounted) return;
+      if (!mounted || seq != _loadSeq) return;
       setState(() {
         _data = d;
         _availableFilters = d['availableFilters'] as Map<String, dynamic>?;
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || seq != _loadSeq) return;
       setState(() {
         _error = '$e';
         _loading = false;
@@ -71,10 +77,21 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (picked == null) return;
     setState(() {
       _preset = 'custom';
+      // Keep the range ordered: a start after the end (or an end before the
+      // start) would query an empty range and show zero calls.
+      // Compared as the y-m-d strings actually sent: _from/_to mix the IST
+      // wall-clock (UTC-flagged) value with the picker's local dates.
       if (isFrom) {
         _from = picked;
       } else {
         _to = picked;
+      }
+      if (_fmt.format(_from).compareTo(_fmt.format(_to)) > 0) {
+        if (isFrom) {
+          _to = picked;
+        } else {
+          _from = picked;
+        }
       }
     });
     _load();

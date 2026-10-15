@@ -104,6 +104,17 @@ class Store {
 
   static int pendingCount() => outbox().length + drafts().length;
 
+  // Everything that belongs to the signed-in operator. Cleared on sign-out:
+  // the outbox is replayed under whoever is signed in when it syncs (log_call
+  // takes the operator from the session), so a colleague signing in on the same
+  // phone would otherwise file these calls under their own name.
+  static Future<void> clearUserData() async {
+    await _p?.remove('outbox');
+    await _p?.remove('drafts');
+    await _p?.remove('complaints_cache');
+    await _p?.remove('complaints_cache_at');
+  }
+
   // --- Cached complaints (offline view) ---
 
   static Future<void> cacheComplaints(List<Map<String, dynamic>> raw) async {

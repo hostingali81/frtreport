@@ -41,12 +41,18 @@ class _HomeScreenState extends State<HomeScreen> {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         if (snap.hasError || !snap.hasData) {
+          // A deactivated account (or a revoked session) fails here on every
+          // retry, and the only other Log out button lives behind this screen —
+          // so offer it here too, or the operator is stuck.
           return Scaffold(
             body: EmptyState(
               icon: Icons.error_outline,
               title: 'Could not load your profile',
               subtitle: '${snap.error ?? ''}',
-              action: FilledButton(onPressed: () => setState(() => _userFuture = Api.me()), child: const Text('Retry')),
+              action: Column(mainAxisSize: MainAxisSize.min, children: [
+                FilledButton(onPressed: () => setState(() => _userFuture = Api.me()), child: const Text('Retry')),
+                TextButton(onPressed: () => signOutWithPendingCheck(context), child: const Text('Log out')),
+              ]),
             ),
           );
         }

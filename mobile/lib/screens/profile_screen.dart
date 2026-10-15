@@ -10,6 +10,41 @@ import '../theme.dart';
 import '../updater.dart';
 import '../widgets.dart';
 
+// Sign out without silently losing — or mis-attributing — this operator's
+// unsynced call logs. Tries the outbox once; if logs are still stuck on the
+// phone, the operator decides whether to stay and sync or discard them.
+Future<void> signOutWithPendingCheck(BuildContext context) async {
+  await Store.syncOutbox();
+  final pending = Store.pendingCount();
+  if (pending > 0 && context.mounted) {
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Unsynced call logs'),
+        content: Text(
+          '$pending call log${pending == 1 ? ' is' : 's are'} still on this phone and not saved to the server. '
+          'Logging out will discard ${pending == 1 ? 'it' : 'them'}. Connect to the internet and finish them from '
+          '"call logs pending" on the Calls screen first.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Stay signed in')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Discard & log out'),
+          ),
+        ],
+      ),
+    );
+    if (discard != true) return;
+  }
+  await Store.clearUserData();
+  // Drop the cached "direct reads work for this user" probe so the next
+  // person to sign in is checked against their own profile.
+  Db.reset();
+  await Supabase.instance.client.auth.signOut();
+}
+
 class ProfileScreen extends StatefulWidget {
   final SessionUser user;
   const ProfileScreen({super.key, required this.user});
@@ -144,12 +179,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
     );
-    if (ok == true) {
-      // Drop the cached "direct reads work for this user" probe so the next
-      // person to sign in is checked against their own profile.
-      Db.reset();
-      await Supabase.instance.client.auth.signOut();
-    }
+    if (ok == true && mounted) await signOutWithPendingCheck(context);
   }
 
   @override

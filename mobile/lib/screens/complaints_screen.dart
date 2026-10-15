@@ -43,7 +43,12 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with WidgetsBinding
   Timer? _realtimeDebounce;
   RealtimeChannel? _channel;
   bool _foreground = true;
+  bool _subscribing = false;
   bool _resyncing = false;
+  // _load() fires from Realtime, the poll, app resume and sheet close, so two
+  // can overlap. Only the newest one may apply its result — otherwise a slow,
+  // older response overwrites a fresher list (and re-fires the same alerts).
+  int _loadSeq = 0;
   DateTime? _lastCallerIdFetch;
 
   // The list used to be polled every 30s so a colleague's "on call" claim (it
@@ -135,9 +140,22 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with WidgetsBinding
   // it carries is queue state without the joined complaint data, so a change
   // triggers a refetch of the view rather than a local patch.
   Future<void> _subscribe() async {
-    if (_channel != null || !await Db.ready()) return;
-    if (!mounted) return;
-    _channel = Supabase.instance.client
+    // initState, app resume and the poll can all land here together; without
+    // the flag each would pass the null check during the Db.ready() await and
+    // open its own channel, leaking all but the last.
+    if (_channel != null || _subscribing) return;
+    _subscribing = true;
+    try {
+      if (!await Db.ready() || !mounted || !_foreground || _channel != null) return;
+      _openChannel();
+    } finally {
+      _subscribing = false;
+    }
+  }
+
+  void _openChannel() {
+    late final RealtimeChannel ch;
+    ch = Supabase.instance.client
         .channel('public:live_complaints')
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
@@ -151,12 +169,15 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with WidgetsBinding
           },
         )
         .subscribe((status, _) {
-          if (!mounted) return;
+          // A late status from a channel already replaced or torn down must not
+          // remove its successor.
+          if (!mounted || !identical(_channel, ch)) return;
           // A channel error means the table isn't published for Realtime (or the
           // socket was refused) — drop back to polling so claims stay visible.
           if (status != RealtimeSubscribeStatus.subscribed) _unsubscribe();
           _restartPoll();
         });
+    _channel = ch;
     _restartPoll();
   }
 
@@ -194,10 +215,11 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with WidgetsBinding
   }
 
   Future<void> _load() async {
+    final seq = ++_loadSeq;
     try {
       final raw = await Api.complaintsRaw();
       final list = raw.map(Complaint.fromJson).toList();
-      if (!mounted) return;
+      if (!mounted || seq != _loadSeq) return;
       setState(() {
         _all = list;
         _error = null;
@@ -210,7 +232,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with WidgetsBinding
       _syncOutboxIfAny();
       _fetchCallerIdCache();
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || seq != _loadSeq) return;
       final cached = Store.cachedComplaints();
       if (cached.isNotEmpty) {
         // Offline: keep working from the last good list.
@@ -539,7 +561,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with WidgetsBinding
                                   child: EmptyState(
                                     icon: Icons.inbox_outlined,
                                     title: _all.isEmpty ? 'No complaints yet' : 'Nothing matches your filters',
-                                    subtitle: _all.isEmpty ? 'Tap "Latest" to pull the live grid.' : 'Try clearing the search or filters.',
+                                    subtitle: _all.isEmpty ? 'Tap "Refresh" to pull the live grid.' : 'Try clearing the search or filters.',
                                     action: _all.isEmpty ? FilledButton.icon(onPressed: _syncing ? null : _fetchLatest, icon: const Icon(Icons.refresh, size: 18), label: const Text('Fetch Latest')) : null,
                                   ),
                                 )

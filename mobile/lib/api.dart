@@ -42,7 +42,7 @@ class Api {
   ) async {
     if (await Db.ready()) {
       try {
-        return await direct();
+        return await direct().timeout(_timeout);
       } catch (_) {
         // Fall through to the API rather than failing the screen.
       }
@@ -111,12 +111,20 @@ class Api {
     throw ApiException('HTTP ${r.statusCode}', statusCode: r.statusCode);
   }
 
-  static Future<Map<String, dynamic>> _get(String path) =>
-      _send((h) => http.get(Uri.parse('${Config.apiBaseUrl}$path'), headers: h));
+  // Without a timeout a request on a dead mobile connection waits for the OS
+  // TCP timeout (minutes), leaving a spinner on screen with no way out. Routes
+  // that log in to FRT (sync, contact miss) get Vercel's full 60s maxDuration
+  // plus headroom. A TimeoutException is not an ApiException, so a call log that
+  // times out lands in the offline outbox like any other network failure.
+  static const _timeout = Duration(seconds: 30);
+  static const _slowTimeout = Duration(seconds: 75);
+
+  static Future<Map<String, dynamic>> _get(String path, {Duration timeout = _timeout}) =>
+      _send((h) => http.get(Uri.parse('${Config.apiBaseUrl}$path'), headers: h).timeout(timeout));
   static Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) =>
-      _send((h) => http.post(Uri.parse('${Config.apiBaseUrl}$path'), headers: h, body: jsonEncode(body)));
+      _send((h) => http.post(Uri.parse('${Config.apiBaseUrl}$path'), headers: h, body: jsonEncode(body)).timeout(_timeout));
   static Future<Map<String, dynamic>> _patch(String path, Map<String, dynamic> body) =>
-      _send((h) => http.patch(Uri.parse('${Config.apiBaseUrl}$path'), headers: h, body: jsonEncode(body)));
+      _send((h) => http.patch(Uri.parse('${Config.apiBaseUrl}$path'), headers: h, body: jsonEncode(body)).timeout(_timeout));
 
   static Future<SessionUser> me() async => SessionUser.fromJson((await _get('/api/auth/me'))['user']);
 
@@ -141,7 +149,7 @@ class Api {
         },
       );
 
-  static Future<Map<String, dynamic>> sync() => _get('/api/calling/sync');
+  static Future<Map<String, dynamic>> sync() => _get('/api/calling/sync', timeout: _slowTimeout);
 
   // A contact that has already been fetched is a plain Supabase row, so read it
   // directly; only a genuine cache miss needs the route, whose reason to exist
@@ -149,13 +157,14 @@ class Api {
   static Future<Contact> contact(int dataid) async {
     if (await Db.ready()) {
       try {
-        final cached = await Db.cachedContact(dataid);
+        final cached = await Db.cachedContact(dataid).timeout(_timeout);
         if (cached != null) return Contact.fromJson(cached);
       } catch (_) {
         // Fall through to the route rather than failing the sheet.
       }
     }
-    return Contact.fromJson((await _get('/api/calling/contact?dataid=$dataid'))['contact']);
+    return Contact.fromJson(
+        (await _get('/api/calling/contact?dataid=$dataid', timeout: _slowTimeout))['contact']);
   }
 
   // One complaint by dataid — a single fast lookup for the incoming-call flow
@@ -203,7 +212,7 @@ class Api {
   static Future<void> logRaw(Map<String, dynamic> payload) async {
     if (await Db.ready()) {
       try {
-        final r = await Db.logCall(payload);
+        final r = await Db.logCall(payload).timeout(_timeout);
         if (r['success'] == true) return;
       } on PostgrestException catch (_) {
         // Refused by the server, so nothing landed — the route can retry and

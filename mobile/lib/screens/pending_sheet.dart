@@ -216,6 +216,13 @@ class _DraftDialogState extends State<_DraftDialog> {
     try {
       await Api.logRaw(payload);
     } on ApiException catch (e) {
+      if (e.retryable) {
+        // Server hiccup, not a bad payload — same as offline: outbox retries it.
+        await Store.queueLog(payload);
+        await Store.removeDraft((d['dataid'] as num).toInt());
+        if (mounted) Navigator.pop(context, true);
+        return;
+      }
       if (mounted) {
         setState(() {
           _error = '$e';
