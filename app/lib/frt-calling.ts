@@ -90,15 +90,17 @@ export function parseResultsByChild(xml: string): Record<string, Array<Record<st
     return out;
 }
 
-// FRT list dates come as M/D/YYYY h:mm:ss AM/PM (IST). Store as timestamptz IST.
+// FRT list dates come as M/D/YYYY h:mm:ss AM/PM (IST) — or, since 2026-10-15,
+// M/D/YYYY HH:mm:ss in 24-hour time with no AM/PM. Store as timestamptz IST.
 export function parseFrtDateTime(value: string | undefined | null): string | null {
     if (!value) return null;
-    const m = value.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)/i);
+    const m = value.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
     if (!m) return null;
     const [, mm, dd, yyyy, hh, min, ss, ap] = m;
     let hours = Number(hh);
-    if (/pm/i.test(ap) && hours < 12) hours += 12;
-    if (/am/i.test(ap) && hours === 12) hours = 0;
+    if (ap && /pm/i.test(ap) && hours < 12) hours += 12;
+    if (ap && /am/i.test(ap) && hours === 12) hours = 0;
+    if (hours > 23) return null;
     const p = (n: number | string) => String(n).padStart(2, '0');
     return `${yyyy}-${p(mm)}-${p(dd)}T${p(hours)}:${p(min)}:${p(ss || '00')}+05:30`;
 }
@@ -332,36 +334,70 @@ export async function saveContact(contact: ContactRecord): Promise<ContactRecord
     const supabase = getSupabaseClient();
     if (!supabase) throw new Error('Supabase is not configured');
     
-    // Get the complaint_number associated with this dataid
-    const { data: lc, error: lcError } = await supabase
+    // The complaints row is keyed by complaint_number. A complaint that has
+    // left the live grid (an incoming call about last week's complaint) is no
+    // longer guaranteed a live_complaints row, so fall back to the complaints
+    // table itself. Neither knowing it is not an error: the operator still gets
+    // the contact they asked for, it just isn't cached.
+    let complaintNumber: string | null = null;
+    const { data: lc } = await supabase
         .from('live_complaints')
         .select('complaint_number')
         .eq('dataid', contact.dataid)
         .maybeSingle();
-
-    if (!lc || lcError) {
-        throw new Error(`Cannot save contact: no live_complaint found for dataid ${contact.dataid}`);
+    complaintNumber = lc?.complaint_number ?? null;
+    if (!complaintNumber) {
+        const { data: c } = await supabase
+            .from('complaints')
+            .select('complaint_number')
+            .eq('dataid', contact.dataid)
+            .maybeSingle();
+        complaintNumber = c?.complaint_number ?? null;
+    }
+    if (!complaintNumber) {
+        console.warn(`[CALLING] contact for dataid ${contact.dataid} not cached: complaint number unknown`);
+        return contact;
     }
 
     // Upsert only the contact fields into the main complaints table; the
     // descriptive/status columns are owned by the sync RPC and report scraper.
-    const { error } = await supabase
+    // Blank fields are left out rather than written as NULL: an upsert writes
+    // every key it is given, so one empty child control in the FRT detail
+    // response would otherwise wipe the consumer name/mobile/substation the
+    // report scraper already stored.
+    const fields: Record<string, string | null> = {
+        consumer_name: contact.consumer_name,
+        consumer_mobile: contact.mobile,
+        consumer_address: contact.address,
+        landmark: contact.landmark,
+        assigned_crew: contact.assigned_crew,
+        crew_mobile: contact.crew_mobile,
+        sub_station: contact.substation,
+        consumer_remarks: contact.remarks
+    };
+    const row: Record<string, string | number | null> = { complaint_number: complaintNumber, dataid: contact.dataid };
+    for (const [k, v] of Object.entries(fields)) if (v !== null) row[k] = v;
+
+    const { data: saved, error } = await supabase
         .from('complaints')
-        .upsert({
-            complaint_number: lc.complaint_number,
-            dataid: contact.dataid,
-            consumer_name: contact.consumer_name,
-            consumer_mobile: contact.mobile,
-            consumer_address: contact.address,
-            landmark: contact.landmark,
-            assigned_crew: contact.assigned_crew,
-            crew_mobile: contact.crew_mobile,
-            sub_station: contact.substation,
-            consumer_remarks: contact.remarks
-        }, { onConflict: 'complaint_number' });
+        .upsert(row, { onConflict: 'complaint_number' })
+        .select('consumer_name, consumer_mobile, consumer_address, landmark, consumer_remarks, sub_station, assigned_crew, crew_mobile')
+        .maybeSingle();
 
     if (error) throw new Error(`complaints upsert failed: ${error.message}`);
-    return contact;
+    // Hand back what is now stored, so a field FRT left blank this time still
+    // shows the value the report scraper had (e.g. the consumer's mobile).
+    return {
+        dataid: contact.dataid,
+        consumer_name: saved?.consumer_name ?? contact.consumer_name,
+        mobile: saved?.consumer_mobile ?? contact.mobile,
+        address: saved?.consumer_address ?? contact.address,
+        landmark: saved?.landmark ?? contact.landmark,
+        remarks: saved?.consumer_remarks ?? contact.remarks,
+        substation: saved?.sub_station ?? contact.substation,
+        assigned_crew: saved?.assigned_crew ?? contact.assigned_crew,
+        crew_mobile: saved?.crew_mobile ?? contact.crew_mobile
+    };
 }
 
 export async function getCachedContact(dataId: number): Promise<ContactRecord | null> {

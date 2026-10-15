@@ -79,6 +79,15 @@ export async function GET(request: Request) {
     const todayIst = istDateOnly(new Date());
     const from = searchParams.get('from') || subtractDays(todayIst, 6);
     const to = searchParams.get('to') || todayIst;
+    // Both go straight into PostgREST filter strings below.
+    const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+    if (!DATE_ONLY.test(from) || !DATE_ONLY.test(to)) {
+      return NextResponse.json({ success: false, error: 'from/to must be YYYY-MM-DD' }, { status: 400 });
+    }
+    // Exclusive upper bound at the next IST midnight. `<= 23:59:59` dropped
+    // calls logged in the last fraction of a second of the day (call_time
+    // carries microseconds).
+    const toExclusive = subtractDays(to, -1);
 
     // ---- filters (Group A: call-level, Group B: complaint-level) ----
     const fStatus = parseList(searchParams.get('status'));               // call_status
@@ -106,7 +115,7 @@ export async function GET(request: Request) {
         .from('call_logs')
         .select(SELECT_COLS)
         .gte('call_time', `${from}T00:00:00+05:30`)
-        .lte('call_time', `${to}T23:59:59+05:30`)
+        .lt('call_time', `${toExclusive}T00:00:00+05:30`)
         .order('call_time', { ascending: false })
         .order('id', { ascending: false }) // stable tiebreak so offset paging can't skip/dupe rows
         .range(offset, offset + BATCH - 1);

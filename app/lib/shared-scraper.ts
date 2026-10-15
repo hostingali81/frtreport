@@ -116,8 +116,9 @@ async function runWithConcurrency<T>(
 export function parseDate(dateStr: string): Date | null {
     if (!dateStr) return null;
 
-    // Match: DD/MM/YYYY HH:MM AM/PM
-    const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    // Match: DD/MM/YYYY HH:MM AM/PM. AM/PM is optional: FRT switched its live
+    // grid to 24-hour time on 2026-10-15, so accept that here too.
+    const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?/i);
     if (!match) return null;
 
     const [, day, month, year, hour, minute, period] = match;
@@ -125,8 +126,9 @@ export function parseDate(dateStr: string): Date | null {
     const mins = parseInt(minute);
 
     // Convert to 24-hour format
-    if (period.toUpperCase() === 'PM' && hours < 12) hours += 12;
-    if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
+    if (period?.toUpperCase() === 'PM' && hours < 12) hours += 12;
+    if (period?.toUpperCase() === 'AM' && hours === 12) hours = 0;
+    if (hours > 23) return null;
 
     // Create date in IST (UTC+5:30)
     // Store as-is without timezone conversion

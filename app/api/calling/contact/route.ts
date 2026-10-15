@@ -34,8 +34,7 @@ export async function GET(request: Request) {
     }
 
     const client = await createFrtCallingClient(username, password);
-    const contact = await client.fetchContact(dataId);
-    await saveContact(contact);
+    const contact = await saveContact(await client.fetchContact(dataId));
 
     return NextResponse.json({ success: true, cached: false, contact });
   } catch (error) {
