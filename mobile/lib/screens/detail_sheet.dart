@@ -9,6 +9,8 @@ import '../api.dart';
 import '../call_channel.dart';
 import '../call_tracker.dart';
 import '../models.dart';
+import '../office_sync.dart';
+import '../main.dart';
 import '../sla.dart';
 import '../storage.dart';
 import '../theme.dart';
@@ -84,6 +86,15 @@ class _DetailSheetState extends State<DetailSheet> {
   // (written minutes ago) before the OS has written this one — and save that
   // call's talk time and Connected verdict against this attempt.
   DateTime? _dialedAt;
+  String? _lastDialedMobile;
+  String _callTarget = 'CONSUMER';
+  Map<String, dynamic>? _foundRecording;
+  bool _sendToOffice = true;
+  bool _isPlayingRecording = false;
+  String? _satisfaction; // Local recording satisfaction: 'SATISFIED' | 'UNSATISFIED' | null
+  bool _hasStoragePermission = false;
+  bool _isScanningRecording = false;
+  bool _isUploadingNow = false;
 
   String? _claimedByOther;
 
@@ -119,6 +130,12 @@ class _DetailSheetState extends State<DetailSheet> {
     });
     if (widget.complaint.callCount > 0) _fetchHistory();
     _setupIncomingCallDefault();
+    CallChannel.onPlaybackComplete = () {
+      if (mounted) setState(() => _isPlayingRecording = false);
+    };
+    CallChannel.hasStoragePermission().then((has) {
+      if (mounted) setState(() => _hasStoragePermission = has);
+    });
   }
 
   Future<void> _fetchHistory() async {
@@ -134,6 +151,8 @@ class _DetailSheetState extends State<DetailSheet> {
   void dispose() {
     _tick?.cancel();
     _claimHeartbeat?.cancel();
+    CallChannel.onPlaybackComplete = null;
+    CallChannel.stopRecording();
     _tracker.stop();
     _speech.cancel();
     _notes.dispose();
@@ -235,6 +254,11 @@ class _DetailSheetState extends State<DetailSheet> {
   // --- calling ---
 
   Future<void> _call(String mobile) async {
+    _lastDialedMobile = mobile;
+    _callTarget = 'CONSUMER';
+    CallChannel.hasStoragePermission().then((has) {
+      if (mounted) setState(() => _hasStoragePermission = has);
+    });
     Haptics.medium();
     final perms = await CallChannel.ensureCallPermissions();
     _perms = perms;
@@ -266,7 +290,8 @@ class _DetailSheetState extends State<DetailSheet> {
     // SIM picker or the dialer won't open.
     final ok = await _placeCall(mobile, perms);
     if (!ok) {
-      _tracker.stop();
+      CallChannel.stopRecording();
+    _tracker.stop();
       CallChannel.stopCallMonitor();
     }
   }
@@ -276,8 +301,17 @@ class _DetailSheetState extends State<DetailSheet> {
   // auto call-outcome guess — those belong to the consumer call this sheet logs
   // against, and reusing them here would mislabel the saved outcome.
   Future<void> _callCrew(String mobile) async {
+    _lastDialedMobile = mobile;
+    _callTarget = 'CREW';
+    _dialedAt = DateTime.now();
+    CallChannel.hasStoragePermission().then((has) {
+      if (mounted) setState(() => _hasStoragePermission = has);
+    });
     Haptics.medium();
     final perms = await CallChannel.ensureCallPermissions();
+    if (perms.phoneState) {
+      _tracker.start((outcome) => _onCallEnded(mobile, outcome));
+    }
     await _placeCall(mobile, perms);
   }
 
@@ -400,6 +434,26 @@ class _DetailSheetState extends State<DetailSheet> {
     // Call log never showed the call (rare) — fall back to the wall-time guess.
     if (!_exact && mounted && !_statusManual && _callStatus == null) {
       setState(() => _callStatus = outcome.likelyConnected ? 'Connected' : 'No Answer');
+    }
+
+    // Re-check storage permission & scan for Redmi recording
+    final hasPerm = await CallChannel.hasStoragePermission();
+    if (mounted) setState(() => _hasStoragePermission = hasPerm);
+
+    if (hasPerm) {
+      for (var recAttempt = 0; recAttempt < 4; recAttempt++) {
+        try {
+          final rec = await CallChannel.findLatestRecording(mobile, sinceMillis: _dialedAt?.millisecondsSinceEpoch);
+          if (rec != null && mounted) {
+            setState(() {
+              _foundRecording = rec;
+              _sendToOffice = true;
+            });
+            break;
+          }
+        } catch (_) {}
+        if (recAttempt < 3) await Future.delayed(const Duration(milliseconds: 900));
+      }
     }
   }
 
@@ -547,6 +601,7 @@ class _DetailSheetState extends State<DetailSheet> {
     }
     _logged = true;
     await Store.removeDraft(widget.complaint.dataid);
+    _syncRecordingToOffice();
     Haptics.success();
     if (mounted) {
       showSnack(context, 'Call logged');
@@ -559,10 +614,297 @@ class _DetailSheetState extends State<DetailSheet> {
     _logged = true;
     await Store.queueLog(payload);
     await Store.removeDraft(widget.complaint.dataid);
+    _syncRecordingToOffice();
     Haptics.success();
     if (mounted) {
       showSnack(context, message);
       Navigator.pop(context, 'logged');
+    }
+  }
+
+  void _syncRecordingToOffice() {
+    if (_foundRecording != null && _sendToOffice) {
+      final user = supabase.auth.currentUser;
+      final metadata = user?.userMetadata;
+      String opName = 'Operator';
+      if (metadata != null && metadata['name'] != null && '${metadata['name']}'.trim().isNotEmpty) {
+        opName = '${metadata['name']}'.trim();
+      } else if (user?.email != null && user!.email!.isNotEmpty) {
+        opName = user.email!.split('@').first;
+      }
+      final opId = user?.id ?? '';
+
+      OfficeSyncService.uploadRecording(
+        filePath: _foundRecording!['path'] as String,
+        complaintNo: widget.complaint.complaintNumber ?? '${widget.complaint.dataid}',
+        callTarget: _callTarget,
+        phoneNumber: _lastDialedMobile ?? _contact?.mobile ?? '',
+        contactName: _callTarget == 'CREW' ? (_contact?.assignedCrew ?? 'Crew') : (_contact?.consumerName ?? 'Consumer'),
+        operatorName: opName,
+        operatorId: opId,
+        durationSeconds: _callDuration?.inSeconds ?? 0,
+        callOutcome: _callStatus,
+        actualProblem: _category,
+        operatorNotes: _notes.text.trim(),
+        consumerSatisfaction: _callStatus == 'Connected' ? _satisfaction : null,
+        consumerName: _contact?.consumerName,
+        area: widget.complaint.area,
+        substation: _contact?.substation ?? widget.complaint.area,
+        feeder: widget.complaint.feeder,
+        complaintType: widget.complaint.complaintSubType ?? widget.complaint.complaintType,
+      );
+    }
+  }
+
+  Future<void> _scanForRecording() async {
+    if (!mounted) return;
+    setState(() => _isScanningRecording = true);
+    final mobile = _lastDialedMobile ?? _contact?.mobile ?? '';
+    try {
+      final rec = await CallChannel.findLatestRecording(mobile, sinceMillis: _dialedAt?.millisecondsSinceEpoch);
+      if (rec != null && mounted) {
+        setState(() {
+          _foundRecording = rec;
+          _sendToOffice = true;
+        });
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _isScanningRecording = false);
+  }
+
+  Future<void> _requestStoragePermission() async {
+    Haptics.tap();
+    await CallChannel.requestStoragePermission();
+    for (var i = 0; i < 6; i++) {
+      await Future.delayed(const Duration(seconds: 1));
+      if (!mounted) return;
+      final has = await CallChannel.hasStoragePermission();
+      if (has) {
+        setState(() => _hasStoragePermission = true);
+        _scanForRecording();
+        break;
+      }
+    }
+  }
+
+  Future<void> _uploadRecordingNow() async {
+    if (_foundRecording == null) return;
+    setState(() => _isUploadingNow = true);
+    Haptics.tap();
+
+    final user = supabase.auth.currentUser;
+    final metadata = user?.userMetadata;
+    String opName = 'Operator';
+    if (metadata != null && metadata['name'] != null && '${metadata['name']}'.trim().isNotEmpty) {
+      opName = '${metadata['name']}'.trim();
+    } else if (user?.email != null && user!.email!.isNotEmpty) {
+      opName = user.email!.split('@').first;
+    }
+    final opId = user?.id ?? '';
+
+    final ok = await OfficeSyncService.uploadRecording(
+      filePath: _foundRecording!['path'] as String,
+      complaintNo: widget.complaint.complaintNumber ?? '${widget.complaint.dataid}',
+      callTarget: _callTarget,
+      phoneNumber: _lastDialedMobile ?? _contact?.mobile ?? '',
+      contactName: _callTarget == 'CREW' ? (_contact?.assignedCrew ?? 'Crew') : (_contact?.consumerName ?? 'Consumer'),
+      operatorName: opName,
+      operatorId: opId,
+      durationSeconds: _callDuration?.inSeconds ?? 0,
+      callOutcome: _callStatus,
+      actualProblem: _category,
+      operatorNotes: _notes.text.trim(),
+      consumerSatisfaction: _callStatus == 'Connected' ? _satisfaction : null,
+      consumerName: _contact?.consumerName,
+      area: widget.complaint.area,
+      substation: _contact?.substation ?? widget.complaint.area,
+      feeder: widget.complaint.feeder,
+      complaintType: widget.complaint.complaintSubType ?? widget.complaint.complaintType,
+    );
+
+    if (mounted) {
+      setState(() => _isUploadingNow = false);
+      if (ok) {
+        showSnack(context, 'Recording Office PC (D: drive) par upload ho gayi!');
+      } else {
+        showSnack(context, 'Office Wi-Fi se connect nahi hua — queue me save ho gaya, Wi-Fi aane par auto-upload hoga');
+      }
+    }
+  }
+
+  Future<void> _openRecordingPicker() async {
+    Haptics.tap();
+    if (!_hasStoragePermission) {
+      await _requestStoragePermission();
+      if (!_hasStoragePermission) return;
+    }
+
+    final mobile = _lastDialedMobile ?? _contact?.mobile ?? '';
+    final list = await CallChannel.listRecordings(number: mobile, limit: 50);
+
+    if (!mounted) return;
+
+    if (list.isEmpty) {
+      showSnack(context, 'Koi recording nahi mili phone par (MIUI/sound_recorder)', error: true);
+      return;
+    }
+
+    String? playingPath;
+
+    final picked = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          return DraggableScrollableSheet(
+            initialChildSize: 0.7,
+            minChildSize: 0.4,
+            maxChildSize: 0.9,
+            expand: false,
+            builder: (ctx, scrollController) {
+              return Column(
+                children: [
+                  Container(
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.audio_file, color: AppColors.brand, size: 22),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Call Recordings (Phone Storage)',
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.ink),
+                          ),
+                        ),
+                        Text(
+                          '${list.length} files',
+                          style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: ListView.separated(
+                      controller: scrollController,
+                      itemCount: list.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (ctx, idx) {
+                        final item = list[idx];
+                        final name = item['name'] as String? ?? 'Recording';
+                        final path = item['path'] as String? ?? '';
+                        final sizeKb = ((item['size'] as num?)?.toInt() ?? 0) ~/ 1024;
+                        final matches = item['matchesNumber'] == true;
+                        final lm = (item['lastModified'] as num?)?.toInt() ?? 0;
+                        final dateStr = lm > 0
+                            ? DateTime.fromMillisecondsSinceEpoch(lm).toString().substring(5, 16)
+                            : '';
+                        final isPlayingThis = playingPath == path;
+
+                        return ListTile(
+                          tileColor: matches ? const Color(0xFFEFF6FF) : null,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          leading: IconButton(
+                            icon: Icon(
+                              isPlayingThis ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                              color: isPlayingThis ? const Color(0xFF2563EB) : AppColors.brand,
+                              size: 34,
+                            ),
+                            onPressed: () async {
+                              if (isPlayingThis) {
+                                await CallChannel.pauseRecording();
+                                setSheetState(() => playingPath = null);
+                              } else {
+                                await CallChannel.playRecording(path);
+                                setSheetState(() => playingPath = path);
+                                CallChannel.onPlaybackComplete = () {
+                                  if (mounted) {
+                                    setSheetState(() => playingPath = null);
+                                    setState(() => _isPlayingRecording = false);
+                                  }
+                                };
+                              }
+                            },
+                          ),
+                          title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  name,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: matches ? FontWeight.bold : FontWeight.w600,
+                                    color: matches ? const Color(0xFF1E40AF) : AppColors.ink,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (matches)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFDBEAFE),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: const Text(
+                                    'Matches',
+                                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8)),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          subtitle: Text(
+                            '$dateStr • $sizeKb KB',
+                            style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                          ),
+                          trailing: FilledButton.tonal(
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            child: const Text('Select', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            onPressed: () {
+                              CallChannel.stopRecording();
+                              Navigator.pop(ctx, item);
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+
+    CallChannel.stopRecording();
+    CallChannel.onPlaybackComplete = () {
+      if (mounted) setState(() => _isPlayingRecording = false);
+    };
+
+    if (picked != null && mounted) {
+      setState(() {
+        _foundRecording = picked;
+        _sendToOffice = true;
+      });
+      showSnack(context, 'Recording selected: ${picked['name']}');
     }
   }
 
@@ -803,6 +1145,419 @@ class _DetailSheetState extends State<DetailSheet> {
                 padding: EdgeInsets.only(top: 6),
                 child: Text('Listening… speak now', style: TextStyle(fontSize: 12, color: AppColors.danger, fontWeight: FontWeight.w600)),
               ),
+            Gap.sm,
+
+            // --- Recording & Office PC Sync Section ---
+            if (!_hasStoragePermission) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFFCD34D)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.folder_shared_outlined, color: Color(0xFFD97706), size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Storage Permission Required',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF92400E)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Redmi call recordings ko detect karne aur Office Server par bhejne ke liye storage permission allow karein.',
+                      style: TextStyle(fontSize: 11.5, color: Color(0xFF78350F)),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(backgroundColor: const Color(0xFFD97706)),
+                        icon: const Icon(Icons.security, size: 16),
+                        label: const Text('Storage Permission Allow Karein', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold)),
+                        onPressed: _requestStoragePermission,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (_foundRecording != null) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.mic, size: 20, color: Color(0xFF2563EB)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${_foundRecording!['name']}',
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: Color(0xFF1E3A8A)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'Size: ${((_foundRecording!['size'] as num?)?.toInt() ?? 0) ~/ 1024} KB',
+                                style: const TextStyle(fontSize: 10, color: Color(0xFF6B7280)),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: Icon(
+                            _isPlayingRecording ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                            color: const Color(0xFF2563EB),
+                            size: 34,
+                          ),
+                          onPressed: () async {
+                            final path = _foundRecording!['path'] as String;
+                            if (_isPlayingRecording) {
+                              await CallChannel.pauseRecording();
+                              if (mounted) setState(() => _isPlayingRecording = false);
+                            } else {
+                              await CallChannel.playRecording(path);
+                              if (mounted) setState(() => _isPlayingRecording = true);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 14, thickness: 0.5, color: Color(0xFFBFDBFE)),
+                    InkWell(
+                      onTap: () => setState(() => _sendToOffice = !_sendToOffice),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: Checkbox(
+                              value: _sendToOffice,
+                              activeColor: const Color(0xFF2563EB),
+                              onChanged: (v) => setState(() => _sendToOffice = v ?? true),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'Office System par bhejein (D: drive)',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E40AF)),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDBEAFE),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              _callTarget,
+                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              visualDensity: VisualDensity.compact,
+                              side: const BorderSide(color: Color(0xFF93C5FD)),
+                            ),
+                            icon: _isUploadingNow
+                                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                                : const Icon(Icons.cloud_upload_outlined, size: 15, color: Color(0xFF1D4ED8)),
+                            label: Text(
+                              _isUploadingNow ? 'Uploading…' : 'Abhi Server Par Bhejein',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8)),
+                            ),
+                            onPressed: _isUploadingNow ? null : _uploadRecordingNow,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            visualDensity: VisualDensity.compact,
+                            side: const BorderSide(color: Color(0xFF93C5FD)),
+                          ),
+                          icon: const Icon(Icons.folder_open, size: 15, color: Color(0xFF1D4ED8)),
+                          label: const Text('Dusri Chunein', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
+                          onPressed: _openRecordingPicker,
+                        ),
+                      ],
+                    ),
+                    if (_callTarget == 'CONSUMER' && _callStatus == 'Connected') ...[
+                      const Divider(height: 14, thickness: 0.5, color: Color(0xFFBFDBFE)),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        alignment: WrapAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Consumer Feedback:',
+                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF1E3A8A)),
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              InkWell(
+                                onTap: () {
+                                  Haptics.tap();
+                                  setState(() => _satisfaction = _satisfaction == 'SATISFIED' ? null : 'SATISFIED');
+                                },
+                                borderRadius: BorderRadius.circular(16),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _satisfaction == 'SATISFIED' ? const Color(0xFF10B981) : Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: _satisfaction == 'SATISFIED' ? const Color(0xFF059669) : const Color(0xFFA7F3D0),
+                                      width: 1.2,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text('😊', style: TextStyle(fontSize: 12)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Satisfied',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: _satisfaction == 'SATISFIED' ? Colors.white : const Color(0xFF047857),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              InkWell(
+                                onTap: () {
+                                  Haptics.tap();
+                                  setState(() => _satisfaction = _satisfaction == 'UNSATISFIED' ? null : 'UNSATISFIED');
+                                },
+                                borderRadius: BorderRadius.circular(16),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _satisfaction == 'UNSATISFIED' ? const Color(0xFFEF4444) : Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: _satisfaction == 'UNSATISFIED' ? const Color(0xFFDC2626) : const Color(0xFFFECACA),
+                                      width: 1.2,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text('🙁', style: TextStyle(fontSize: 12)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Unsatisfied',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: _satisfaction == 'UNSATISFIED' ? Colors.white : const Color(0xFFB91C1C),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ] else ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          _callTracked ? Icons.mic_none : Icons.mic_outlined,
+                          color: const Color(0xFF64748B),
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _callTracked
+                                ? 'Recording auto-detect nahi hui (call abhi hui thi toh Rescan karein)'
+                                : 'Call cut hone par recording auto-attach hogi',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              color: _callTracked ? const Color(0xFF334155) : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        if (_callTracked) ...[
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            icon: _isScanningRecording
+                                ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                                : const Icon(Icons.refresh, size: 14),
+                            label: Text(_isScanningRecording ? 'Scanning…' : 'Rescan', style: const TextStyle(fontSize: 11)),
+                            onPressed: _isScanningRecording ? null : _scanForRecording,
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              visualDensity: VisualDensity.compact,
+                              side: const BorderSide(color: AppColors.brand),
+                            ),
+                            icon: const Icon(Icons.folder_open, size: 14, color: AppColors.brand),
+                            label: const Text(
+                              'Purani Recording Chunein',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.brand),
+                            ),
+                            onPressed: _openRecordingPicker,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_callTarget == 'CONSUMER' && _callStatus == 'Connected') ...[
+                      const Divider(height: 14, thickness: 0.5, color: Color(0xFFCBD5E1)),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        alignment: WrapAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Consumer Feedback:',
+                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.ink),
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              InkWell(
+                                onTap: () {
+                                  Haptics.tap();
+                                  setState(() => _satisfaction = _satisfaction == 'SATISFIED' ? null : 'SATISFIED');
+                                },
+                                borderRadius: BorderRadius.circular(16),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _satisfaction == 'SATISFIED' ? const Color(0xFF10B981) : Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: _satisfaction == 'SATISFIED' ? const Color(0xFF059669) : const Color(0xFFA7F3D0),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text('😊', style: TextStyle(fontSize: 12)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Satisfied',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: _satisfaction == 'SATISFIED' ? Colors.white : const Color(0xFF047857),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              InkWell(
+                                onTap: () {
+                                  Haptics.tap();
+                                  setState(() => _satisfaction = _satisfaction == 'UNSATISFIED' ? null : 'UNSATISFIED');
+                                },
+                                borderRadius: BorderRadius.circular(16),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _satisfaction == 'UNSATISFIED' ? const Color(0xFFEF4444) : Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: _satisfaction == 'UNSATISFIED' ? const Color(0xFFDC2626) : const Color(0xFFFECACA),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text('🙁', style: TextStyle(fontSize: 12)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Unsatisfied',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: _satisfaction == 'UNSATISFIED' ? Colors.white : const Color(0xFFB91C1C),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
             if (_saveError != null) ...[Gap.sm, Text(_saveError!, style: const TextStyle(color: AppColors.danger))],
             Gap.lg,
             Row(

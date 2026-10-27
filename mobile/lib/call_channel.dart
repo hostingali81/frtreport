@@ -36,6 +36,18 @@ class CallPermissions {
 
 class CallChannel {
   static const _ch = MethodChannel('frt/call');
+  static VoidCallback? onPlaybackComplete;
+  static bool _handlerInitialized = false;
+
+  static void _ensureHandler() {
+    if (_handlerInitialized) return;
+    _handlerInitialized = true;
+    _ch.setMethodCallHandler((call) async {
+      if (call.method == 'onRecordingPlaybackComplete') {
+        onPlaybackComplete?.call();
+      }
+    });
+  }
 
   // Current grant status without prompting.
   static Future<CallPermissions> permissions() async {
@@ -118,6 +130,95 @@ class CallChannel {
   static Future<void> notify(int id, String title, String body) async {
     try {
       await _ch.invokeMethod('notify', {'id': id, 'title': title, 'body': body});
+    } catch (_) {}
+  }
+
+  // --- Call Recording & Storage Access ---
+
+  static Future<bool> hasStoragePermission() async {
+    try {
+      return await _ch.invokeMethod<bool>('hasStoragePermission') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> requestStoragePermission() async {
+    try {
+      return await _ch.invokeMethod<bool>('requestStoragePermission') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<Map<String, dynamic>?> findLatestRecording(String number, {int? sinceMillis}) async {
+    try {
+      final res = await _ch.invokeMethod<Map<dynamic, dynamic>>('findLatestRecording', {
+        'number': number,
+        'sinceMillis': sinceMillis ?? (DateTime.now().millisecondsSinceEpoch - 30 * 60 * 1000),
+      });
+      if (res == null) return null;
+      return Map<String, dynamic>.from(res);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> listRecordings({String? number, int limit = 50}) async {
+    try {
+      final res = await _ch.invokeMethod<List<dynamic>>('listRecordings', {
+        'number': number ?? '',
+        'limit': limit,
+      });
+      if (res == null) return [];
+      return res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<bool> playRecording(String path) async {
+    _ensureHandler();
+    try {
+      return await _ch.invokeMethod<bool>('playRecording', {'path': path}) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> pauseRecording() async {
+    try {
+      return await _ch.invokeMethod<bool>('pauseRecording') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> stopRecording() async {
+    try {
+      return await _ch.invokeMethod<bool>('stopRecording') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> isPlayingRecording() async {
+    try {
+      return await _ch.invokeMethod<bool>('isPlayingRecording') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> acquireMulticastLock() async {
+    try {
+      await _ch.invokeMethod('acquireMulticastLock');
+    } catch (_) {}
+  }
+
+  static Future<void> releaseMulticastLock() async {
+    try {
+      await _ch.invokeMethod('releaseMulticastLock');
     } catch (_) {}
   }
 }

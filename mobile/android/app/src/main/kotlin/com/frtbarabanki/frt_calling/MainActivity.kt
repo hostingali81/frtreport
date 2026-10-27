@@ -15,6 +15,9 @@ import android.telephony.TelephonyManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import android.media.MediaPlayer
+import android.net.wifi.WifiManager
+import android.os.Environment
 import io.flutter.embedding.android.FlutterActivity
 import java.io.File
 import io.flutter.embedding.engine.FlutterEngine
@@ -112,6 +115,43 @@ class MainActivity : FlutterActivity() {
                 "getAbis" -> result.success(Build.SUPPORTED_ABIS.toList())
                 "getUpdateApkPath" -> result.success(File(cacheDir, "update.apk").absolutePath)
                 "installApk" -> result.success(installApk(call.argument<String>("path") ?: ""))
+                // Storage permission & Redmi Recording Finder
+                "hasStoragePermission" -> result.success(hasStoragePermission())
+                "requestStoragePermission" -> result.success(requestStoragePermission())
+                "findLatestRecording" -> {
+                    val number = call.argument<String>("number") ?: ""
+                    val since = (call.argument<Number>("sinceMillis"))?.toLong() ?: 0L
+                    Thread {
+                        val resultData = findLatestRecording(number, since)
+                        runOnUiThread {
+                            result.success(resultData)
+                        }
+                    }.start()
+                }
+                "listRecordings" -> {
+                    val number = call.argument<String>("number") ?: ""
+                    val limit = (call.argument<Number>("limit"))?.toInt() ?: 50
+                    Thread {
+                        val resultData = listRecordings(number, limit)
+                        runOnUiThread {
+                            result.success(resultData)
+                        }
+                    }.start()
+                }
+                // Native Audio Player Preview
+                "playRecording" -> result.success(playRecording(call.argument<String>("path") ?: ""))
+                "pauseRecording" -> result.success(pauseRecording())
+                "stopRecording" -> result.success(stopRecording())
+                "isPlayingRecording" -> result.success(isPlayingRecording())
+                // Multicast Lock for UDP Auto-Discovery
+                "acquireMulticastLock" -> {
+                    acquireMulticastLock()
+                    result.success(null)
+                }
+                "releaseMulticastLock" -> {
+                    releaseMulticastLock()
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -264,5 +304,266 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private var previewPlayer: MediaPlayer? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
+
+    private fun hasStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestStoragePermission(): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                        data = Uri.parse("package:$packageName")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                    true
+                } catch (_: Exception) {
+                    val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                    true
+                }
+            } else {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(
+                        Manifest.permission.READ_EXTERNAL_STORAGE,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE
+                    ),
+                    7302
+                )
+                true
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun acquireMulticastLock() {
+        try {
+            if (multicastLock == null) {
+                val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                multicastLock = wm.createMulticastLock("frt_multicast_lock").apply {
+                    setReferenceCounted(true)
+                }
+            }
+            multicastLock?.acquire()
+        } catch (_: Exception) {}
+    }
+
+    private fun releaseMulticastLock() {
+        try {
+            if (multicastLock?.isHeld == true) {
+                multicastLock?.release()
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun getRecordingDirectories(): List<File> {
+        val dirs = mutableListOf<File>()
+        val sd = Environment.getExternalStorageDirectory()
+
+        // Redmi / Xiaomi MIUI / HyperOS paths
+        dirs.add(File("/sdcard/MIUI/sound_recorder/call_rec"))
+        dirs.add(File(sd, "MIUI/sound_recorder/call_rec"))
+        dirs.add(File("/storage/emulated/0/MIUI/sound_recorder/call_rec"))
+
+        // Standard Android & OEM Call Recording paths
+        dirs.add(File(sd, "Recordings/Call"))
+        dirs.add(File(sd, "Recordings/call_rec"))
+        dirs.add(File(sd, "Music/Recordings/Call"))
+        dirs.add(File(sd, "Sounds/Call"))
+        dirs.add(File(sd, "Audio/Call"))
+        dirs.add(File(sd, "CallRecordings"))
+        dirs.add(File(sd, "Call_Recordings"))
+
+        try {
+            val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+            dirs.add(File(musicDir, "Recordings/Call"))
+            dirs.add(File(musicDir, "Call"))
+        } catch (_: Exception) {}
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val recDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS)
+                dirs.add(File(recDir, "Call"))
+                dirs.add(File(recDir, "call_rec"))
+            }
+        } catch (_: Exception) {}
+
+        return dirs.filter { it.exists() && it.isDirectory }
+    }
+
+    private fun isAudioFile(name: String): Boolean {
+        return name.endsWith(".mp3", ignoreCase = true) ||
+               name.endsWith(".m4a", ignoreCase = true) ||
+               name.endsWith(".aac", ignoreCase = true) ||
+               name.endsWith(".amr", ignoreCase = true) ||
+               name.endsWith(".wav", ignoreCase = true)
+    }
+
+    private fun findLatestRecording(rawNumber: String, sinceMillis: Long): Map<String, Any>? {
+        if (!hasStoragePermission()) return null
+        val cleanPhone = rawNumber.filter { it.isDigit() }.takeLast(10)
+
+        val dirs = getRecordingDirectories()
+        var bestFile: File? = null
+        var bestModified = 0L
+        val cutoff = if (sinceMillis > 0) sinceMillis - 90_000L else 0L
+
+        for (dir in dirs) {
+            val files = dir.listFiles() ?: continue
+            for (f in files) {
+                if (!f.isFile || !isAudioFile(f.name)) continue
+                val lm = f.lastModified()
+                if (lm < cutoff) continue
+
+                val name = f.name
+                val matches = cleanPhone.isNotEmpty() && name.contains(cleanPhone)
+                if (matches) {
+                    if (lm > bestModified) {
+                        bestModified = lm
+                        bestFile = f
+                    }
+                }
+            }
+            if (bestFile != null) break
+        }
+
+        // Fallback: if no file contained the 10-digit number, but a call recording was created within 90s of call end
+        if (bestFile == null && sinceMillis > 0) {
+            val recentCutoff = sinceMillis - 30_000L
+            for (dir in dirs) {
+                val files = dir.listFiles() ?: continue
+                for (f in files) {
+                    if (!f.isFile || !isAudioFile(f.name)) continue
+                    val lm = f.lastModified()
+                    if (lm >= recentCutoff && lm > bestModified) {
+                        bestModified = lm
+                        bestFile = f
+                    }
+                }
+            }
+        }
+
+        val found = bestFile ?: return null
+        return mapOf(
+            "path" to found.absolutePath,
+            "name" to found.name,
+            "size" to found.length(),
+            "lastModified" to found.lastModified()
+        )
+    }
+
+    private fun listRecordings(rawNumber: String?, limit: Int): List<Map<String, Any>> {
+        if (!hasStoragePermission()) return emptyList()
+        val cleanPhone = (rawNumber ?: "").filter { it.isDigit() }.takeLast(10)
+
+        val allFiles = mutableListOf<File>()
+        for (dir in getRecordingDirectories()) {
+            if (!dir.exists() || !dir.isDirectory) continue
+            val files = dir.listFiles() ?: continue
+            for (f in files) {
+                if (f.isFile && isAudioFile(f.name)) {
+                    allFiles.add(f)
+                }
+            }
+        }
+
+        val uniqueFiles = allFiles.distinctBy { it.name }
+
+        // Sort: matching phone number first (newest to oldest), then all others (newest to oldest)
+        val sorted = uniqueFiles.sortedWith(Comparator { a, b ->
+            val aMatches = cleanPhone.isNotEmpty() && a.name.contains(cleanPhone)
+            val bMatches = cleanPhone.isNotEmpty() && b.name.contains(cleanPhone)
+            when {
+                aMatches && !bMatches -> -1
+                !aMatches && bMatches -> 1
+                else -> b.lastModified().compareTo(a.lastModified())
+            }
+        })
+
+        return sorted.take(limit).map { f ->
+            val matches = cleanPhone.isNotEmpty() && f.name.contains(cleanPhone)
+            mapOf(
+                "path" to f.absolutePath,
+                "name" to f.name,
+                "size" to f.length(),
+                "lastModified" to f.lastModified(),
+                "matchesNumber" to matches
+            )
+        }
+    }
+
+    private fun playRecording(path: String): Boolean {
+        if (path.isEmpty()) return false
+        return try {
+            previewPlayer?.stop()
+            previewPlayer?.release()
+            previewPlayer = MediaPlayer().apply {
+                setDataSource(path)
+                setOnCompletionListener {
+                    flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
+                        MethodChannel(messenger, callChannelName)
+                            .invokeMethod("onRecordingPlaybackComplete", null)
+                    }
+                }
+                prepare()
+                start()
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun pauseRecording(): Boolean {
+        return try {
+            if (previewPlayer?.isPlaying == true) {
+                previewPlayer?.pause()
+                true
+            } else false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun stopRecording(): Boolean {
+        return try {
+            previewPlayer?.stop()
+            previewPlayer?.release()
+            previewPlayer = null
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun isPlayingRecording(): Boolean {
+        return try {
+            previewPlayer?.isPlaying ?: false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    override fun onDestroy() {
+        try {
+            previewPlayer?.release()
+            previewPlayer = null
+            releaseMulticastLock()
+        } catch (_: Exception) {}
+        super.onDestroy()
     }
 }

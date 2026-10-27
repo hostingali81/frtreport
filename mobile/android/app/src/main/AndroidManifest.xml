@@ -18,13 +18,24 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- In-app self-update: open the system installer for the downloaded APK. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- Read Redmi / MIUI call recordings from /sdcard/MIUI/sound_recorder/call_rec/ -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+    <!-- Local Wi-Fi discovery & transfer to Office PC -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <!-- Cleartext HTTP is only allowed in debug/profile builds (local dev
          against http://10.0.2.2:3000 etc.) — see those manifests. Release
          talks HTTPS to the deployed backend only. -->
     <application
         android:label="FRT Calling"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true"
+        android:requestLegacyExternalStorage="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -112,3 +123,5 @@
         </intent>
     </queries>
 </manifest>
+
+
