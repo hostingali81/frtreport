@@ -186,6 +186,7 @@ class _DraftDialogState extends State<_DraftDialog> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (_status == null) {
       setState(() => _error = 'Select the call outcome');
       return;

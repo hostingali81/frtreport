@@ -71,6 +71,8 @@ class _DetailSheetState extends State<DetailSheet> {
   String? _category;
   final _notes = TextEditingController();
   bool _saving = false;
+  bool _isSubmitting = false;
+  bool _recordingAlreadyUploaded = false;
   String? _saveError;
   bool _logged = false;
 
@@ -504,12 +506,172 @@ class _DetailSheetState extends State<DetailSheet> {
 
   // --- save ---
 
+  /// If calling a consumer and call was connected, prompt the operator if satisfaction wasn't chosen.
+  Future<bool> _confirmSatisfactionIfNeeded() async {
+    if (_callTarget == 'CONSUMER' &&
+        _callStatus == 'Connected' &&
+        (_satisfaction == null || _satisfaction!.isEmpty)) {
+      Haptics.warn();
+      final proceed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+          contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.help_outline, color: Color(0xFFD97706), size: 24),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'फीडबैक नहीं चुना गया',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 8),
+              const Text(
+                'आपने उपभोक्ता की संतुष्टि स्थिति (संतुष्ट / असंतुष्ट) सेलेक्ट नहीं किया है।',
+                style: TextStyle(fontSize: 14, color: Color(0xFF334155), height: 1.4),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'यहाँ से तुरंत चुनें:',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              if (mounted) setState(() => _satisfaction = 'SATISFIED');
+                              Navigator.pop(ctx, true);
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFDCFCE7),
+                                border: Border.all(color: const Color(0xFF10B981), width: 1.2),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text('😊', style: TextStyle(fontSize: 14)),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    'संतुष्ट',
+                                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF047857)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              if (mounted) setState(() => _satisfaction = 'UNSATISFIED');
+                              Navigator.pop(ctx, true);
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFEE2E2),
+                                border: Border.all(color: const Color(0xFFEF4444), width: 1.2),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text('🙁', style: TextStyle(fontSize: 14)),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    'असंतुष्ट',
+                                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFFB91C1C)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'क्या आप बिना सेलेक्ट किए ही भेजना चाहते हैं?',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+              ),
+            ],
+          ),
+          actions: [
+            OutlinedButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF64748B),
+                side: const BorderSide(color: Color(0xFFCBD5E1)),
+              ),
+              child: const Text('वापस जाएं'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+              ),
+              child: const Text('बिना सेलेक्ट किए भेजें'),
+            ),
+          ],
+        ),
+      );
+      return proceed == true;
+    }
+    return true;
+  }
+
   Future<void> _save() async {
+    // Prevent double-clicking / duplicate submissions
+    if (_saving || _isSubmitting) return;
+
     if (_callStatus == null) {
       Haptics.warn();
       setState(() => _saveError = 'Select a call outcome');
       return;
     }
+
+    final proceedWithFeedback = await _confirmSatisfactionIfNeeded();
+    if (!proceedWithFeedback || !mounted) return;
+
     // Incoming calls: the consumer called us, so _callTracked will always be
     // false (the operator didn't dial from the app). Skip the warning.
     if (!_callTracked && !widget.isIncomingCall) {
@@ -527,6 +689,7 @@ class _DetailSheetState extends State<DetailSheet> {
       );
       if (ok != true) return;
     }
+    _isSubmitting = true;
     setState(() {
       _saving = true;
       _saveError = null;
@@ -591,6 +754,7 @@ class _DetailSheetState extends State<DetailSheet> {
         setState(() {
           _saveError = '$e';
           _saving = false;
+          _isSubmitting = false;
         });
       }
       return;
@@ -623,7 +787,12 @@ class _DetailSheetState extends State<DetailSheet> {
   }
 
   void _syncRecordingToOffice() {
+    if (_recordingAlreadyUploaded) {
+      debugPrint('[OfficeSync] Recording already uploaded during this session, skipping duplicate sync.');
+      return;
+    }
     if (_foundRecording != null && _sendToOffice) {
+      _recordingAlreadyUploaded = true;
       final user = supabase.auth.currentUser;
       final metadata = user?.userMetadata;
       String opName = 'Operator';
@@ -688,7 +857,12 @@ class _DetailSheetState extends State<DetailSheet> {
   }
 
   Future<void> _uploadRecordingNow() async {
+    if (_isUploadingNow || _recordingAlreadyUploaded) return;
     if (_foundRecording == null) return;
+
+    final proceedWithFeedback = await _confirmSatisfactionIfNeeded();
+    if (!proceedWithFeedback || !mounted) return;
+
     setState(() => _isUploadingNow = true);
     Haptics.tap();
 
@@ -723,7 +897,10 @@ class _DetailSheetState extends State<DetailSheet> {
     );
 
     if (mounted) {
-      setState(() => _isUploadingNow = false);
+      setState(() {
+        _isUploadingNow = false;
+        if (ok) _recordingAlreadyUploaded = true;
+      });
       if (ok) {
         showSnack(context, 'Recording Office PC (D: drive) par upload ho gayi!');
       } else {
@@ -1285,16 +1462,29 @@ class _DetailSheetState extends State<DetailSheet> {
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               visualDensity: VisualDensity.compact,
-                              side: const BorderSide(color: Color(0xFF93C5FD)),
+                              side: BorderSide(
+                                color: _recordingAlreadyUploaded ? const Color(0xFF86EFAC) : const Color(0xFF93C5FD),
+                              ),
+                              backgroundColor: _recordingAlreadyUploaded ? const Color(0xFFF0FDF4) : null,
                             ),
                             icon: _isUploadingNow
                                 ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                                : const Icon(Icons.cloud_upload_outlined, size: 15, color: Color(0xFF1D4ED8)),
+                                : Icon(
+                                    _recordingAlreadyUploaded ? Icons.check_circle : Icons.cloud_upload_outlined,
+                                    size: 15,
+                                    color: _recordingAlreadyUploaded ? const Color(0xFF16A34A) : const Color(0xFF1D4ED8),
+                                  ),
                             label: Text(
-                              _isUploadingNow ? 'Uploading…' : 'Abhi Server Par Bhejein',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8)),
+                              _isUploadingNow
+                                  ? 'Uploading…'
+                                  : (_recordingAlreadyUploaded ? 'Uploaded ✓' : 'Abhi Server Par Bhejein'),
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: _recordingAlreadyUploaded ? const Color(0xFF16A34A) : const Color(0xFF1D4ED8),
+                              ),
                             ),
-                            onPressed: _isUploadingNow ? null : _uploadRecordingNow,
+                            onPressed: (_isUploadingNow || _recordingAlreadyUploaded) ? null : _uploadRecordingNow,
                           ),
                         ),
                         const SizedBox(width: 6),
@@ -1567,7 +1757,7 @@ class _DetailSheetState extends State<DetailSheet> {
                 Expanded(
                   flex: 2,
                   child: FilledButton(
-                    onPressed: _saving ? null : _save,
+                    onPressed: (_saving || _isSubmitting) ? null : _save,
                     child: _saving
                         ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : const Text('Save call log'),

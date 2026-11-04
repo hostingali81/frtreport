@@ -26,6 +26,8 @@ class OfficeSyncService {
   static const int discoveryPort = 41234;
 
   static DiscoveredServer? _cachedServer;
+  static final Set<String> _inFlightUploadKeys = {};
+  static bool _isFlushing = false;
 
   /// Discovers the Office PC IP automatically via UDP broadcast over Wi-Fi.
   static Future<String?> discoverOfficeServer({Duration timeout = const Duration(seconds: 3)}) async {
@@ -127,33 +129,39 @@ class OfficeSyncService {
       return false;
     }
 
-    final baseUrl = await discoverOfficeServer();
-    if (baseUrl == null) {
-      // Offline: queue for background upload when Wi-Fi connects
-      await _queueUpload({
-        'filePath': filePath,
-        'complaint_no': complaintNo,
-        'call_target': callTarget,
-        'phone_number': phoneNumber,
-        'contact_name': contactName ?? '',
-        'operator_name': operatorName,
-        'operator_id': operatorId ?? '',
-        'duration_seconds': durationSeconds.toString(),
-        'call_outcome': callOutcome ?? '',
-        'actual_problem': actualProblem ?? '',
-        'operator_notes': operatorNotes ?? '',
-        'consumer_satisfaction': consumerSatisfaction ?? '',
-        'consumer_name': consumerName ?? '',
-        'area': area ?? '',
-        'substation': substation ?? '',
-        'feeder': feeder ?? '',
-        'complaint_type': complaintType ?? '',
-        'call_time': DateTime.now().toIso8601String(),
-      });
-      return false;
+    final inFlightKey = '${complaintNo}_${file.path}';
+    if (_inFlightUploadKeys.contains(inFlightKey)) {
+      return false; // Already uploading this recording right now
     }
+    _inFlightUploadKeys.add(inFlightKey);
 
     try {
+      final baseUrl = await discoverOfficeServer();
+      if (baseUrl == null) {
+        // Offline: queue for background upload when Wi-Fi connects
+        await _queueUpload({
+          'filePath': filePath,
+          'complaint_no': complaintNo,
+          'call_target': callTarget,
+          'phone_number': phoneNumber,
+          'contact_name': contactName ?? '',
+          'operator_name': operatorName,
+          'operator_id': operatorId ?? '',
+          'duration_seconds': durationSeconds.toString(),
+          'call_outcome': callOutcome ?? '',
+          'actual_problem': actualProblem ?? '',
+          'operator_notes': operatorNotes ?? '',
+          'consumer_satisfaction': consumerSatisfaction ?? '',
+          'consumer_name': consumerName ?? '',
+          'area': area ?? '',
+          'substation': substation ?? '',
+          'feeder': feeder ?? '',
+          'complaint_type': complaintType ?? '',
+          'call_time': DateTime.now().toIso8601String(),
+        });
+        return false;
+      }
+
       final uri = Uri.parse('$baseUrl/api/upload');
       final request = http.MultipartRequest('POST', uri);
 
@@ -209,50 +217,70 @@ class OfficeSyncService {
         'call_time': DateTime.now().toIso8601String(),
       });
       return false;
+    } finally {
+      _inFlightUploadKeys.remove(inFlightKey);
     }
   }
 
   static Future<void> _queueUpload(Map<String, dynamic> item) async {
     final prefs = await SharedPreferences.getInstance();
     final list = prefs.getStringList(_prefKeyQueue) ?? [];
-    list.add(jsonEncode(item));
-    await prefs.setStringList(_prefKeyQueue, list);
+    // Avoid queuing duplicate item for same complaint and file
+    final isDuplicate = list.any((str) {
+      try {
+        final parsed = jsonDecode(str) as Map<String, dynamic>;
+        return parsed['complaint_no'] == item['complaint_no'] &&
+               parsed['filePath'] == item['filePath'];
+      } catch (_) {
+        return false;
+      }
+    });
+    if (!isDuplicate) {
+      list.add(jsonEncode(item));
+      await prefs.setStringList(_prefKeyQueue, list);
+    }
   }
 
   /// Flushes pending uploads when back on Office Wi-Fi.
   static Future<void> flushPendingUploads() async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList(_prefKeyQueue);
-    if (list == null || list.isEmpty) return;
+    if (_isFlushing) return;
+    _isFlushing = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = prefs.getStringList(_prefKeyQueue);
+      if (list == null || list.isEmpty) return;
 
-    final baseUrl = await discoverOfficeServer();
-    if (baseUrl == null) return;
+      final baseUrl = await discoverOfficeServer();
+      if (baseUrl == null) return;
 
-    final remaining = <String>[];
-    for (final jsonStr in list) {
-      try {
-        final item = jsonDecode(jsonStr) as Map<String, dynamic>;
-        final filePath = item['filePath'] as String;
-        if (!File(filePath).existsSync()) continue;
+      final remaining = <String>[];
+      for (final jsonStr in list) {
+        try {
+          final item = jsonDecode(jsonStr) as Map<String, dynamic>;
+          final filePath = item['filePath'] as String;
+          if (!File(filePath).existsSync()) continue;
 
-        final uri = Uri.parse('$baseUrl/api/upload');
-        final request = http.MultipartRequest('POST', uri);
+          final uri = Uri.parse('$baseUrl/api/upload');
+          final request = http.MultipartRequest('POST', uri);
 
-        item.forEach((key, val) {
-          if (key != 'filePath') {
-            request.fields[key] = '$val';
+          item.forEach((key, val) {
+            if (key != 'filePath') {
+              request.fields[key] = '$val';
+            }
+          });
+          request.files.add(await http.MultipartFile.fromPath('audio', filePath));
+
+          final streamed = await request.send().timeout(const Duration(seconds: 15));
+          if (streamed.statusCode != 200) {
+            remaining.add(jsonStr);
           }
-        });
-        request.files.add(await http.MultipartFile.fromPath('audio', filePath));
-
-        final streamed = await request.send().timeout(const Duration(seconds: 15));
-        if (streamed.statusCode != 200) {
+        } catch (_) {
           remaining.add(jsonStr);
         }
-      } catch (_) {
-        remaining.add(jsonStr);
       }
+      await prefs.setStringList(_prefKeyQueue, remaining);
+    } finally {
+      _isFlushing = false;
     }
-    await prefs.setStringList(_prefKeyQueue, remaining);
   }
 }
