@@ -159,13 +159,13 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
     let finalFilePath = '';
     let finalFileName = '';
 
+    const dateObj = new Date(call_time);
+    const dateFolder = isNaN(dateObj.getTime())
+      ? new Date().toISOString().slice(0, 10)
+      : dateObj.toISOString().slice(0, 10);
+
     if (file) {
       // Determine target directory: D:\FRT_Recordings\YYYY-MM-DD\Complaint_<complaint_no>\
-      const dateObj = new Date(call_time);
-      const dateFolder = isNaN(dateObj.getTime())
-        ? new Date().toISOString().slice(0, 10)
-        : dateObj.toISOString().slice(0, 10);
-
       const safeComplaint = complaint_no.replace(/[^a-zA-Z0-9_-]/g, '_');
       const complaintDir = path.join(RECORDINGS_BASE_DIR, dateFolder, `Complaint_${safeComplaint}`);
       if (!fs.existsSync(complaintDir)) {
@@ -569,11 +569,11 @@ app.get('/api/complaints', async (req, res) => {
     }
 
     if (date.trim()) {
-      whereClause += ` AND date(r.call_time) = date(?)`;
-      params.push(date.trim());
+      whereClause += ` AND (date(r.call_time) = date(?) OR date(c.last_activity_at) = date(?))`;
+      params.push(date.trim(), date.trim());
     } else if (month.trim()) {
-      whereClause += ` AND strftime('%Y-%m', r.call_time) = ?`;
-      params.push(month.trim());
+      whereClause += ` AND (strftime('%Y-%m', r.call_time) = ? OR strftime('%Y-%m', c.last_activity_at) = ?)`;
+      params.push(month.trim(), month.trim());
     }
 
     if (substation.trim()) {
@@ -671,14 +671,22 @@ app.get('/api/stats', async (req, res) => {
     const todayStats = await get(
       `SELECT 
         COUNT(id) as total_calls_today,
-        COUNT(DISTINCT complaint_no) as total_complaints_today,
         COALESCE(SUM(duration_seconds), 0) as total_duration_today,
-        COALESCE(SUM(file_size_bytes), 0) as total_bytes_today,
-        SUM(CASE WHEN consumer_satisfaction = 'SATISFIED' THEN 1 ELSE 0 END) as satisfied_today,
-        SUM(CASE WHEN consumer_satisfaction = 'UNSATISFIED' THEN 1 ELSE 0 END) as unsatisfied_today
+        COALESCE(SUM(file_size_bytes), 0) as total_bytes_today
        FROM call_recordings
        WHERE date(call_time) = date(?)`,
       [today]
+    );
+
+    const todayComplaintsAndSat = await get(
+      `SELECT 
+        COUNT(DISTINCT c.complaint_no) as total_complaints_today,
+        COUNT(DISTINCT CASE WHEN c.complaint_no IN (SELECT complaint_no FROM call_recordings WHERE consumer_satisfaction = 'SATISFIED') THEN c.complaint_no END) as satisfied_today,
+        COUNT(DISTINCT CASE WHEN c.complaint_no NOT IN (SELECT complaint_no FROM call_recordings WHERE consumer_satisfaction = 'SATISFIED') AND c.complaint_no IN (SELECT complaint_no FROM call_recordings WHERE consumer_satisfaction = 'UNSATISFIED') THEN c.complaint_no END) as unsatisfied_today
+       FROM complaints_meta c
+       WHERE date(c.last_activity_at) = date(?) 
+          OR c.complaint_no IN (SELECT complaint_no FROM call_recordings WHERE date(call_time) = date(?))`,
+      [today, today]
     );
 
     const operatorBreakdown = await all(
@@ -702,9 +710,9 @@ app.get('/api/stats', async (req, res) => {
       today: {
         date: today,
         calls: todayStats.total_calls_today || 0,
-        complaints: todayStats.total_complaints_today || 0,
-        satisfied: todayStats.satisfied_today || 0,
-        unsatisfied: todayStats.unsatisfied_today || 0,
+        complaints: todayComplaintsAndSat.total_complaints_today || 0,
+        satisfied: todayComplaintsAndSat.satisfied_today || 0,
+        unsatisfied: todayComplaintsAndSat.unsatisfied_today || 0,
         durationMinutes: Math.round((todayStats.total_duration_today || 0) / 60),
         storageMB: ((todayStats.total_bytes_today || 0) / (1024 * 1024)).toFixed(2),
       },
