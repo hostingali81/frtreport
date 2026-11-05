@@ -2,6 +2,8 @@
 
 # dependencies
 /node_modules
+office-server/node_modules/
+office-server/data/
 /.pnp
 .pnp.*
 .yarn/*

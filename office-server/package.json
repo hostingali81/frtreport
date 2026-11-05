@@ -1,0 +1,15 @@
+{
+  "name": "frt-office-server",
+  "version": "1.0.0",
+  "description": "Dedicated Local Server & Dashboard for FRT Barabanki Call Recordings",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "sqlite3": "^5.1.7"
+  }
+}

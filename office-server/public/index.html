@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FRT Barabanki — Call Recordings Hub</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+    .audio-scrubber::-webkit-slider-thumb {
+      appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #2563eb; cursor: pointer;
+    }
+  </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col">
+
+  <!-- Top Navbar -->
+  <header class="bg-slate-900 text-white shadow-md sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-xl shadow">
+          <i class="fa-solid fa-headset"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold leading-tight flex items-center gap-2">
+            FRT Control Room <span class="text-xs bg-blue-500/20 text-blue-300 border border-blue-400/30 px-2 py-0.5 rounded-full font-medium">Barabanki</span>
+          </h1>
+          <p class="text-xs text-slate-400">Office Local Storage & Call Recording Hub</p>
+        </div>
+      </div>
+
+      <!-- Live Beacon Status & Disk Info -->
+      <div class="flex items-center space-x-4">
+        <div class="flex items-center space-x-2 text-xs bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-full text-slate-300">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span>LAN Radar Active (Port 41234)</span>
+        </div>
+        <div id="lan-ip-badge" class="hidden sm:block text-xs bg-slate-800 text-slate-400 border border-slate-700 px-3 py-1.5 rounded-full">
+          <i class="fa-solid fa-wifi text-emerald-400 mr-1"></i> <span id="server-ip-text">Loading IP...</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full space-y-6">
+
+    <!-- KPI / Stats Summary Banner -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-center space-x-3">
+        <div class="w-11 h-11 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-lg">
+          <i class="fa-solid fa-phone-volume"></i>
+        </div>
+        <div>
+          <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Today's Calls</p>
+          <p id="stat-today-calls" class="text-2xl font-bold text-slate-800">0</p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-center space-x-3">
+        <div class="w-11 h-11 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center text-lg">
+          <i class="fa-solid fa-clipboard-list"></i>
+        </div>
+        <div>
+          <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Complaints Covered</p>
+          <p id="stat-today-complaints" class="text-2xl font-bold text-slate-800">0</p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-center space-x-3">
+        <div class="w-11 h-11 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-lg">
+          <i class="fa-solid fa-clock"></i>
+        </div>
+        <div>
+          <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Talk Time Today</p>
+          <p id="stat-today-time" class="text-2xl font-bold text-slate-800">0 min</p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-center space-x-3">
+        <div class="w-11 h-11 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center text-lg">
+          <i class="fa-solid fa-hard-drive"></i>
+        </div>
+        <div>
+          <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">D: Drive Storage</p>
+          <p id="stat-storage" class="text-2xl font-bold text-slate-800">0 MB</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filter & Search Toolbar -->
+    <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm space-y-3">
+      <!-- Row 1: Primary Inputs -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
+        
+        <!-- Search input -->
+        <div class="lg:col-span-4 relative">
+          <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+          <input 
+            type="text" 
+            id="search-input" 
+            placeholder="Search Complaint No, Phone, Name..." 
+            class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+          />
+        </div>
+
+        <!-- Substation / Area filter -->
+        <div class="lg:col-span-2">
+          <select 
+            id="substation-filter" 
+            class="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+          >
+            <option value="">All Substations</option>
+          </select>
+        </div>
+
+        <!-- Month filter -->
+        <div class="lg:col-span-2">
+          <select 
+            id="month-filter" 
+            class="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+          >
+            <option value="">Month: All</option>
+          </select>
+        </div>
+
+        <!-- Specific Date selector -->
+        <div class="lg:col-span-2">
+          <input 
+            type="date" 
+            id="date-filter" 
+            class="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+          />
+        </div>
+
+        <!-- Operator filter -->
+        <div class="lg:col-span-2">
+          <select 
+            id="operator-filter" 
+            class="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+          >
+            <option value="">All Operators (24/7)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Row 2: Secondary Filters & Action Controls -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-slate-100">
+        
+        <!-- Left: Quick Date & Target Filter -->
+        <div class="flex flex-wrap items-center gap-1.5 text-xs">
+          <span class="text-slate-400 font-medium mr-1">Quick:</span>
+          <button class="quick-date-btn px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 font-semibold hover:bg-blue-100 transition" data-range="today">Today</button>
+          <button class="quick-date-btn px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-range="yesterday">Yesterday</button>
+          <button class="quick-date-btn px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-range="this_month">This Month</button>
+          <button class="quick-date-btn px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-range="all">All Dates</button>
+          
+          <span class="text-slate-300 mx-1">|</span>
+
+          <!-- Call Target Filter -->
+          <button class="target-btn px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold transition" data-target="">All Calls</button>
+          <button class="target-btn px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-target="CONSUMER">Consumer</button>
+          <button class="target-btn px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-target="CREW">Crew / Lineman</button>
+        </div>
+
+        <!-- Right: Export Excel & Refresh -->
+        <div class="flex items-center space-x-2">
+          <!-- Call Outcome Filter -->
+          <select 
+            id="outcome-filter" 
+            class="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-700 focus:outline-none"
+          >
+            <option value="">All Call Outcomes</option>
+            <option value="Connected">Connected Only</option>
+            <option value="No Answer">No Answer Only</option>
+            <option value="Switched Off">Switched Off Only</option>
+            <option value="Busy">Busy Only</option>
+          </select>
+
+          <!-- Satisfaction Filter -->
+          <select 
+            id="satisfaction-filter" 
+            class="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-700 focus:outline-none"
+          >
+            <option value="">Feedback: All</option>
+            <option value="SATISFIED">😊 Satisfied Only</option>
+            <option value="UNSATISFIED">🙁 Unsatisfied Only</option>
+          </select>
+
+          <!-- Export to Excel Button -->
+          <button 
+            id="export-csv-btn" 
+            title="Export filtered records to Excel (CSV)"
+            class="px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <i class="fa-solid fa-file-excel text-emerald-600"></i> Export Excel
+          </button>
+
+          <!-- Refresh Button -->
+          <button 
+            id="refresh-btn" 
+            title="Refresh List"
+            class="p-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-xs transition"
+          >
+            <i class="fa-solid fa-arrows-rotate"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Real-time Alert Banner -->
+    <div id="new-call-banner" class="hidden bg-emerald-500 text-white px-4 py-2.5 rounded-lg shadow-sm flex items-center justify-between animate-bounce">
+      <div class="flex items-center space-x-2 text-sm font-semibold">
+        <i class="fa-solid fa-circle-check"></i>
+        <span id="new-call-message">New call recording received from Phone!</span>
+      </div>
+      <button onclick="loadComplaints()" class="text-xs bg-white text-emerald-800 font-bold px-3 py-1 rounded shadow hover:bg-emerald-50">
+        Show Now
+      </button>
+    </div>
+
+    <!-- Complaint Threads List -->
+    <div class="space-y-4">
+      <div class="flex items-center justify-between px-1">
+        <h2 class="text-sm font-semibold text-slate-700 uppercase tracking-wide">
+          Complaints & Audio Timeline (<span id="total-count">0</span>)
+        </h2>
+        <span class="text-xs text-slate-400">Chronological Call Threads</span>
+      </div>
+
+      <div id="complaints-container" class="space-y-4">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Loading State -->
+      <div id="loading-spinner" class="py-16 text-center text-slate-400">
+        <i class="fa-solid fa-circle-notch fa-spin text-3xl text-blue-500 mb-2"></i>
+        <p class="text-sm">Fetching recordings from D: drive...</p>
+      </div>
+
+      <!-- Empty State -->
+      <div id="empty-state" class="hidden py-16 text-center bg-white rounded-xl border border-dashed border-slate-300 p-8">
+        <div class="w-16 h-16 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 text-2xl">
+          <i class="fa-solid fa-phone-slash"></i>
+        </div>
+        <h3 class="text-base font-semibold text-slate-700">No Call Recordings Found</h3>
+        <p class="text-xs text-slate-400 max-w-sm mx-auto mt-1">
+          No recordings match your current search or date filters. As soon as an operator submits a call from the mobile app, it will appear here instantly.
+        </p>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

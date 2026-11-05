@@ -8,6 +8,7 @@ import '../updater.dart';
 import '../widgets.dart';
 import 'complaints_screen.dart';
 import 'detail_sheet.dart';
+import 'followup_screen.dart';
 import 'profile_screen.dart';
 import 'reports_screen.dart';
 import 'users_screen.dart';
@@ -81,11 +82,12 @@ class _HomeShellState extends State<_HomeShell> with WidgetsBindingObserver {
     final u = widget.user;
     _tabs = [
       _Tab('Calls', Icons.phone_in_talk_outlined, Icons.phone_in_talk, const ComplaintsScreen()),
+      _Tab('Follow-up', Icons.assignment_late_outlined, Icons.assignment_late, const FollowupScreen()),
       _Tab('Reports', Icons.bar_chart_outlined, Icons.bar_chart, ReportsScreen(user: u)),
       if (u.isSuperAdmin) _Tab('Users', Icons.group_outlined, Icons.group, const UsersScreen()),
       _Tab('Profile', Icons.person_outline, Icons.person, ProfileScreen(user: u)),
     ];
-    _index = u.isManager ? 1 : 0;
+    _index = u.isManager ? 2 : 0;
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkPendingIncomingCall());
   }
