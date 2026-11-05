@@ -24,10 +24,12 @@ class OfficeSyncService {
   static const _prefKeyServerUrl = 'office_server_url';
   static const _prefKeyQueue = 'office_pending_uploads';
   static const _prefKeyFollowupCache = 'office_followup_cache';
+  static const _prefKeySatisfiedCache = 'office_locally_satisfied_complaints';
   static const int discoveryPort = 41234;
 
   static DiscoveredServer? _cachedServer;
   static final Set<String> _inFlightUploadKeys = {};
+  static final Set<String> _locallySatisfiedNumbers = {};
   static bool _isFlushing = false;
 
   static DiscoveredServer? get cachedServer => _cachedServer;
@@ -222,9 +224,79 @@ class OfficeSyncService {
     }
   }
 
+  /// Loads locally satisfied complaints from SharedPreferences into memory.
+  static Future<void> _loadLocallySatisfied() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = prefs.getStringList(_prefKeySatisfiedCache);
+      if (list != null) {
+        _locallySatisfiedNumbers.addAll(list);
+      }
+    } catch (_) {}
+  }
+
+  /// Marks a complaint as satisfied locally, removing it from follow-up cache immediately.
+  static Future<void> markComplaintLocallySatisfied(String complaintNo) async {
+    final clean = complaintNo.trim();
+    if (clean.isEmpty) return;
+    _locallySatisfiedNumbers.add(clean);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_prefKeySatisfiedCache, _locallySatisfiedNumbers.toList());
+      await removeFromFollowupCache(clean);
+    } catch (_) {}
+  }
+
+  /// Removes a single complaint from the cached follow-up list in SharedPreferences.
+  static Future<void> removeFromFollowupCache(String complaintNo) async {
+    final clean = complaintNo.trim();
+    if (clean.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cachedJson = prefs.getString(_prefKeyFollowupCache);
+      if (cachedJson != null && cachedJson.isNotEmpty) {
+        final decoded = jsonDecode(cachedJson);
+        if (decoded is List) {
+          final updated = decoded.where((item) {
+            if (item is Map) {
+              return '${item['complaint_no'] ?? ''}'.trim() != clean;
+            }
+            return true;
+          }).toList();
+          await prefs.setString(_prefKeyFollowupCache, jsonEncode(updated));
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Determines if a complaint is satisfied based on any recording or local state.
+  static bool isComplaintSatisfied(Map<String, dynamic> c) {
+    final compNo = '${c['complaint_no'] ?? ''}'.trim();
+    if (compNo.isNotEmpty && _locallySatisfiedNumbers.contains(compNo)) {
+      return true;
+    }
+
+    final overallSat = '${c['consumer_satisfaction'] ?? ''}'.trim().toUpperCase();
+    if (overallSat == 'SATISFIED') return true;
+
+    final recs = c['recordings'] as List?;
+    if (recs != null && recs.isNotEmpty) {
+      for (final r in recs) {
+        if (r is Map) {
+          final sat = '${r['consumer_satisfaction'] ?? ''}'.trim().toUpperCase();
+          if (sat == 'SATISFIED') return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /// Fetches unsatisfied complaints from the local Office Server.
   /// Falls back to local SharedPreferences cache when Wi-Fi is disconnected.
+  /// Strictly filters out any complaint that has a positive (SATISFIED) recording.
   static Future<List<Map<String, dynamic>>> fetchUnsatisfiedComplaints({bool forceRefresh = false}) async {
+    await _loadLocallySatisfied();
+
     final baseUrl = await discoverOfficeServer(forceRefresh: forceRefresh);
     if (baseUrl != null) {
       try {
@@ -233,7 +305,9 @@ class OfficeSyncService {
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body);
           if (data is Map && data['complaints'] is List) {
-            final list = (data['complaints'] as List).cast<Map<String, dynamic>>();
+            final rawList = (data['complaints'] as List).cast<Map<String, dynamic>>();
+            // Strictly exclude any complaint that has any SATISFIED recording
+            final list = rawList.where((c) => !isComplaintSatisfied(c)).toList();
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString(_prefKeyFollowupCache, jsonEncode(list));
             return list;
@@ -242,14 +316,15 @@ class OfficeSyncService {
       } catch (_) {}
     }
 
-    // Offline fallback: load cached complaints
+    // Offline fallback: load cached complaints and exclude satisfied ones
     try {
       final prefs = await SharedPreferences.getInstance();
       final cachedJson = prefs.getString(_prefKeyFollowupCache);
       if (cachedJson != null && cachedJson.isNotEmpty) {
         final decoded = jsonDecode(cachedJson);
         if (decoded is List) {
-          return decoded.cast<Map<String, dynamic>>();
+          final rawList = decoded.cast<Map<String, dynamic>>();
+          return rawList.where((c) => !isComplaintSatisfied(c)).toList();
         }
       }
     } catch (_) {}
@@ -263,6 +338,8 @@ class OfficeSyncService {
     String? notes,
     String? operatorName,
   }) async {
+    await markComplaintLocallySatisfied(complaintNo);
+
     final baseUrl = await discoverOfficeServer();
     if (baseUrl == null) return false;
 
@@ -306,6 +383,10 @@ class OfficeSyncService {
     String? complaintType,
   }) async {
     final hasFile = filePath != null && filePath.isNotEmpty && File(filePath).existsSync();
+
+    if ((consumerSatisfaction ?? '').trim().toUpperCase() == 'SATISFIED') {
+      await markComplaintLocallySatisfied(complaintNo);
+    }
 
     final inFlightKey = hasFile ? '${complaintNo}_$filePath' : '${complaintNo}_${phoneNumber}_$durationSeconds';
     if (_inFlightUploadKeys.contains(inFlightKey)) {
@@ -439,6 +520,11 @@ class OfficeSyncService {
           final item = jsonDecode(jsonStr) as Map<String, dynamic>;
           final filePath = item['filePath'] as String?;
           final hasFile = filePath != null && filePath.isNotEmpty && File(filePath).existsSync();
+          final compNo = '${item['complaint_no'] ?? ''}'.trim();
+          final sat = '${item['consumer_satisfaction'] ?? ''}'.trim().toUpperCase();
+          if (sat == 'SATISFIED' && compNo.isNotEmpty) {
+            await markComplaintLocallySatisfied(compNo);
+          }
 
           final uri = Uri.parse('$baseUrl/api/upload');
           final request = http.MultipartRequest('POST', uri);

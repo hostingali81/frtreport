@@ -133,7 +133,7 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       const newNotes = (operator_notes || '').trim();
       let updated = false;
 
-      if (newSat && (!existingDuplicate.consumer_satisfaction || existingDuplicate.consumer_satisfaction === '')) {
+      if (newSat && existingDuplicate.consumer_satisfaction !== newSat) {
         await run(`UPDATE call_recordings SET consumer_satisfaction = ? WHERE id = ?`, [newSat, existingDuplicate.id]);
         existingDuplicate.consumer_satisfaction = newSat;
         updated = true;
@@ -425,6 +425,17 @@ app.post('/api/complaints/:complaint_no/satisfaction', async (req, res) => {
         consumer_satisfaction: satUpper,
         operator_notes: updatedNotes,
       });
+    } else {
+      await run(
+        `INSERT INTO call_recordings (complaint_no, call_target, phone_number, operator_name, call_time, file_path, file_name, file_size_bytes, consumer_satisfaction, operator_notes)
+         VALUES (?, 'CONSUMER', '', ?, CURRENT_TIMESTAMP, '', '', 0, ?, ?)`,
+        [complaint_no, operator_name, satUpper, notes]
+      );
+      broadcastEvent('new_recording', {
+        complaint_no,
+        consumer_satisfaction: satUpper,
+        operator_notes: notes,
+      });
     }
 
     await run(
@@ -498,12 +509,19 @@ app.get('/api/complaints', async (req, res) => {
       params.push(target.trim().toUpperCase());
     }
 
-    if (satisfaction.trim()) {
-      whereClause += ` AND r.id = (
-        SELECT r2.id FROM call_recordings r2 
-        WHERE r2.complaint_no = c.complaint_no 
-        ORDER BY r2.call_time DESC, r2.id DESC LIMIT 1
-      ) AND r.consumer_satisfaction = ?`;
+    if (satisfaction.trim().toUpperCase() === 'UNSATISFIED') {
+      // Exclude ANY complaint that has even one SATISFIED recording!
+      whereClause += ` AND c.complaint_no NOT IN (
+        SELECT complaint_no FROM call_recordings WHERE consumer_satisfaction = 'SATISFIED'
+      ) AND c.complaint_no IN (
+        SELECT complaint_no FROM call_recordings WHERE consumer_satisfaction = 'UNSATISFIED'
+      )`;
+    } else if (satisfaction.trim().toUpperCase() === 'SATISFIED') {
+      whereClause += ` AND c.complaint_no IN (
+        SELECT complaint_no FROM call_recordings WHERE consumer_satisfaction = 'SATISFIED'
+      )`;
+    } else if (satisfaction.trim()) {
+      whereClause += ` AND r.consumer_satisfaction = ?`;
       params.push(satisfaction.trim().toUpperCase());
     }
 

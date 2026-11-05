@@ -142,6 +142,9 @@ class _FollowupScreenState extends State<FollowupScreen> {
       final list = await OfficeSyncService.fetchUnsatisfiedComplaints(forceRefresh: forceRefresh);
       final server = await OfficeSyncService.discoverOfficeServer(forceRefresh: forceRefresh);
 
+      // Strictly filter out any complaint that is satisfied
+      list.removeWhere((c) => OfficeSyncService.isComplaintSatisfied(c));
+
       // Sort newest / latest call first so last complaints always appear at the top
       list.sort((a, b) {
         final timeA = extractLastCallDate(a) ?? extractComplaintDate(a) ?? DateTime(2000);
