@@ -1253,7 +1253,13 @@ class _FollowupCallSheetState extends State<FollowupCallSheet> {
     setState(() => _isSaving = true);
 
     final complaintNo = '${widget.complaint['complaint_no'] ?? ''}';
-    final phone = '${widget.complaint['consumer_phone'] ?? ''}';
+    String phone = '${widget.complaint['consumer_phone'] ?? ''}'.trim();
+    if (phone.isEmpty) {
+      final recs = widget.complaint['recordings'] as List?;
+      if (recs != null && recs.isNotEmpty) {
+        phone = '${recs.last['phone_number'] ?? ''}'.trim();
+      }
+    }
     final consumerName = '${widget.complaint['consumer_name'] ?? 'Consumer'}';
 
     final user = Supabase.instance.client.auth.currentUser;
@@ -1316,7 +1322,13 @@ class _FollowupCallSheetState extends State<FollowupCallSheet> {
   Widget build(BuildContext context) {
     final complaintNo = widget.complaint['complaint_no'] ?? '-';
     final consumerName = widget.complaint['consumer_name'] ?? 'Consumer';
-    final phone = widget.complaint['consumer_phone'] ?? '';
+    String phone = '${widget.complaint['consumer_phone'] ?? ''}'.trim();
+    if (phone.isEmpty) {
+      final recs = widget.complaint['recordings'] as List?;
+      if (recs != null && recs.isNotEmpty) {
+        phone = '${recs.last['phone_number'] ?? ''}'.trim();
+      }
+    }
     final area = widget.complaint['area'] ?? '';
     final feeder = widget.complaint['feeder'] ?? '';
     final type = widget.complaint['complaint_type'] ?? 'Complaint';

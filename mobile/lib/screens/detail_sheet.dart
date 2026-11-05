@@ -791,7 +791,9 @@ class _DetailSheetState extends State<DetailSheet> {
       debugPrint('[OfficeSync] Recording already uploaded during this session, skipping duplicate sync.');
       return;
     }
-    if (_foundRecording != null && _sendToOffice) {
+    final hasAudio = _foundRecording != null;
+    final hasCall = _lastDialedMobile != null || (_callDuration != null && _callDuration!.inSeconds > 0);
+    if ((hasAudio || hasCall) && _sendToOffice) {
       _recordingAlreadyUploaded = true;
       final user = supabase.auth.currentUser;
       final metadata = user?.userMetadata;
@@ -804,7 +806,7 @@ class _DetailSheetState extends State<DetailSheet> {
       final opId = user?.id ?? '';
 
       OfficeSyncService.uploadRecording(
-        filePath: _foundRecording!['path'] as String,
+        filePath: _foundRecording?['path'] as String?,
         complaintNo: widget.complaint.complaintNumber ?? '${widget.complaint.dataid}',
         callTarget: _callTarget,
         phoneNumber: _lastDialedMobile ?? _contact?.mobile ?? '',

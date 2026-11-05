@@ -486,12 +486,17 @@ class OfficeSyncService {
   static Future<void> _queueUpload(Map<String, dynamic> item) async {
     final prefs = await SharedPreferences.getInstance();
     final list = prefs.getStringList(_prefKeyQueue) ?? [];
-    // Avoid queuing duplicate item for same complaint and file
+    final hasFile = (item['filePath'] as String?)?.isNotEmpty == true;
     final isDuplicate = list.any((str) {
       try {
         final parsed = jsonDecode(str) as Map<String, dynamic>;
-        return parsed['complaint_no'] == item['complaint_no'] &&
-               parsed['filePath'] == item['filePath'];
+        if (hasFile) {
+          return parsed['complaint_no'] == item['complaint_no'] &&
+                 parsed['filePath'] == item['filePath'];
+        } else {
+          return parsed['complaint_no'] == item['complaint_no'] &&
+                 parsed['call_time'] == item['call_time'];
+        }
       } catch (_) {
         return false;
       }
