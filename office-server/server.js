@@ -509,7 +509,7 @@ app.get('/api/complaints', async (req, res) => {
 
     // Get matching complaint numbers
     const complaintsQuery = `
-      SELECT DISTINCT c.complaint_no, c.consumer_name, c.consumer_phone, c.area, c.substation, c.feeder, c.complaint_type, c.last_activity_at
+      SELECT DISTINCT c.complaint_no, c.consumer_name, c.consumer_phone, c.area, c.substation, c.feeder, c.complaint_type, c.complaint_date, c.last_activity_at
       FROM complaints_meta c
       JOIN call_recordings r ON c.complaint_no = r.complaint_no
       ${whereClause}
@@ -530,10 +530,6 @@ app.get('/api/complaints', async (req, res) => {
       if (target.trim()) {
         recQuery += ` AND call_target = ?`;
         recParams.push(target.trim().toUpperCase());
-      }
-      if (satisfaction.trim()) {
-        recQuery += ` AND consumer_satisfaction = ?`;
-        recParams.push(satisfaction.trim().toUpperCase());
       }
       recQuery += ` ORDER BY call_time ASC`;
 

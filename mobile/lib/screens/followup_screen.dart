@@ -14,6 +14,88 @@ import '../storage.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
+// --- Date & Time Helpers ---
+
+String formatRelativeTime(DateTime? dt) {
+  if (dt == null) return '';
+  final now = DateTime.now();
+  final diff = now.difference(dt);
+  if (diff.isNegative) return 'Just now';
+  if (diff.inSeconds < 45) return 'Just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago (${diff.inMinutes} मिनट पहले)';
+  if (diff.inHours < 24) return '${diff.inHours}h ago (${diff.inHours} घंटे पहले)';
+  if (diff.inDays == 1) return 'Yesterday (1 दिन पहले)';
+  if (diff.inDays < 30) return '${diff.inDays}d ago (${diff.inDays} दिन पहले)';
+  final months = (diff.inDays / 30).floor();
+  return '$months mo ago ($months माह पहले)';
+}
+
+DateTime? extractComplaintDate(Map<String, dynamic> c) {
+  // 1. If complaint_date is set (e.g. 2026-11-05 or ISO string)
+  final compDateStr = c['complaint_date'] as String?;
+  if (compDateStr != null && compDateStr.isNotEmpty) {
+    final parsed = DateTime.tryParse(compDateStr);
+    if (parsed != null) return parsed;
+  }
+
+  // 2. First call recording's call_time (the initial incoming/registration call)
+  final recs = c['recordings'] as List?;
+  if (recs != null && recs.isNotEmpty) {
+    final firstRec = recs.first as Map<String, dynamic>;
+    final callTimeStr = firstRec['call_time'] as String?;
+    if (callTimeStr != null && callTimeStr.isNotEmpty) {
+      final parsed = DateTime.tryParse(callTimeStr);
+      if (parsed != null) return parsed;
+    }
+  }
+
+  // 3. From complaint_no pattern (e.g. MV051126... -> 05/11/26)
+  final compNo = '${c['complaint_no'] ?? ''}';
+  final regMatch = RegExp(r'[A-Za-z]+(\d{2})(\d{2})(\d{2})').firstMatch(compNo);
+  if (regMatch != null) {
+    try {
+      final d = int.parse(regMatch.group(1)!);
+      final m = int.parse(regMatch.group(2)!);
+      final y = 2000 + int.parse(regMatch.group(3)!);
+      return DateTime(y, m, d);
+    } catch (_) {}
+  }
+
+  // 4. last_activity_at fallback
+  final lastAct = c['last_activity_at'] as String?;
+  if (lastAct != null && lastAct.isNotEmpty) {
+    return DateTime.tryParse(lastAct);
+  }
+
+  return null;
+}
+
+DateTime? extractLastCallDate(Map<String, dynamic> c) {
+  final recs = c['recordings'] as List?;
+  if (recs != null && recs.isNotEmpty) {
+    final lastRec = recs.last as Map<String, dynamic>;
+    final callTimeStr = lastRec['call_time'] as String?;
+    if (callTimeStr != null && callTimeStr.isNotEmpty) {
+      return DateTime.tryParse(callTimeStr);
+    }
+  }
+  return null;
+}
+
+String getComplaintDateKey(Map<String, dynamic> c) {
+  final lastCall = extractLastCallDate(c);
+  if (lastCall != null) {
+    return DateFormat('yyyy-MM-dd').format(lastCall);
+  }
+  final compDt = extractComplaintDate(c);
+  if (compDt != null) {
+    return DateFormat('yyyy-MM-dd').format(compDt);
+  }
+  final lastAct = '${c['last_activity_at'] ?? ''}';
+  if (lastAct.length >= 10) return lastAct.substring(0, 10);
+  return '';
+}
+
 class FollowupScreen extends StatefulWidget {
   const FollowupScreen({super.key});
 
@@ -28,8 +110,11 @@ class _FollowupScreenState extends State<FollowupScreen> {
   bool _syncing = false;
   String? _serverUrl;
   String _search = '';
-  String _dateFilter = 'all'; // 'all' | 'today' | 'yesterday'
+  String _dateFilter = 'today'; // By default 'today' is selected
   int? _playingRecordingId;
+
+  int _todayCount = 0;
+  int _yesterdayCount = 0;
 
   final _searchController = TextEditingController();
 
@@ -57,6 +142,13 @@ class _FollowupScreenState extends State<FollowupScreen> {
       final list = await OfficeSyncService.fetchUnsatisfiedComplaints(forceRefresh: forceRefresh);
       final server = await OfficeSyncService.discoverOfficeServer(forceRefresh: forceRefresh);
 
+      // Sort newest / latest call first so last complaints always appear at the top
+      list.sort((a, b) {
+        final timeA = extractLastCallDate(a) ?? extractComplaintDate(a) ?? DateTime(2000);
+        final timeB = extractLastCallDate(b) ?? extractComplaintDate(b) ?? DateTime(2000);
+        return timeB.compareTo(timeA);
+      });
+
       if (mounted) {
         setState(() {
           _complaints = list;
@@ -82,7 +174,18 @@ class _FollowupScreenState extends State<FollowupScreen> {
     final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final yesterdayStr = DateFormat('yyyy-MM-dd').format(DateTime.now().subtract(const Duration(days: 1)));
 
+    int tCount = 0;
+    int yCount = 0;
+    for (final c in _complaints) {
+      final k = getComplaintDateKey(c);
+      if (k == todayStr) tCount++;
+      if (k == yesterdayStr) yCount++;
+    }
+
     setState(() {
+      _todayCount = tCount;
+      _yesterdayCount = yCount;
+
       _filtered = _complaints.where((c) {
         // Search query
         if (q.isNotEmpty) {
@@ -101,16 +204,10 @@ class _FollowupScreenState extends State<FollowupScreen> {
           if (!match) return false;
         }
 
-        // Date filter
-        if (_dateFilter != 'all') {
-          final lastAct = '${c['last_activity_at'] ?? ''}';
-          final recs = c['recordings'] as List?;
-          final lastRecTime = (recs != null && recs.isNotEmpty) ? '${recs.last['call_time'] ?? ''}' : '';
-          final dateStr = lastRecTime.isNotEmpty ? lastRecTime.split('T').first : lastAct.split(' ').first;
-
-          if (_dateFilter == 'today' && dateStr != todayStr) return false;
-          if (_dateFilter == 'yesterday' && dateStr != yesterdayStr) return false;
-        }
+        // Date filter: 'today' | 'yesterday' | 'all'
+        final dateKey = getComplaintDateKey(c);
+        if (_dateFilter == 'today' && dateKey != todayStr) return false;
+        if (_dateFilter == 'yesterday' && dateKey != yesterdayStr) return false;
 
         return true;
       }).toList();
@@ -228,11 +325,14 @@ class _FollowupScreenState extends State<FollowupScreen> {
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: const Column(
+        title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Follow-up Queue', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.ink)),
-            Text('Unsatisfied closed complaints', style: TextStyle(fontSize: 12, color: AppColors.inkSoft)),
+            const Text('Follow-up Queue', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.ink)),
+            Text(
+              '${_complaints.length} Unsatisfied ($_todayCount Today)',
+              style: const TextStyle(fontSize: 12, color: AppColors.inkSoft),
+            ),
           ],
         ),
         backgroundColor: AppColors.surface,
@@ -332,14 +432,14 @@ class _FollowupScreenState extends State<FollowupScreen> {
                   ),
                   const SizedBox(height: 8),
 
-                  // Filter Row
+                  // Filter Row: Today (Default), Yesterday, All
                   Row(
                     children: [
+                      _filterChip('today', 'Today ($_todayCount)'),
+                      const SizedBox(width: 8),
+                      _filterChip('yesterday', 'Yesterday ($_yesterdayCount)'),
+                      const SizedBox(width: 8),
                       _filterChip('all', 'All (${_complaints.length})'),
-                      const SizedBox(width: 8),
-                      _filterChip('today', 'Today'),
-                      const SizedBox(width: 8),
-                      _filterChip('yesterday', 'Yesterday'),
                       const Spacer(),
                       Text(
                         'Showing ${_filtered.length}',
@@ -364,32 +464,46 @@ class _FollowupScreenState extends State<FollowupScreen> {
                                 children: [
                                   Container(
                                     padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFDCFCE7),
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFFDCFCE7),
                                       shape: BoxShape.circle,
                                     ),
                                     child: const Icon(Icons.verified, size: 48, color: Color(0xFF059669)),
                                   ),
                                   const SizedBox(height: 14),
-                                  const Text(
-                                    'Koi Unsatisfied Complaint Nahi Hai!',
-                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.ink),
+                                  Text(
+                                    _dateFilter == 'today'
+                                        ? 'Aaj Ki Koi Unsatisfied Complaint Nahi Hai!'
+                                        : 'Koi Unsatisfied Complaint Nahi Mili!',
+                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.ink),
                                   ),
                                   const SizedBox(height: 6),
-                                  const Padding(
-                                    padding: EdgeInsets.symmetric(horizontal: 40),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 40),
                                     child: Text(
-                                      'Sabhi consumers follow-up me santusht ho chuke hain ya queue clear hai.',
+                                      _dateFilter == 'today' && _complaints.isNotEmpty
+                                          ? 'Aaj ki sabhi complaints resolve ho gayi hain. Pichli dekhne ke liye "All" par click karein.'
+                                          : 'Sabhi consumers follow-up me santusht ho chuke hain ya queue clear hai.',
                                       textAlign: TextAlign.center,
-                                      style: TextStyle(fontSize: 13, color: AppColors.muted),
+                                      style: const TextStyle(fontSize: 13, color: AppColors.muted),
                                     ),
                                   ),
-                                  const SizedBox(height: 20),
-                                  OutlinedButton.icon(
-                                    onPressed: () => _load(forceRefresh: true),
-                                    icon: const Icon(Icons.refresh, size: 18),
-                                    label: const Text('Refresh Check Karein'),
-                                  ),
+                                  const SizedBox(height: 16),
+                                  if (_dateFilter == 'today' && _complaints.isNotEmpty)
+                                    FilledButton.icon(
+                                      onPressed: () {
+                                        setState(() => _dateFilter = 'all');
+                                        _applyFilters();
+                                      },
+                                      icon: const Icon(Icons.list, size: 18),
+                                      label: Text('All Complaints Dekhein (${_complaints.length})'),
+                                    )
+                                  else
+                                    OutlinedButton.icon(
+                                      onPressed: () => _load(forceRefresh: true),
+                                      icon: const Icon(Icons.refresh, size: 18),
+                                      label: const Text('Refresh Check Karein'),
+                                    ),
                                 ],
                               ),
                             ),
@@ -475,6 +589,28 @@ class _FollowupCard extends StatelessWidget {
     final lastOp = lastRec?['operator_name'] ?? 'Operator';
     final recId = lastRec?['id'] as int?;
 
+    // Timestamps
+    final compDt = extractComplaintDate(complaint);
+    final lastCallDt = extractLastCallDate(complaint);
+
+    final now = DateTime.now();
+    final isLastCallToday = lastCallDt != null &&
+        lastCallDt.year == now.year &&
+        lastCallDt.month == now.month &&
+        lastCallDt.day == now.day;
+
+    final formattedLastCallTime = lastCallDt != null
+        ? (isLastCallToday
+            ? DateFormat('hh:mm a').format(lastCallDt)
+            : DateFormat('dd MMM, hh:mm a').format(lastCallDt))
+        : '';
+    final lastCallElapsed = formatRelativeTime(lastCallDt);
+
+    final formattedCompTime = compDt != null
+        ? DateFormat('dd MMM, hh:mm a').format(compDt)
+        : '';
+    final compElapsed = formatRelativeTime(compDt);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -495,7 +631,7 @@ class _FollowupCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Top Header
+            // Top Header: Badge, Complaint #, Type
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: const BoxDecoration(
@@ -544,6 +680,7 @@ class _FollowupCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Consumer Details & Audio Stream Button
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -587,11 +724,64 @@ class _FollowupCard extends StatelessWidget {
                                 Icon(isPlaying ? Icons.stop : Icons.volume_up, size: 14, color: isPlaying ? const Color(0xFFDC2626) : const Color(0xFF1D4ED8)),
                                 const SizedBox(width: 4),
                                 Text(
-                                  isPlaying ? 'Stop' : 'Audio Sunen',
+                                  isPlaying ? 'Stop' : 'Audio',
                                   style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isPlaying ? const Color(0xFFDC2626) : const Color(0xFF1D4ED8)),
                                 ),
                               ],
                             ),
+                          ),
+                        ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Time Badges: Complaint Registration Time & Last Call Time
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      // 1. Complaint Age Tag
+                      if (formattedCompTime.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFFFDE68A)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.access_time_filled, size: 12, color: Color(0xFFD97706)),
+                              const SizedBox(width: 4),
+                              Text(
+                                'शिकायत: $formattedCompTime ($compElapsed)',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                      // 2. Last Call Tag
+                      if (formattedLastCallTime.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFFBFDBFE)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.phone_callback, size: 12, color: Color(0xFF2563EB)),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Last Call: $formattedLastCallTime ($lastCallElapsed)',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8)),
+                              ),
+                            ],
                           ),
                         ),
                     ],
@@ -614,9 +804,14 @@ class _FollowupCard extends StatelessWidget {
                           children: [
                             const Icon(Icons.history, size: 14, color: Color(0xFF64748B)),
                             const SizedBox(width: 5),
-                            Text(
-                              'Previous Call ($lastOp):',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                            Expanded(
+                              child: Text(
+                                formattedLastCallTime.isNotEmpty
+                                    ? 'Previous Call: $formattedLastCallTime ($lastCallElapsed) · $lastOp'
+                                    : 'Previous Call ($lastOp):',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           ],
                         ),
@@ -1123,6 +1318,9 @@ class _FollowupCallSheetState extends State<FollowupCallSheet> {
     final feeder = widget.complaint['feeder'] ?? '';
     final type = widget.complaint['complaint_type'] ?? 'Complaint';
 
+    final compDt = extractComplaintDate(widget.complaint);
+    final lastCallDt = extractLastCallDate(widget.complaint);
+
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -1181,7 +1379,7 @@ class _FollowupCallSheetState extends State<FollowupCallSheet> {
 
               const Divider(height: 16, color: Color(0xFFF1F5F9)),
 
-              // Complaint Details Pill
+              // Complaint Details & Timestamp Pill
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Container(
@@ -1191,16 +1389,43 @@ class _FollowupCallSheetState extends State<FollowupCallSheet> {
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.electrical_services, size: 16, color: Color(0xFF64748B)),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          '$type | $area ${feeder.isNotEmpty ? "· $feeder" : ""}',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
-                        ),
+                      Row(
+                        children: [
+                          const Icon(Icons.electrical_services, size: 16, color: Color(0xFF64748B)),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              '$type | $area ${feeder.isNotEmpty ? "· $feeder" : ""}',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                            ),
+                          ),
+                        ],
                       ),
+                      if (compDt != null || lastCallDt != null) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            if (compDt != null)
+                              Expanded(
+                                child: Text(
+                                  'शिकायत: ${DateFormat("dd MMM, hh:mm a").format(compDt)} (${formatRelativeTime(compDt)})',
+                                  style: const TextStyle(fontSize: 11, color: Color(0xFF92400E), fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            if (lastCallDt != null)
+                              Expanded(
+                                child: Text(
+                                  'अंतिम कॉल: ${DateFormat("hh:mm a").format(lastCallDt)} (${formatRelativeTime(lastCallDt)})',
+                                  style: const TextStyle(fontSize: 11, color: Color(0xFF1D4ED8), fontWeight: FontWeight.w600),
+                                  textAlign: TextAlign.end,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),

@@ -228,7 +228,7 @@ class OfficeSyncService {
     final baseUrl = await discoverOfficeServer(forceRefresh: forceRefresh);
     if (baseUrl != null) {
       try {
-        final uri = Uri.parse('$baseUrl/api/complaints?satisfaction=UNSATISFIED&limit=100');
+        final uri = Uri.parse('$baseUrl/api/complaints?satisfaction=UNSATISFIED&limit=3000');
         final res = await http.get(uri).timeout(const Duration(seconds: 4));
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body);
