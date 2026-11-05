@@ -287,7 +287,7 @@ class OfficeSyncService {
 
   /// Sends a call recording + metadata directly to the Office PC.
   static Future<bool> uploadRecording({
-    required String filePath,
+    String? filePath,
     required String complaintNo,
     required String callTarget,
     required String phoneNumber,
@@ -305,12 +305,9 @@ class OfficeSyncService {
     String? feeder,
     String? complaintType,
   }) async {
-    final file = File(filePath);
-    if (!file.existsSync()) {
-      return false;
-    }
+    final hasFile = filePath != null && filePath.isNotEmpty && File(filePath).existsSync();
 
-    final inFlightKey = '${complaintNo}_${file.path}';
+    final inFlightKey = hasFile ? '${complaintNo}_$filePath' : '${complaintNo}_${phoneNumber}_$durationSeconds';
     if (_inFlightUploadKeys.contains(inFlightKey)) {
       return false; // Already uploading this recording right now
     }
@@ -321,7 +318,7 @@ class OfficeSyncService {
       if (baseUrl == null) {
         // Offline: queue for background upload when Wi-Fi connects
         await _queueUpload({
-          'filePath': filePath,
+          'filePath': filePath ?? '',
           'complaint_no': complaintNo,
           'call_target': callTarget,
           'phone_number': phoneNumber,
@@ -364,7 +361,9 @@ class OfficeSyncService {
       request.fields['complaint_type'] = complaintType ?? '';
       request.fields['call_time'] = DateTime.now().toIso8601String();
 
-      request.files.add(await http.MultipartFile.fromPath('audio', filePath));
+      if (hasFile) {
+        request.files.add(await http.MultipartFile.fromPath('audio', filePath));
+      }
 
       final streamedResponse = await request.send().timeout(const Duration(seconds: 20));
       final response = await http.Response.fromStream(streamedResponse);
@@ -438,8 +437,8 @@ class OfficeSyncService {
       for (final jsonStr in list) {
         try {
           final item = jsonDecode(jsonStr) as Map<String, dynamic>;
-          final filePath = item['filePath'] as String;
-          if (!File(filePath).existsSync()) continue;
+          final filePath = item['filePath'] as String?;
+          final hasFile = filePath != null && filePath.isNotEmpty && File(filePath).existsSync();
 
           final uri = Uri.parse('$baseUrl/api/upload');
           final request = http.MultipartRequest('POST', uri);
@@ -449,7 +448,9 @@ class OfficeSyncService {
               request.fields[key] = '$val';
             }
           });
-          request.files.add(await http.MultipartFile.fromPath('audio', filePath));
+          if (hasFile) {
+            request.files.add(await http.MultipartFile.fromPath('audio', filePath));
+          }
 
           final streamed = await request.send().timeout(const Duration(seconds: 15));
           if (streamed.statusCode != 200) {

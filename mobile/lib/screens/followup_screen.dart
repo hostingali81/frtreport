@@ -1,10 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../call_channel.dart';
+import '../call_tracker.dart';
 import '../office_sync.dart';
+import '../storage.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
@@ -111,20 +117,6 @@ class _FollowupScreenState extends State<FollowupScreen> {
     });
   }
 
-  Future<void> _makeCall(String phoneNumber) async {
-    Haptics.medium();
-    final clean = phoneNumber.replaceAll(RegExp(r'\D'), '');
-    if (clean.isEmpty) return;
-
-    final directOk = await CallChannel.directCall(clean);
-    if (!directOk) {
-      final uri = Uri.parse('tel:$clean');
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri);
-      }
-    }
-  }
-
   Future<void> _toggleAudio(int recId) async {
     Haptics.tap();
     if (_playingRecordingId == recId) {
@@ -147,69 +139,24 @@ class _FollowupScreenState extends State<FollowupScreen> {
     }
   }
 
-  Future<void> _markSatisfiedDialog(Map<String, dynamic> comp) async {
-    final complaintNo = comp['complaint_no'] as String;
-    final consumerName = comp['consumer_name'] ?? 'Consumer';
-    final notesCtrl = TextEditingController(text: 'Follow-up call: Supply restored, consumer satisfied');
-
-    final confirmed = await showDialog<bool>(
+  void _openFollowupCallSheet(Map<String, dynamic> comp, {bool autoStartCall = false}) {
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: const Color(0xFFDCFCE7), borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.check_circle_outline, color: Color(0xFF059669), size: 24),
-            ),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text('संतुष्ट मार्क करें', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'क्या उपभोक्ता $consumerName (#$complaintNo) अब संतुष्ट हैं?',
-              style: const TextStyle(fontSize: 14, color: AppColors.ink),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: notesCtrl,
-              maxLines: 2,
-              decoration: const InputDecoration(
-                labelText: 'फॉलोअप रिमार्क (Notes)',
-                border: OutlineInputBorder(),
-                alignLabelWithHint: true,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('रद्द करें')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF059669)),
-            child: const Text('हाँ, संतुष्ट है ✓'),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => FollowupCallSheet(
+        complaint: comp,
+        serverUrl: _serverUrl,
+        autoStartCall: autoStartCall,
+        onRefresh: () => _load(forceRefresh: false),
+        onRemoveLocal: (complaintNo) {
+          setState(() {
+            _complaints.removeWhere((c) => c['complaint_no'] == complaintNo);
+            _applyFilters();
+          });
+        },
       ),
     );
-
-    if (confirmed == true) {
-      Haptics.success();
-      final ok = await OfficeSyncService.markComplaintSatisfied(complaintNo, notes: notesCtrl.text.trim());
-      if (ok && mounted) {
-        showSnack(context, 'Complaint #$complaintNo ko Satisfied mark kar diya gaya! ✓');
-        _load(forceRefresh: false);
-      } else if (mounted) {
-        showSnack(context, 'Office PC se update nahi hua, Wi-Fi check karein', error: true);
-      }
-    }
   }
 
   void _showServerDialog() {
@@ -218,57 +165,58 @@ class _FollowupScreenState extends State<FollowupScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Office PC Server', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        title: const Row(
+          children: [
+            Icon(Icons.wifi_tethering, color: AppColors.brand),
+            SizedBox(width: 8),
+            Text('Office PC Server IP', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'AirFiber router restart hone par PC ka IP badal sakta hai. App apne aap nayi IP dhoondh leta hai.',
-              style: TextStyle(fontSize: 12.5, color: AppColors.inkSoft),
+              'Jio AirFiber router restart hone par PC ka IP badal sakta hai. Niche se naya IP scan karein ya manually enter karein:',
+              style: TextStyle(fontSize: 13, color: AppColors.inkSoft),
             ),
             const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: ipCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Server IP (e.g. 192.168.31.68)',
-                      prefixText: 'http://',
-                      suffixText: ':8080',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-              ],
+            TextField(
+              controller: ipCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Server IP (e.g. 192.168.31.68)',
+                prefixText: 'http://',
+                suffixText: ':8080',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
             ),
           ],
         ),
         actions: [
-          OutlinedButton.icon(
-            icon: const Icon(Icons.refresh, size: 16),
-            label: const Text('Auto-Scan'),
-            onPressed: () {
+          TextButton.icon(
+            onPressed: () async {
               Navigator.pop(ctx);
-              _load(forceRefresh: true);
+              showSnack(context, 'AirFiber Wi-Fi par Office PC scan ho raha hai...');
+              await _load(forceRefresh: true);
             },
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Auto Scan Wi-Fi'),
           ),
           FilledButton(
             onPressed: () async {
-              final raw = ipCtrl.text.trim();
-              if (raw.isNotEmpty) {
+              final val = ipCtrl.text.trim();
+              if (val.isNotEmpty) {
                 Navigator.pop(ctx);
-                final ok = await OfficeSyncService.setManualServerUrl(raw);
-                if (ok && mounted) {
-                  showSnack(context, 'Server connected: $raw');
-                  _load();
-                } else if (mounted) {
-                  showSnack(context, 'Is IP par server nahi mila', error: true);
+                final fullUrl = val.startsWith('http') ? val : 'http://$val:8080';
+                await OfficeSyncService.setManualServerUrl(fullUrl);
+                if (mounted) {
+                  _load(forceRefresh: true);
                 }
               }
             },
-            child: const Text('Save & Connect'),
+            child: const Text('Save IP'),
           ),
         ],
       ),
@@ -277,95 +225,99 @@ class _FollowupScreenState extends State<FollowupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isOnline = _serverUrl != null;
-
     return Scaffold(
       backgroundColor: AppColors.bg,
-      body: RefreshIndicator(
-        onRefresh: () => _load(forceRefresh: true),
-        color: AppColors.brand,
-        child: CustomScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverAppBar(
-              floating: true,
-              pinned: true,
-              backgroundColor: AppColors.bg,
-              elevation: 0,
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      appBar: AppBar(
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Follow-up Queue', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.ink)),
+            Text('Unsatisfied closed complaints', style: TextStyle(fontSize: 12, color: AppColors.inkSoft)),
+          ],
+        ),
+        backgroundColor: AppColors.surface,
+        elevation: 0.5,
+        actions: [
+          // Connection status pill
+          InkWell(
+            onTap: _showServerDialog,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: _serverUrl != null ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _serverUrl != null ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Follow-up', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 19)),
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _serverUrl != null ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                    ),
+                  ),
+                  const SizedBox(width: 5),
                   Text(
-                    '${_filtered.length} असंतोषजनक शिकायतें',
-                    style: const TextStyle(fontSize: 11.5, color: Color(0xFFDC2626), fontWeight: FontWeight.bold),
+                    _serverUrl != null
+                        ? _serverUrl!.replaceAll('http://', '').replaceAll(':8080', '')
+                        : 'No Wi-Fi',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: _serverUrl != null ? const Color(0xFF15803D) : const Color(0xFFB91C1C),
+                    ),
                   ),
                 ],
               ),
-              actions: [
-                // Server Connection Pill
-                InkWell(
-                  onTap: _showServerDialog,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 10),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: isOnline ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: isOnline ? const Color(0xFF86EFAC) : const Color(0xFFFECACA)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.circle,
-                          size: 8,
-                          color: isOnline ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          isOnline ? _serverUrl!.replaceAll('http://', '').split(':').first : 'Offline',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: isOnline ? const Color(0xFF166534) : const Color(0xFF991B1B),
-                          ),
-                        ),
-                        const SizedBox(width: 3),
-                        Icon(Icons.tune, size: 12, color: isOnline ? const Color(0xFF166534) : const Color(0xFF991B1B)),
-                      ],
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: _syncing
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.refresh),
-                  onPressed: _syncing ? null : () => _load(forceRefresh: true),
-                  tooltip: 'Refresh from Server',
-                ),
-              ],
             ),
-
-            // Search Bar & Filter Chips
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-                child: Column(
-                  children: [
-                    TextField(
+          ),
+          IconButton(
+            icon: _syncing
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh, color: AppColors.ink),
+            tooltip: 'Refresh queue',
+            onPressed: _syncing ? null : () => _load(forceRefresh: true),
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: () => _load(forceRefresh: true),
+        child: Column(
+          children: [
+            // Search and Filters
+            Container(
+              color: AppColors.surface,
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+              child: Column(
+                children: [
+                  // Search box
+                  Container(
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: TextField(
                       controller: _searchController,
-                      onChanged: (val) {
-                        _search = val;
+                      onChanged: (v) {
+                        _search = v;
                         _applyFilters();
                       },
+                      style: const TextStyle(fontSize: 14),
                       decoration: InputDecoration(
-                        hintText: 'Search Complaint no, Name, Phone...',
-                        prefixIcon: const Icon(Icons.search, size: 20),
+                        hintText: 'Search complaint #, consumer, feeder...',
+                        hintStyle: const TextStyle(fontSize: 13, color: AppColors.muted),
+                        prefixIcon: const Icon(Icons.search, size: 20, color: AppColors.muted),
                         suffixIcon: _search.isNotEmpty
                             ? IconButton(
-                                icon: const Icon(Icons.clear, size: 18),
+                                icon: const Icon(Icons.close, size: 18, color: AppColors.muted),
                                 onPressed: () {
                                   _searchController.clear();
                                   _search = '';
@@ -373,126 +325,117 @@ class _FollowupScreenState extends State<FollowupScreen> {
                                 },
                               )
                             : null,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
-                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 10),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        _FilterChip(
-                          label: 'All (${_complaints.length})',
-                          selected: _dateFilter == 'all',
-                          onTap: () {
-                            setState(() => _dateFilter = 'all');
-                            _applyFilters();
-                          },
-                        ),
-                        const SizedBox(width: 8),
-                        _FilterChip(
-                          label: 'Today',
-                          selected: _dateFilter == 'today',
-                          onTap: () {
-                            setState(() => _dateFilter = 'today');
-                            _applyFilters();
-                          },
-                        ),
-                        const SizedBox(width: 8),
-                        _FilterChip(
-                          label: 'Yesterday',
-                          selected: _dateFilter == 'yesterday',
-                          onTap: () {
-                            setState(() => _dateFilter = 'yesterday');
-                            _applyFilters();
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
+                  ),
+                  const SizedBox(height: 8),
 
-            // Content Body
-            if (_loading)
-              const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))
-            else if (_filtered.isEmpty)
-              SliverFillRemaining(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  // Filter Row
+                  Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(color: const Color(0xFFDCFCE7), borderRadius: BorderRadius.circular(30)),
-                        child: const Icon(Icons.sentiment_very_satisfied, size: 40, color: Color(0xFF059669)),
-                      ),
-                      const SizedBox(height: 14),
-                      const Text(
-                        'शानदार! कोई असंतोषजनक शिकायत नहीं',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.ink),
-                      ),
-                      const SizedBox(height: 6),
+                      _filterChip('all', 'All (${_complaints.length})'),
+                      const SizedBox(width: 8),
+                      _filterChip('today', 'Today'),
+                      const SizedBox(width: 8),
+                      _filterChip('yesterday', 'Yesterday'),
+                      const Spacer(),
                       Text(
-                        isOnline ? 'सभी उपभोक्ताओं ने संतुष्टि व्यक्त की है।' : 'Office Wi-Fi se connect karein nayi list ke liye.',
-                        style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft),
+                        'Showing ${_filtered.length}',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.inkSoft),
                       ),
                     ],
                   ),
-                ),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, idx) {
-                      final comp = _filtered[idx];
-                      return _FollowupCard(
-                        complaint: comp,
-                        playingRecordingId: _playingRecordingId,
-                        onCall: () => _makeCall('${comp['consumer_phone'] ?? ''}'),
-                        onToggleAudio: (recId) => _toggleAudio(recId),
-                        onMarkSatisfied: () => _markSatisfiedDialog(comp),
-                      );
-                    },
-                    childCount: _filtered.length,
-                  ),
-                ),
+                ],
               ),
+            ),
+
+            // Complaint List
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _filtered.isEmpty
+                      ? ListView(
+                          children: [
+                            const SizedBox(height: 80),
+                            Center(
+                              child: Column(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFDCFCE7),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.verified, size: 48, color: Color(0xFF059669)),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  const Text(
+                                    'Koi Unsatisfied Complaint Nahi Hai!',
+                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.ink),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(horizontal: 40),
+                                    child: Text(
+                                      'Sabhi consumers follow-up me santusht ho chuke hain ya queue clear hai.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(fontSize: 13, color: AppColors.muted),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 20),
+                                  OutlinedButton.icon(
+                                    onPressed: () => _load(forceRefresh: true),
+                                    icon: const Icon(Icons.refresh, size: 18),
+                                    label: const Text('Refresh Check Karein'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
+                          itemCount: _filtered.length,
+                          itemBuilder: (context, i) {
+                            final comp = _filtered[i];
+                            return _FollowupCard(
+                              complaint: comp,
+                              isPlaying: _playingRecordingId != null &&
+                                  (comp['recordings'] as List?)?.any((r) => r['id'] == _playingRecordingId) == true,
+                              onToggleAudio: _toggleAudio,
+                              onStartCall: () => _openFollowupCallSheet(comp, autoStartCall: true),
+                              onOpenSheet: () => _openFollowupCallSheet(comp, autoStartCall: false),
+                            );
+                          },
+                        ),
+            ),
           ],
         ),
       ),
     );
   }
-}
 
-class _FilterChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  const _FilterChip({required this.label, required this.selected, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _filterChip(String id, String label) {
+    final selected = _dateFilter == id;
     return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        setState(() => _dateFilter = id);
+        _applyFilters();
+      },
+      borderRadius: BorderRadius.circular(20),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: selected ? AppColors.brand : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: selected ? AppColors.brand : const Color(0xFFCBD5E1)),
+          color: selected ? AppColors.brand : const Color(0xFFF1F5F9),
+          borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: 11.5,
-            fontWeight: FontWeight.bold,
+            fontWeight: selected ? FontWeight.bold : FontWeight.w500,
             color: selected ? Colors.white : AppColors.inkSoft,
           ),
         ),
@@ -503,35 +446,34 @@ class _FilterChip extends StatelessWidget {
 
 class _FollowupCard extends StatelessWidget {
   final Map<String, dynamic> complaint;
-  final int? playingRecordingId;
-  final VoidCallback onCall;
-  final Function(int) onToggleAudio;
-  final VoidCallback onMarkSatisfied;
+  final bool isPlaying;
+  final Function(int recId) onToggleAudio;
+  final VoidCallback onStartCall;
+  final VoidCallback onOpenSheet;
 
   const _FollowupCard({
     required this.complaint,
-    required this.playingRecordingId,
-    required this.onCall,
+    required this.isPlaying,
     required this.onToggleAudio,
-    required this.onMarkSatisfied,
+    required this.onStartCall,
+    required this.onOpenSheet,
   });
 
   @override
   Widget build(BuildContext context) {
-    final complaintNo = '${complaint['complaint_no'] ?? ''}';
-    final consumerName = '${complaint['consumer_name'] ?? 'Consumer'}';
-    final phone = '${complaint['consumer_phone'] ?? ''}';
-    final area = '${complaint['area'] ?? ''}';
-    final feeder = '${complaint['feeder'] ?? ''}';
-    final type = '${complaint['complaint_type'] ?? 'No Supply'}';
+    final complaintNo = complaint['complaint_no'] ?? '-';
+    final consumerName = complaint['consumer_name'] ?? 'Consumer';
+    final phone = complaint['consumer_phone'] ?? '';
+    final area = complaint['area'] ?? '';
+    final feeder = complaint['feeder'] ?? '';
+    final type = complaint['complaint_type'] ?? 'Complaint';
 
-    final recs = (complaint['recordings'] as List?) ?? [];
-    final lastRec = recs.isNotEmpty ? recs.last as Map<String, dynamic> : null;
-    final lastOp = lastRec != null ? '${lastRec['operator_name'] ?? 'Operator'}' : '';
-    final lastProblem = lastRec != null ? '${lastRec['actual_problem'] ?? ''}' : '';
-    final lastNotes = lastRec != null ? '${lastRec['operator_notes'] ?? ''}' : '';
-    final recId = lastRec != null ? lastRec['id'] as int? : null;
-    final isPlaying = recId != null && playingRecordingId == recId;
+    final recordings = (complaint['recordings'] as List?) ?? [];
+    final lastRec = recordings.isNotEmpty ? recordings.last as Map<String, dynamic> : null;
+    final lastProblem = lastRec?['actual_problem'] ?? '';
+    final lastNotes = lastRec?['operator_notes'] ?? '';
+    final lastOp = lastRec?['operator_name'] ?? 'Operator';
+    final recId = lastRec?['id'] as int?;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -547,187 +489,1092 @@ class _FollowupCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Top Header
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: const BoxDecoration(
-              color: Color(0xFFFFF1F2),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(13)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEE2E2),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFFCA5A5)),
+      child: InkWell(
+        onTap: onOpenSheet,
+        borderRadius: BorderRadius.circular(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Top Header
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFF1F2),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(13)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEE2E2),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFFFCA5A5)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('🙁', style: TextStyle(fontSize: 11)),
+                        SizedBox(width: 4),
+                        Text(
+                          'UNSATISFIED',
+                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFB91C1C)),
+                        ),
+                      ],
+                    ),
                   ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
+                  const SizedBox(width: 8),
+                  Text(
+                    '#$complaintNo',
+                    style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.ink),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
+                    child: Text(type, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: AppColors.inkSoft)),
+                  ),
+                ],
+              ),
+            ),
+
+            // Body Content
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('🙁', style: TextStyle(fontSize: 11)),
-                      SizedBox(width: 4),
-                      Text(
-                        'UNSATISFIED',
-                        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFB91C1C)),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(consumerName, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: AppColors.ink)),
+                            const SizedBox(height: 2),
+                            Row(
+                              children: [
+                                const Icon(Icons.location_on_outlined, size: 14, color: AppColors.muted),
+                                const SizedBox(width: 3),
+                                Expanded(
+                                  child: Text(
+                                    feeder.isNotEmpty ? '$area · $feeder' : area,
+                                    style: const TextStyle(fontSize: 12, color: AppColors.inkSoft),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
+                      // Previous Call Audio Button
+                      if (recId != null)
+                        InkWell(
+                          onTap: () => onToggleAudio(recId),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: isPlaying ? const Color(0xFFFEE2E2) : const Color(0xFFEFF6FF),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: isPlaying ? const Color(0xFFEF4444) : const Color(0xFF93C5FD)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(isPlaying ? Icons.stop : Icons.volume_up, size: 14, color: isPlaying ? const Color(0xFFDC2626) : const Color(0xFF1D4ED8)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  isPlaying ? 'Stop' : 'Audio Sunen',
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isPlaying ? const Color(0xFFDC2626) : const Color(0xFF1D4ED8)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                     ],
+                  ),
+
+                  const Divider(height: 18, thickness: 0.5, color: Color(0xFFE2E8F0)),
+
+                  // Problem & Previous Call Notes
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.history, size: 14, color: Color(0xFF64748B)),
+                            const SizedBox(width: 5),
+                            Text(
+                              'Previous Call ($lastOp):',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                            ),
+                          ],
+                        ),
+                        if (lastProblem.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Fault: $lastProblem',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                          ),
+                        ],
+                        if (lastNotes.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'Note: $lastNotes',
+                            style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Prominent Recall Button (Follow-up Call)
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: onStartCall,
+                      icon: const Icon(Icons.call, size: 18),
+                      label: Text(
+                        'दोबारा कॉल करें ($phone)',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Follow-up Call Sheet: Handles placing call, tracking duration, scanning local recording,
+/// capturing satisfaction feedback (SATISFIED / UNSATISFIED), and syncing back to the Office PC.
+class FollowupCallSheet extends StatefulWidget {
+  final Map<String, dynamic> complaint;
+  final String? serverUrl;
+  final bool autoStartCall;
+  final VoidCallback onRefresh;
+  final Function(String complaintNo) onRemoveLocal;
+
+  const FollowupCallSheet({
+    super.key,
+    required this.complaint,
+    required this.serverUrl,
+    this.autoStartCall = false,
+    required this.onRefresh,
+    required this.onRemoveLocal,
+  });
+
+  @override
+  State<FollowupCallSheet> createState() => _FollowupCallSheetState();
+}
+
+class _FollowupCallSheetState extends State<FollowupCallSheet> {
+  final _tracker = CallTracker();
+  final _notesCtrl = TextEditingController();
+  final _speech = SpeechToText();
+
+  bool _speechReady = false;
+  bool _isListening = false;
+  bool _isCallActive = false;
+  bool _callEnded = false;
+  bool _isSaving = false;
+  bool _isScanningRecording = false;
+  bool _isPlayingRecording = false;
+
+  String? _callStatus; // 'Connected' | 'No Answer' | 'Busy' | 'Switched Off'
+  Duration _callDuration = Duration.zero;
+  DateTime? _dialedAt;
+  Map<String, dynamic>? _foundRecording;
+  String? _satisfaction; // 'SATISFIED' | 'UNSATISFIED' | null
+
+  @override
+  void initState() {
+    super.initState();
+    CallChannel.onPlaybackComplete = () {
+      if (mounted) setState(() => _isPlayingRecording = false);
+    };
+
+    if (widget.autoStartCall) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _startCall();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    CallChannel.stopRecording();
+    CallChannel.onPlaybackComplete = null;
+    _tracker.stop();
+    _speech.cancel();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _startCall() async {
+    final phone = '${widget.complaint['consumer_phone'] ?? ''}'.replaceAll(RegExp(r'\D'), '');
+    if (phone.isEmpty) {
+      showSnack(context, 'Valid phone number nahi mila', error: true);
+      return;
+    }
+
+    Haptics.medium();
+    final perms = await CallChannel.ensureCallPermissions();
+    _dialedAt = DateTime.now();
+
+    setState(() {
+      _isCallActive = true;
+      _callEnded = false;
+      _callDuration = Duration.zero;
+      _callStatus = null;
+      _foundRecording = null;
+    });
+
+    if (perms.phoneState) {
+      try {
+        _tracker.start((outcome) => _onCallEnded(phone, outcome));
+        final infoJson = jsonEncode({
+          'dataid': widget.complaint['complaint_no'],
+          'complaint_number': widget.complaint['complaint_no'],
+          'consumer_name': widget.complaint['consumer_name'] ?? 'Consumer',
+          'substation': widget.complaint['substation'] ?? widget.complaint['area'] ?? '',
+          'complaint_sub_type': widget.complaint['complaint_type'] ?? '',
+          'remarks': 'Follow-up Call (Previous: UNSATISFIED)',
+          'total_complaints': 1,
+          'last_status': 'UNSATISFIED',
+        });
+        CallChannel.startCallMonitor(info: infoJson);
+      } catch (_) {}
+    }
+
+    // SIM handling
+    String? accountId;
+    if (perms.callPhone) {
+      final saved = Store.simAccountId();
+      if (saved != null) {
+        accountId = saved == '__default__' ? null : saved;
+      } else {
+        final accounts = await CallChannel.phoneAccounts();
+        if (accounts.length > 1 && mounted) {
+          final (aborted, pickedId) = await _chooseSim(accounts);
+          if (aborted) {
+            _tracker.stop();
+            CallChannel.stopCallMonitor();
+            setState(() {
+              _isCallActive = false;
+            });
+            return;
+          }
+          accountId = pickedId;
+        }
+      }
+    }
+
+    final placed = await CallChannel.directCall(phone, accountId: accountId);
+    if (!placed) {
+      final uri = Uri.parse('tel:$phone');
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else {
+        _tracker.stop();
+        CallChannel.stopCallMonitor();
+        if (mounted) {
+          setState(() {
+            _isCallActive = false;
+          });
+          showSnack(context, 'Dialer open nahi ho saka', error: true);
+        }
+      }
+    }
+  }
+
+  Future<(bool aborted, String? accountId)> _chooseSim(List<PhoneAccount> accounts) async {
+    var remember = true;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      showDragHandle: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Call using', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.ink)),
+              const SizedBox(height: 8),
+              ...accounts.map((a) => ListTile(
+                    leading: const Icon(Icons.sim_card_outlined, color: AppColors.brand),
+                    title: Text(a.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    onTap: () => Navigator.pop(ctx, a.id),
+                  )),
+              ListTile(
+                leading: const Icon(Icons.settings_outlined, color: AppColors.muted),
+                title: const Text('System default', style: TextStyle(fontWeight: FontWeight.w600)),
+                onTap: () => Navigator.pop(ctx, '__default__'),
+              ),
+              CheckboxListTile(
+                value: remember,
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: const Text('Remember my choice', style: TextStyle(fontSize: 13.5)),
+                onChanged: (v) => setSheet(() => remember = v ?? true),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null) return (true, null);
+    final id = picked == '__default__' ? null : picked;
+    if (remember) {
+      final label = id == null ? 'System default' : accounts.firstWhere((a) => a.id == id).label;
+      await Store.setSim(id ?? '__default__', label);
+    }
+    return (false, id);
+  }
+
+  Future<void> _onCallEnded(String phone, CallOutcome outcome) async {
+    if (!mounted) return;
+    Haptics.light();
+
+    setState(() {
+      _isCallActive = false;
+      _callEnded = true;
+      _callDuration = outcome.duration;
+      _callStatus = outcome.likelyConnected ? 'Connected' : 'No Answer';
+    });
+
+    // Exact duration from system call log if available
+    for (var attempt = 0; attempt < 6; attempt++) {
+      await Future.delayed(Duration(milliseconds: 800 + attempt * 700));
+      final entry = await CallChannel.lastOutgoingCall(phone);
+      if (entry == null) continue;
+
+      final since = (_dialedAt ?? DateTime.now().subtract(const Duration(minutes: 5)))
+          .subtract(const Duration(seconds: 10));
+      if (entry.dateMillis < since.millisecondsSinceEpoch) continue;
+
+      if (!mounted) return;
+      setState(() {
+        _callStatus = entry.answered ? 'Connected' : 'No Answer';
+        _callDuration = Duration(seconds: entry.answered ? entry.durationSeconds : 0);
+      });
+      break;
+    }
+
+    // Scan for Redmi call recording
+    final hasPerm = await CallChannel.hasStoragePermission();
+    if (hasPerm && mounted) {
+      setState(() => _isScanningRecording = true);
+      for (var recAttempt = 0; recAttempt < 4; recAttempt++) {
+        try {
+          final rec = await CallChannel.findLatestRecording(phone, sinceMillis: _dialedAt?.millisecondsSinceEpoch);
+          if (rec != null && mounted) {
+            setState(() {
+              _foundRecording = rec;
+              _isScanningRecording = false;
+            });
+            break;
+          }
+        } catch (_) {}
+        if (recAttempt < 3) await Future.delayed(const Duration(milliseconds: 900));
+      }
+      if (mounted) setState(() => _isScanningRecording = false);
+    }
+  }
+
+  Future<void> _toggleListenSpeech() async {
+    Haptics.tap();
+    if (_isListening) {
+      await _speech.stop();
+      if (mounted) setState(() => _isListening = false);
+      return;
+    }
+
+    if (!_speechReady) {
+      _speechReady = await _speech.initialize(
+        onStatus: (s) {
+          if ((s == 'done' || s == 'notListening') && mounted) setState(() => _isListening = false);
+        },
+        onError: (_) {
+          if (mounted) setState(() => _isListening = false);
+        },
+      );
+      if (!_speechReady) {
+        if (mounted) showSnack(context, 'Speech recognition available nahi hai', error: true);
+        return;
+      }
+    }
+
+    setState(() => _isListening = true);
+    await _speech.listen(
+      listenOptions: SpeechListenOptions(partialResults: true, cancelOnError: true),
+      onResult: (r) {
+        if (!mounted) return;
+        setState(() {
+          _notesCtrl.text = r.recognizedWords;
+        });
+      },
+    );
+  }
+
+  Future<void> _togglePlayLocalRecording() async {
+    Haptics.tap();
+    if (_isPlayingRecording) {
+      await CallChannel.stopRecording();
+      if (mounted) setState(() => _isPlayingRecording = false);
+      return;
+    }
+
+    final path = _foundRecording?['path'] as String?;
+    if (path == null) return;
+
+    setState(() => _isPlayingRecording = true);
+    final ok = await CallChannel.playRecording(path);
+    if (!ok && mounted) {
+      setState(() => _isPlayingRecording = false);
+      showSnack(context, 'Audio play nahi ho saki', error: true);
+    }
+  }
+
+  Future<bool> _confirmSatisfactionDialog() async {
+    Haptics.warn();
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.help_outline, color: Color(0xFFD97706), size: 24),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'फीडबैक नहीं चुना गया',
+                style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'आपने उपभोक्ता की संतुष्टि स्थिति (संतुष्ट / असंतुष्ट) सेलेक्ट नहीं किया है। क्या आप बिना सेलेक्ट किए भेजना चाहते हैं या अभी चुनना चाहते हैं?',
+              style: TextStyle(fontSize: 13.5, color: Color(0xFF334155), height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'यहाँ से तुरंत चुनें:',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => Navigator.pop(ctx, 'SATISFIED'),
+                    icon: const Text('😊', style: TextStyle(fontSize: 14)),
+                    label: const Text('संतुष्ट', style: TextStyle(fontWeight: FontWeight.bold)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF059669),
+                      visualDensity: VisualDensity.compact,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  '#$complaintNo',
-                  style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.ink),
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
-                  child: Text(type, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: AppColors.inkSoft)),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => Navigator.pop(ctx, 'UNSATISFIED'),
+                    icon: const Text('🙁', style: TextStyle(fontSize: 14)),
+                    label: const Text('असंतुष्ट', style: TextStyle(fontWeight: FontWeight.bold)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFDC2626),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
                 ),
               ],
             ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'DISMISS'),
+            child: const Text('वापस जाएं'),
           ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'PROCEED_EMPTY'),
+            child: const Text('बिना चुने भेजें', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+        ],
+      ),
+    );
 
-          // Body Content
-          Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    if (result == 'SATISFIED') {
+      if (mounted) setState(() => _satisfaction = 'SATISFIED');
+      return true;
+    } else if (result == 'UNSATISFIED') {
+      if (mounted) setState(() => _satisfaction = 'UNSATISFIED');
+      return true;
+    } else if (result == 'PROCEED_EMPTY') {
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> _submitFollowup() async {
+    // If call was connected and satisfaction is empty, prompt operator
+    if (_callStatus == 'Connected' && (_satisfaction == null || _satisfaction!.isEmpty)) {
+      final proceed = await _confirmSatisfactionDialog();
+      if (!proceed) return;
+    }
+
+    setState(() => _isSaving = true);
+
+    final complaintNo = '${widget.complaint['complaint_no'] ?? ''}';
+    final phone = '${widget.complaint['consumer_phone'] ?? ''}';
+    final consumerName = '${widget.complaint['consumer_name'] ?? 'Consumer'}';
+
+    final user = Supabase.instance.client.auth.currentUser;
+    final metadata = user?.userMetadata;
+    String opName = 'Operator';
+    if (metadata != null && metadata['name'] != null && '${metadata['name']}'.trim().isNotEmpty) {
+      opName = '${metadata['name']}'.trim();
+    } else if (user?.email != null && user!.email!.isNotEmpty) {
+      opName = user.email!.split('@').first;
+    }
+
+    final notes = _notesCtrl.text.trim();
+    final recPath = _foundRecording?['path'] as String?;
+
+    // 1. Upload call recording + metadata to Office Server
+    await OfficeSyncService.uploadRecording(
+      filePath: recPath,
+      complaintNo: complaintNo,
+      callTarget: 'CONSUMER',
+      phoneNumber: phone,
+      contactName: consumerName,
+      operatorName: opName,
+      operatorId: user?.id,
+      durationSeconds: _callDuration.inSeconds,
+      callOutcome: _callStatus ?? 'Connected',
+      actualProblem: widget.complaint['complaint_type'],
+      operatorNotes: notes.isNotEmpty ? notes : 'Follow-up call completed',
+      consumerSatisfaction: _satisfaction,
+      consumerName: consumerName,
+      area: widget.complaint['area'],
+      substation: widget.complaint['substation'],
+      feeder: widget.complaint['feeder'],
+      complaintType: widget.complaint['complaint_type'],
+    );
+
+    // 2. If SATISFIED, also ensure complaint satisfaction status is updated on Office Server
+    if (_satisfaction == 'SATISFIED') {
+      await OfficeSyncService.markComplaintSatisfied(
+        complaintNo,
+        notes: notes.isNotEmpty ? notes : 'Follow-up call: Consumer satisfied',
+        operatorName: opName,
+      );
+      if (mounted) {
+        widget.onRemoveLocal(complaintNo);
+        showSnack(context, '✅ शिकायत #$complaintNo संतुष्ट मार्क हो गई (Queue se hat gayi)');
+      }
+    } else {
+      if (mounted) {
+        showSnack(context, '⚠️ फॉलोअप सेव हुआ: उपभोक्ता अभी भी असंतुष्ट हैं (लिस्ट में रहेगा)');
+      }
+    }
+
+    if (mounted) {
+      Navigator.pop(context);
+      widget.onRefresh();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final complaintNo = widget.complaint['complaint_no'] ?? '-';
+    final consumerName = widget.complaint['consumer_name'] ?? 'Consumer';
+    final phone = widget.complaint['consumer_phone'] ?? '';
+    final area = widget.complaint['area'] ?? '';
+    final feeder = widget.complaint['feeder'] ?? '';
+    final type = widget.complaint['complaint_type'] ?? 'Complaint';
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Drag Handle
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 8),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+
+              // Title Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
                   children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.support_agent, color: Color(0xFF2563EB), size: 22),
+                    ),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(consumerName, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: AppColors.ink)),
-                          const SizedBox(height: 2),
-                          Row(
+                          Text('फॉलोअप कॉल (#$complaintNo)', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.ink)),
+                          Text('$consumerName · $phone', style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: AppColors.muted),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+
+              const Divider(height: 16, color: Color(0xFFF1F5F9)),
+
+              // Complaint Details Pill
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.electrical_services, size: 16, color: Color(0xFF64748B)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '$type | $area ${feeder.isNotEmpty ? "· $feeder" : ""}',
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              // Calling Action Area
+              if (!_callEnded) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    children: [
+                      if (_isCallActive) ...[
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF0FDF4),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF86EFAC)),
+                          ),
+                          child: const Row(
                             children: [
-                              const Icon(Icons.location_on_outlined, size: 14, color: AppColors.muted),
-                              const SizedBox(width: 3),
+                              SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF16A34A))),
+                              SizedBox(width: 12),
                               Expanded(
                                 child: Text(
-                                  feeder.isNotEmpty ? '$area · $feeder' : area,
-                                  style: const TextStyle(fontSize: 12, color: AppColors.inkSoft),
-                                  overflow: TextOverflow.ellipsis,
+                                  'कॉल चालू है... बात समाप्त होने पर ऐप में वापस आएं।',
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
                                 ),
                               ),
                             ],
                           ),
-                        ],
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _isCallActive ? null : _startCall,
+                          icon: const Icon(Icons.call, size: 20),
+                          label: Text(
+                            _isCallActive ? 'कॉल जारी है...' : 'उपभोक्ता को कॉल करें ($phone)',
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                          ),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF059669),
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
                       ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                // Call Outcome & Duration Summary
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
                     ),
-                    // Call Button
-                    FilledButton.icon(
-                      onPressed: onCall,
-                      icon: const Icon(Icons.call, size: 16),
-                      label: Text(phone, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF2563EB),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        visualDensity: VisualDensity.compact,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: _callStatus == 'Connected' ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                _callStatus ?? 'Call Finished',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: _callStatus == 'Connected' ? const Color(0xFF047857) : const Color(0xFFB45309),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              'Duration: ${_callDuration.inMinutes}:${(_callDuration.inSeconds % 60).toString().padLeft(2, '0')}',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink),
+                            ),
+                            const Spacer(),
+                            TextButton.icon(
+                              onPressed: _startCall,
+                              icon: const Icon(Icons.replay, size: 16),
+                              label: const Text('Re-call', style: TextStyle(fontSize: 12)),
+                              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 8),
+
+                        // Audio recording detection
+                        if (_isScanningRecording)
+                          const Row(
+                            children: [
+                              SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                              SizedBox(width: 8),
+                              Text('कॉल रिकॉर्डिंग खोजी जा रही है...', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+                            ],
+                          )
+                        else if (_foundRecording != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEFF6FF),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFBFDBFE)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.mic, size: 16, color: Color(0xFF2563EB)),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    '${_foundRecording!['name']}',
+                                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF1D4ED8)),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                InkWell(
+                                  onTap: _togglePlayLocalRecording,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: _isPlayingRecording ? const Color(0xFFFEE2E2) : Colors.white,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: _isPlayingRecording ? const Color(0xFFEF4444) : const Color(0xFF93C5FD)),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(_isPlayingRecording ? Icons.stop : Icons.play_arrow, size: 14, color: _isPlayingRecording ? const Color(0xFFDC2626) : const Color(0xFF2563EB)),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          _isPlayingRecording ? 'Stop' : 'Play',
+                                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _isPlayingRecording ? const Color(0xFFDC2626) : const Color(0xFF2563EB)),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          const Text(
+                            'ℹ️ लोकल रिकॉर्डिंग फाइल डिटेक्ट नहीं हुई (ऑटो-रिकॉर्डर चेक करें)',
+                            style: TextStyle(fontSize: 11.5, color: Color(0xFF94A3B8)),
+                          ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
 
-                const Divider(height: 18, thickness: 0.5, color: Color(0xFFE2E8F0)),
+                const SizedBox(height: 16),
 
-                // Problem & Previous Call Notes
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
+                // COMPULSORY Satisfaction Selection
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      const Row(
+                        children: [
+                          Text('उपभोक्ता का फीडबैक चुनें', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: AppColors.ink)),
+                          SizedBox(width: 4),
+                          Text('*', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
                       Row(
                         children: [
-                          const Icon(Icons.history, size: 14, color: Color(0xFF64748B)),
-                          const SizedBox(width: 5),
-                          Text(
-                            'Previous Call ($lastOp):',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
-                          ),
-                          const Spacer(),
-                          if (recId != null)
-                            InkWell(
-                              onTap: () => onToggleAudio(recId),
+                          // SATISFIED Button
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => setState(() => _satisfaction = _satisfaction == 'SATISFIED' ? null : 'SATISFIED'),
                               borderRadius: BorderRadius.circular(12),
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                                 decoration: BoxDecoration(
-                                  color: isPlaying ? const Color(0xFFFEE2E2) : const Color(0xFFEFF6FF),
+                                  color: _satisfaction == 'SATISFIED' ? const Color(0xFFDCFCE7) : Colors.white,
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: isPlaying ? const Color(0xFFEF4444) : const Color(0xFF93C5FD)),
+                                  border: Border.all(
+                                    color: _satisfaction == 'SATISFIED' ? const Color(0xFF059669) : const Color(0xFFCBD5E1),
+                                    width: _satisfaction == 'SATISFIED' ? 2 : 1,
+                                  ),
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
+                                child: Column(
                                   children: [
-                                    Icon(isPlaying ? Icons.stop : Icons.play_arrow, size: 13, color: isPlaying ? const Color(0xFFDC2626) : const Color(0xFF1D4ED8)),
-                                    const SizedBox(width: 3),
+                                    const Text('😊', style: TextStyle(fontSize: 22)),
+                                    const SizedBox(height: 4),
                                     Text(
-                                      isPlaying ? 'Stop' : 'Audio',
-                                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: isPlaying ? const Color(0xFFDC2626) : const Color(0xFF1D4ED8)),
+                                      'संतुष्ट (SATISFIED)',
+                                      style: TextStyle(
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: _satisfaction == 'SATISFIED' ? const Color(0xFF047857) : const Color(0xFF334155),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'बिजली चालू हो गई',
+                                      style: TextStyle(fontSize: 10.5, color: _satisfaction == 'SATISFIED' ? const Color(0xFF065F46) : const Color(0xFF64748B)),
                                     ),
                                   ],
                                 ),
                               ),
                             ),
+                          ),
+                          const SizedBox(width: 10),
+                          // UNSATISFIED Button
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => setState(() => _satisfaction = _satisfaction == 'UNSATISFIED' ? null : 'UNSATISFIED'),
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                                decoration: BoxDecoration(
+                                  color: _satisfaction == 'UNSATISFIED' ? const Color(0xFFFEE2E2) : Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: _satisfaction == 'UNSATISFIED' ? const Color(0xFFDC2626) : const Color(0xFFCBD5E1),
+                                    width: _satisfaction == 'UNSATISFIED' ? 2 : 1,
+                                  ),
+                                ),
+                                child: Column(
+                                  children: [
+                                    const Text('🙁', style: TextStyle(fontSize: 22)),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'असंतुष्ट (UNSATISFIED)',
+                                      style: TextStyle(
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: _satisfaction == 'UNSATISFIED' ? const Color(0xFFB91C1C) : const Color(0xFF334155),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'समस्या अभी भी है',
+                                      style: TextStyle(fontSize: 10.5, color: _satisfaction == 'UNSATISFIED' ? const Color(0xFF991B1B) : const Color(0xFF64748B)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
-                      if (lastProblem.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          'Fault: $lastProblem',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
-                        ),
-                      ],
-                      if (lastNotes.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          'Note: $lastNotes',
-                          style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
-                        ),
-                      ],
                     ],
                   ),
                 ),
 
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
 
-                // Bottom Actions: Mark Satisfied Button
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: onMarkSatisfied,
-                    icon: const Text('😊', style: TextStyle(fontSize: 14)),
-                    label: const Text(
-                      'Mark Satisfied (संतुष्ट मार्क करें)',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFF047857)),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Color(0xFF10B981), width: 1.2),
-                      backgroundColor: const Color(0xFFF0FDF4),
-                      padding: const EdgeInsets.symmetric(vertical: 9),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                // Followup Notes Area
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Text('फॉलोअप रिमार्क (Notes)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.ink)),
+                          const Spacer(),
+                          InkWell(
+                            onTap: _toggleListenSpeech,
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: _isListening ? const Color(0xFFFEE2E2) : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.mic, size: 14, color: _isListening ? Colors.red : const Color(0xFF475569)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _isListening ? 'Listening...' : 'Bol kar likhein',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _isListening ? Colors.red : const Color(0xFF475569)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _notesCtrl,
+                        maxLines: 2,
+                        decoration: InputDecoration(
+                          hintText: 'उपभोक्ता से क्या बात हुई...',
+                          hintStyle: const TextStyle(fontSize: 13, color: AppColors.muted),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          isDense: true,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Quick phrase chips
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          _quickChip('सप्लाई सामान्य हो गई ✓', (text) => _notesCtrl.text = text),
+                          _quickChip('उपभोक्ता संतुष्ट हैं', (text) => _notesCtrl.text = text),
+                          _quickChip('अभी भी सप्लाई बाधित है', (text) => _notesCtrl.text = text),
+                          _quickChip('कॉल नहीं उठाया', (text) => _notesCtrl.text = text),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 18),
+
+                // Save & Submit Button
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _isSaving ? null : _submitFollowup,
+                      icon: _isSaving
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Icon(Icons.cloud_upload_outlined, size: 18),
+                      label: Text(
+                        _isSaving ? 'सेव हो रहा है...' : 'फॉलोअप कॉल सेव करें (Save & Upload)',
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
                     ),
                   ),
                 ),
               ],
-            ),
+            ],
           ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  Widget _quickChip(String text, Function(String) onPick) {
+    return InkWell(
+      onTap: () => onPick(text),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF1F5F9),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFCBD5E1)),
+        ),
+        child: Text(text, style: const TextStyle(fontSize: 11, color: Color(0xFF334155))),
       ),
     );
   }

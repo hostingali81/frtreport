@@ -66,9 +66,6 @@ app.get('/api/ping', (req, res) => {
 app.post('/api/upload', upload.single('audio'), async (req, res) => {
   try {
     const file = req.file;
-    if (!file) {
-      return res.status(400).json({ error: 'No audio file provided' });
-    }
 
     const {
       complaint_no,
@@ -92,27 +89,42 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
     } = req.body;
 
     if (!complaint_no || !phone_number) {
-      if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+      if (file && fs.existsSync(file.path)) fs.unlinkSync(file.path);
       return res.status(400).json({ error: 'complaint_no and phone_number are required' });
     }
 
     const cleanPhone = phone_number.replace(/\D/g, '').slice(-10);
     const durSec = parseInt(duration_seconds, 10) || 0;
 
+    const fileSize = file ? file.size : 0;
+
     // Check for duplicate upload (same complaint_no, same phone, same file size or close duration)
-    const existingDuplicate = await get(
-      `SELECT * FROM call_recordings 
-       WHERE complaint_no = ? 
-         AND (phone_number = ? OR phone_number LIKE ?)
-         AND file_size_bytes = ? 
-         AND (ABS(duration_seconds - ?) <= 2 OR duration_seconds = ?)
-       ORDER BY id DESC LIMIT 1`,
-      [complaint_no, phone_number, `%${cleanPhone}`, file.size, durSec, durSec]
-    );
+    let existingDuplicate = null;
+    if (file) {
+      existingDuplicate = await get(
+        `SELECT * FROM call_recordings 
+         WHERE complaint_no = ? 
+           AND (phone_number = ? OR phone_number LIKE ?)
+           AND file_size_bytes = ? 
+           AND (ABS(duration_seconds - ?) <= 2 OR duration_seconds = ?)
+         ORDER BY id DESC LIMIT 1`,
+        [complaint_no, phone_number, `%${cleanPhone}`, fileSize, durSec, durSec]
+      );
+    } else {
+      existingDuplicate = await get(
+        `SELECT * FROM call_recordings 
+         WHERE complaint_no = ? 
+           AND (phone_number = ? OR phone_number LIKE ?)
+           AND file_size_bytes = 0 
+           AND ABS(strftime('%s', call_time) - strftime('%s', ?)) <= 5
+         ORDER BY id DESC LIMIT 1`,
+        [complaint_no, phone_number, `%${cleanPhone}`, call_time]
+      );
+    }
 
     if (existingDuplicate) {
-      console.log(`[Upload] Duplicate recording ignored for complaint ${complaint_no} (existing recording id: ${existingDuplicate.id}, size: ${file.size} bytes)`);
-      if (fs.existsSync(file.path)) {
+      console.log(`[Upload] Duplicate recording ignored for complaint ${complaint_no} (existing recording id: ${existingDuplicate.id}, size: ${fileSize} bytes)`);
+      if (file && fs.existsSync(file.path)) {
         try { fs.unlinkSync(file.path); } catch (_) {}
       }
 
@@ -144,33 +156,38 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       });
     }
 
-    // Determine target directory: D:\FRT_Recordings\YYYY-MM-DD\Complaint_<complaint_no>\
-    const dateObj = new Date(call_time);
-    const dateFolder = isNaN(dateObj.getTime())
-      ? new Date().toISOString().slice(0, 10)
-      : dateObj.toISOString().slice(0, 10);
+    let finalFilePath = '';
+    let finalFileName = '';
 
-    const safeComplaint = complaint_no.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const complaintDir = path.join(RECORDINGS_BASE_DIR, dateFolder, `Complaint_${safeComplaint}`);
-    if (!fs.existsSync(complaintDir)) {
-      fs.mkdirSync(complaintDir, { recursive: true });
+    if (file) {
+      // Determine target directory: D:\FRT_Recordings\YYYY-MM-DD\Complaint_<complaint_no>\
+      const dateObj = new Date(call_time);
+      const dateFolder = isNaN(dateObj.getTime())
+        ? new Date().toISOString().slice(0, 10)
+        : dateObj.toISOString().slice(0, 10);
+
+      const safeComplaint = complaint_no.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const complaintDir = path.join(RECORDINGS_BASE_DIR, dateFolder, `Complaint_${safeComplaint}`);
+      if (!fs.existsSync(complaintDir)) {
+        fs.mkdirSync(complaintDir, { recursive: true });
+      }
+
+      // Determine sequence index for multiple calls in the same complaint
+      const existingCalls = await all(
+        'SELECT COUNT(*) as count FROM call_recordings WHERE complaint_no = ?',
+        [complaint_no]
+      );
+      const callIndex = (existingCalls[0]?.count || 0) + 1;
+
+      // Clean destination filename
+      const cleanOp = operator_name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const timeTag = dateObj.toTimeString().slice(0, 8).replace(/:/g, '');
+      finalFileName = `${String(callIndex).padStart(2, '0')}_${call_target}_${cleanPhone}_${timeTag}_${cleanOp}.mp3`;
+      finalFilePath = path.join(complaintDir, finalFileName);
+
+      // Move file from temp to final destination
+      fs.renameSync(file.path, finalFilePath);
     }
-
-    // Determine sequence index for multiple calls in the same complaint
-    const existingCalls = await all(
-      'SELECT COUNT(*) as count FROM call_recordings WHERE complaint_no = ?',
-      [complaint_no]
-    );
-    const callIndex = (existingCalls[0]?.count || 0) + 1;
-
-    // Clean destination filename
-    const cleanOp = operator_name.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const timeTag = dateObj.toTimeString().slice(0, 8).replace(/:/g, '');
-    const finalFileName = `${String(callIndex).padStart(2, '0')}_${call_target}_${cleanPhone}_${timeTag}_${cleanOp}.mp3`;
-    const finalFilePath = path.join(complaintDir, finalFileName);
-
-    // Move file from temp to final destination
-    fs.renameSync(file.path, finalFilePath);
 
     // Upsert complaint metadata
     await run(
@@ -218,7 +235,7 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
         parseInt(duration_seconds, 10) || 0,
         finalFilePath,
         finalFileName,
-        file.size,
+        fileSize,
         call_outcome,
         actual_problem,
         operator_notes,
