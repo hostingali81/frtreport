@@ -1,45 +1,81 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="hi">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FRT Barabanki — Call Recordings Hub</title>
+  <title>FRT Barabanki — Call Recording & Followup Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-    body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #f8fafc; }
     .audio-scrubber::-webkit-slider-thumb {
       appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #2563eb; cursor: pointer;
     }
+    .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
   </style>
 </head>
-<body class="text-slate-800 antialiased min-h-screen flex flex-col">
+<body class="text-slate-800 antialiased min-h-screen flex flex-col bg-slate-50">
 
   <!-- Top Navbar -->
-  <header class="bg-slate-900 text-white shadow-md sticky top-0 z-40">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-xl shadow">
+  <header class="bg-slate-900 text-white shadow-lg sticky top-0 z-40 border-b border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      
+      <!-- Brand & Hub Info -->
+      <div class="flex items-center space-x-3 shrink-0">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-700 to-indigo-500 flex items-center justify-center text-white font-bold text-xl shadow-md ring-2 ring-blue-400/20">
           <i class="fa-solid fa-headset"></i>
         </div>
         <div>
-          <h1 class="text-lg font-bold leading-tight flex items-center gap-2">
-            FRT Control Room <span class="text-xs bg-blue-500/20 text-blue-300 border border-blue-400/30 px-2 py-0.5 rounded-full font-medium">Barabanki</span>
-          </h1>
-          <p class="text-xs text-slate-400">Office Local Storage & Call Recording Hub</p>
+          <div class="flex items-center gap-2">
+            <h1 class="text-base sm:text-lg font-bold leading-tight tracking-tight">FRT Control Room</h1>
+            <span class="text-[11px] bg-blue-500/20 text-blue-300 border border-blue-400/30 px-2 py-0.5 rounded-full font-semibold">Barabanki</span>
+          </div>
+          <p class="text-xs text-slate-400 flex items-center gap-1.5">
+            <span>Call History & Follow-up Hub</span>
+            <span class="inline-block w-1 h-1 rounded-full bg-slate-600"></span>
+            <span class="text-emerald-400 font-medium">D: Drive Active</span>
+          </p>
         </div>
       </div>
 
-      <!-- Live Beacon Status & Disk Info -->
-      <div class="flex items-center space-x-4">
-        <div class="flex items-center space-x-2 text-xs bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-full text-slate-300">
-          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span>LAN Radar Active (Port 41234)</span>
+      <!-- Quick Action Buttons: Phone Lookup & Complaint Search -->
+      <div class="flex items-center space-x-2 sm:space-x-3">
+        <button 
+          id="btn-open-phone-search" 
+          class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 text-xs font-semibold shadow-sm transition"
+          title="Search all call recordings for any 10-digit Phone Number"
+        >
+          <i class="fa-solid fa-phone-volume text-emerald-400"></i>
+          <span class="hidden sm:inline">Phone Lookup</span>
+        </button>
+
+        <button 
+          id="btn-open-comp-search" 
+          class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 text-xs font-semibold shadow-sm transition"
+          title="Directly open Complaint History by Complaint Number"
+        >
+          <i class="fa-solid fa-file-invoice text-blue-400"></i>
+          <span class="hidden sm:inline">Complaint History</span>
+        </button>
+
+        <!-- LAN IP Badge -->
+        <div id="lan-ip-badge" class="hidden md:flex items-center space-x-2 text-xs bg-slate-800 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg font-mono">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="server-ip-text">Loading...</span>
         </div>
-        <div id="lan-ip-badge" class="hidden sm:block text-xs bg-slate-800 text-slate-400 border border-slate-700 px-3 py-1.5 rounded-full">
-          <i class="fa-solid fa-wifi text-emerald-400 mr-1"></i> <span id="server-ip-text">Loading IP...</span>
-        </div>
+
+        <!-- Refresh Button -->
+        <button 
+          id="refresh-btn" 
+          class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 rounded-lg text-xs transition" 
+          title="Refresh All Data"
+        >
+          <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
       </div>
     </div>
   </header>
@@ -47,52 +83,81 @@
   <!-- Main Container -->
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full space-y-6">
 
-    <!-- KPI / Stats Summary Banner -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-      <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-center space-x-3">
-        <div class="w-11 h-11 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-lg">
+    <!-- KPI / Stats Summary Banner (6 Metrics) -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+      
+      <!-- 1. Today's Calls -->
+      <div class="bg-white rounded-xl p-3.5 sm:p-4 border border-slate-200 shadow-sm flex items-center space-x-3 transition hover:border-blue-300 hover:shadow">
+        <div class="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-lg shrink-0">
           <i class="fa-solid fa-phone-volume"></i>
         </div>
-        <div>
-          <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Today's Calls</p>
-          <p id="stat-today-calls" class="text-2xl font-bold text-slate-800">0</p>
+        <div class="min-w-0">
+          <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide truncate">Today's Calls</p>
+          <p id="stat-today-calls" class="text-xl sm:text-2xl font-bold text-slate-900">0</p>
         </div>
       </div>
 
-      <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-center space-x-3">
-        <div class="w-11 h-11 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center text-lg">
+      <!-- 2. Complaints Covered -->
+      <div class="bg-white rounded-xl p-3.5 sm:p-4 border border-slate-200 shadow-sm flex items-center space-x-3 transition hover:border-purple-300 hover:shadow">
+        <div class="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-lg shrink-0">
           <i class="fa-solid fa-clipboard-list"></i>
         </div>
-        <div>
-          <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Complaints Covered</p>
-          <p id="stat-today-complaints" class="text-2xl font-bold text-slate-800">0</p>
+        <div class="min-w-0">
+          <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide truncate">Complaints</p>
+          <p id="stat-today-complaints" class="text-xl sm:text-2xl font-bold text-slate-900">0</p>
         </div>
       </div>
 
-      <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-center space-x-3">
-        <div class="w-11 h-11 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-lg">
+      <!-- 3. Satisfied Feedback (Green) -->
+      <div class="bg-white rounded-xl p-3.5 sm:p-4 border border-emerald-200 shadow-sm flex items-center space-x-3 transition hover:border-emerald-400 hover:shadow bg-emerald-50/30">
+        <div class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-lg shrink-0">
+          <i class="fa-solid fa-face-smile"></i>
+        </div>
+        <div class="min-w-0">
+          <p class="text-[11px] font-semibold text-emerald-700 uppercase tracking-wide truncate">Satisfied</p>
+          <p id="stat-today-satisfied" class="text-xl sm:text-2xl font-bold text-emerald-700">0</p>
+        </div>
+      </div>
+
+      <!-- 4. Unsatisfied Feedback (Red) -->
+      <div class="bg-white rounded-xl p-3.5 sm:p-4 border border-rose-200 shadow-sm flex items-center space-x-3 transition hover:border-rose-400 hover:shadow bg-rose-50/30">
+        <div class="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center text-lg shrink-0">
+          <i class="fa-solid fa-face-frown"></i>
+        </div>
+        <div class="min-w-0">
+          <p class="text-[11px] font-semibold text-rose-700 uppercase tracking-wide truncate">Unsatisfied</p>
+          <p id="stat-today-unsatisfied" class="text-xl sm:text-2xl font-bold text-rose-700">0</p>
+        </div>
+      </div>
+
+      <!-- 5. Talk Time -->
+      <div class="bg-white rounded-xl p-3.5 sm:p-4 border border-slate-200 shadow-sm flex items-center space-x-3 transition hover:border-blue-300 hover:shadow">
+        <div class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-lg shrink-0">
           <i class="fa-solid fa-clock"></i>
         </div>
-        <div>
-          <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Talk Time Today</p>
-          <p id="stat-today-time" class="text-2xl font-bold text-slate-800">0 min</p>
+        <div class="min-w-0">
+          <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide truncate">Talk Time</p>
+          <p id="stat-today-time" class="text-xl sm:text-2xl font-bold text-slate-900">0 min</p>
         </div>
       </div>
 
-      <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-center space-x-3">
-        <div class="w-11 h-11 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center text-lg">
+      <!-- 6. D: Storage -->
+      <div class="bg-white rounded-xl p-3.5 sm:p-4 border border-slate-200 shadow-sm flex items-center space-x-3 transition hover:border-amber-300 hover:shadow">
+        <div class="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-lg shrink-0">
           <i class="fa-solid fa-hard-drive"></i>
         </div>
-        <div>
-          <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">D: Drive Storage</p>
-          <p id="stat-storage" class="text-2xl font-bold text-slate-800">0 MB</p>
+        <div class="min-w-0">
+          <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide truncate">D: Storage</p>
+          <p id="stat-storage" class="text-xl sm:text-2xl font-bold text-slate-900">0 MB</p>
         </div>
       </div>
+
     </div>
 
     <!-- Filter & Search Toolbar -->
-    <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm space-y-3">
-      <!-- Row 1: Primary Inputs -->
+    <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm space-y-3.5">
+      
+      <!-- Row 1: Universal Search & Primary Selectors -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
         
         <!-- Search input -->
@@ -101,16 +166,19 @@
           <input 
             type="text" 
             id="search-input" 
-            placeholder="Search Complaint No, Phone, Name..." 
-            class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+            placeholder="Search Complaint #, Phone, Name, Feeder..." 
+            class="w-full pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition shadow-xs"
           />
+          <button id="search-clear-btn" class="hidden absolute right-3 top-3 text-slate-400 hover:text-slate-600 text-xs">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
         </div>
 
         <!-- Substation / Area filter -->
         <div class="lg:col-span-2">
           <select 
             id="substation-filter" 
-            class="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+            class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
           >
             <option value="">All Substations</option>
           </select>
@@ -120,7 +188,7 @@
         <div class="lg:col-span-2">
           <select 
             id="month-filter" 
-            class="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+            class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
           >
             <option value="">Month: All</option>
           </select>
@@ -131,7 +199,7 @@
           <input 
             type="date" 
             id="date-filter" 
-            class="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+            class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
           />
         </div>
 
@@ -139,38 +207,50 @@
         <div class="lg:col-span-2">
           <select 
             id="operator-filter" 
-            class="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+            class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
           >
             <option value="">All Operators (24/7)</option>
           </select>
         </div>
       </div>
 
-      <!-- Row 2: Secondary Filters & Action Controls -->
-      <div class="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-slate-100">
+      <!-- Row 2: Secondary Quick Filters & Mode Switcher -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
         
-        <!-- Left: Quick Date & Target Filter -->
+        <!-- Left: Quick Date & Target & Feedback Filters -->
         <div class="flex flex-wrap items-center gap-1.5 text-xs">
-          <span class="text-slate-400 font-medium mr-1">Quick:</span>
-          <button class="quick-date-btn px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 font-semibold hover:bg-blue-100 transition" data-range="today">Today</button>
-          <button class="quick-date-btn px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-range="yesterday">Yesterday</button>
-          <button class="quick-date-btn px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-range="this_month">This Month</button>
-          <button class="quick-date-btn px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-range="all">All Dates</button>
+          <span class="text-slate-400 font-medium mr-0.5">Date:</span>
+          <button class="quick-date-btn px-2.5 py-1.5 rounded-lg bg-blue-600 text-white font-semibold transition" data-range="today">Today</button>
+          <button class="quick-date-btn px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-range="yesterday">Yesterday</button>
+          <button class="quick-date-btn px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-range="this_month">This Month</button>
+          <button class="quick-date-btn px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-range="all">All Dates</button>
           
           <span class="text-slate-300 mx-1">|</span>
 
+          <!-- Feedback Status Pills -->
+          <span class="text-slate-400 font-medium mr-0.5">Feedback:</span>
+          <button class="feedback-filter-btn px-2.5 py-1.5 rounded-lg bg-slate-800 text-white font-semibold transition" data-satisfaction="">All</button>
+          <button class="feedback-filter-btn px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 font-semibold transition flex items-center gap-1" data-satisfaction="SATISFIED">
+            <i class="fa-solid fa-face-smile text-emerald-600"></i> Satisfied
+          </button>
+          <button class="feedback-filter-btn px-2.5 py-1.5 rounded-lg bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100 font-semibold transition flex items-center gap-1" data-satisfaction="UNSATISFIED">
+            <i class="fa-solid fa-face-frown text-rose-600"></i> Unsatisfied
+          </button>
+
+          <span class="text-slate-300 mx-1">|</span>
+
           <!-- Call Target Filter -->
-          <button class="target-btn px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold transition" data-target="">All Calls</button>
-          <button class="target-btn px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-target="CONSUMER">Consumer</button>
-          <button class="target-btn px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-target="CREW">Crew / Lineman</button>
+          <button class="target-btn px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-target="">All Targets</button>
+          <button class="target-btn px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-target="CONSUMER">Consumer</button>
+          <button class="target-btn px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition" data-target="CREW">Crew / Lineman</button>
         </div>
 
-        <!-- Right: Export Excel & Refresh -->
+        <!-- Right: View Modes & Export -->
         <div class="flex items-center space-x-2">
           <!-- Call Outcome Filter -->
           <select 
             id="outcome-filter" 
-            class="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-700 focus:outline-none"
+            class="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 focus:outline-none"
           >
             <option value="">All Call Outcomes</option>
             <option value="Connected">Connected Only</option>
@@ -179,80 +259,273 @@
             <option value="Busy">Busy Only</option>
           </select>
 
-          <!-- Satisfaction Filter -->
-          <select 
-            id="satisfaction-filter" 
-            class="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-700 focus:outline-none"
-          >
-            <option value="">Feedback: All</option>
-            <option value="SATISFIED">😊 Satisfied Only</option>
-            <option value="UNSATISFIED">🙁 Unsatisfied Only</option>
-          </select>
+          <!-- View Mode Toggle: Card vs Compact Table -->
+          <div class="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200 text-xs">
+            <button id="view-mode-cards" class="px-2.5 py-1 rounded-md bg-white text-slate-800 font-bold shadow-xs transition" title="Expanded Cards View">
+              <i class="fa-solid fa-grip mr-1"></i> Cards
+            </button>
+            <button id="view-mode-table" class="px-2.5 py-1 rounded-md text-slate-600 hover:text-slate-800 font-medium transition" title="Compact Table View">
+              <i class="fa-solid fa-table-list mr-1"></i> Table
+            </button>
+          </div>
 
           <!-- Export to Excel Button -->
           <button 
             id="export-csv-btn" 
             title="Export filtered records to Excel (CSV)"
-            class="px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md text-xs font-semibold flex items-center gap-1.5 transition"
+            class="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-xs"
           >
-            <i class="fa-solid fa-file-excel text-emerald-600"></i> Export Excel
-          </button>
-
-          <!-- Refresh Button -->
-          <button 
-            id="refresh-btn" 
-            title="Refresh List"
-            class="p-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-xs transition"
-          >
-            <i class="fa-solid fa-arrows-rotate"></i>
+            <i class="fa-solid fa-file-excel text-emerald-600"></i> <span class="hidden sm:inline">Export Excel</span>
           </button>
         </div>
       </div>
     </div>
 
     <!-- Active Real-time Alert Banner -->
-    <div id="new-call-banner" class="hidden bg-emerald-500 text-white px-4 py-2.5 rounded-lg shadow-sm flex items-center justify-between animate-bounce">
-      <div class="flex items-center space-x-2 text-sm font-semibold">
-        <i class="fa-solid fa-circle-check"></i>
-        <span id="new-call-message">New call recording received from Phone!</span>
+    <div id="new-call-banner" class="hidden bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-md flex items-center justify-between transition-all duration-300">
+      <div class="flex items-center space-x-2.5 text-sm font-semibold">
+        <i class="fa-solid fa-circle-check text-lg text-emerald-200 animate-pulse"></i>
+        <span id="new-call-message">New call recording received from Android Phone!</span>
       </div>
-      <button onclick="loadComplaints()" class="text-xs bg-white text-emerald-800 font-bold px-3 py-1 rounded shadow hover:bg-emerald-50">
+      <button onclick="loadComplaints()" class="text-xs bg-white text-emerald-900 font-bold px-3.5 py-1.5 rounded-lg shadow hover:bg-emerald-50 transition">
         Show Now
       </button>
     </div>
 
-    <!-- Complaint Threads List -->
+    <!-- Main Content Container: Cards or Table -->
     <div class="space-y-4">
       <div class="flex items-center justify-between px-1">
-        <h2 class="text-sm font-semibold text-slate-700 uppercase tracking-wide">
-          Complaints & Audio Timeline (<span id="total-count">0</span>)
-        </h2>
-        <span class="text-xs text-slate-400">Chronological Call Threads</span>
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wide">
+            Complaints & Audio Timeline (<span id="total-count">0</span>)
+          </h2>
+          <span class="text-xs text-slate-400">· Click any Complaint # or Phone Number for full history</span>
+        </div>
+        <span class="text-xs text-slate-500 font-mono" id="showing-summary-text">Showing latest records</span>
       </div>
 
+      <!-- View 1: Card Timeline View -->
       <div id="complaints-container" class="space-y-4">
         <!-- Rendered dynamically -->
       </div>
 
+      <!-- View 2: Compact Table View (hidden by default) -->
+      <div id="complaints-table-container" class="hidden bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto custom-scroll">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider border-b border-slate-200">
+                <th class="p-3 pl-4">Complaint #</th>
+                <th class="p-3">Consumer & Phone</th>
+                <th class="p-3">Area / Feeder</th>
+                <th class="p-3 text-center">Feedback Status</th>
+                <th class="p-3 text-center">Calls</th>
+                <th class="p-3">Latest Call Time</th>
+                <th class="p-3">Last Operator</th>
+                <th class="p-3 text-right pr-4">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="complaints-table-body" class="divide-y divide-slate-100">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Loading State -->
       <div id="loading-spinner" class="py-16 text-center text-slate-400">
-        <i class="fa-solid fa-circle-notch fa-spin text-3xl text-blue-500 mb-2"></i>
-        <p class="text-sm">Fetching recordings from D: drive...</p>
+        <i class="fa-solid fa-circle-notch fa-spin text-3xl text-blue-600 mb-2"></i>
+        <p class="text-sm font-medium">Fetching call records from D: drive...</p>
       </div>
 
       <!-- Empty State -->
-      <div id="empty-state" class="hidden py-16 text-center bg-white rounded-xl border border-dashed border-slate-300 p-8">
-        <div class="w-16 h-16 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 text-2xl">
+      <div id="empty-state" class="hidden py-16 text-center bg-white rounded-2xl border border-dashed border-slate-300 p-8 shadow-xs">
+        <div class="w-16 h-16 mx-auto mb-3 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400 text-2xl">
           <i class="fa-solid fa-phone-slash"></i>
         </div>
-        <h3 class="text-base font-semibold text-slate-700">No Call Recordings Found</h3>
-        <p class="text-xs text-slate-400 max-w-sm mx-auto mt-1">
-          No recordings match your current search or date filters. As soon as an operator submits a call from the mobile app, it will appear here instantly.
+        <h3 class="text-base font-bold text-slate-800">No Call Recordings Found</h3>
+        <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+          No records match your selected date, feedback, or search criteria. As soon as an operator completes a call in the FRT Calling app, it will appear here automatically.
         </p>
       </div>
     </div>
 
   </main>
+
+  <!-- ============================================================== -->
+  <!-- MODAL 1: Full Complaint Details & Call History Timeline        -->
+  <!-- ============================================================== -->
+  <div id="complaint-history-modal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+    <div class="bg-white w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+      
+      <!-- Modal Header -->
+      <div class="p-4 sm:p-5 bg-slate-900 text-white flex items-start justify-between gap-3 shrink-0">
+        <div class="space-y-1">
+          <div class="flex items-center gap-2.5">
+            <span class="px-2.5 py-1 bg-blue-600 text-white font-mono font-bold text-sm rounded-lg shadow-sm" id="modal-comp-no">
+              #MV...
+            </span>
+            <span id="modal-comp-satisfaction-pill" class="px-2.5 py-0.5 rounded-full text-xs font-bold border">
+              PENDING
+            </span>
+          </div>
+          <h2 class="text-lg font-bold text-white flex items-center gap-2" id="modal-comp-name">
+            Consumer Name
+          </h2>
+          <p class="text-xs text-slate-400 flex items-center gap-2" id="modal-comp-meta">
+            <span>Area / Substation</span>
+          </p>
+        </div>
+        <button onclick="closeComplaintModal()" class="text-slate-400 hover:text-white p-1 rounded-lg transition text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- Satisfaction Toggle Strip (Direct Control Room Action) -->
+      <div class="bg-slate-100 p-3 sm:px-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <div class="text-xs text-slate-600 flex items-center gap-1.5">
+          <span class="font-bold">फीडबैक स्थिति बदलें:</span>
+          <span class="text-slate-500">(Operator / Consumer Feedback)</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="modal-mark-satisfied-btn" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1 transition">
+            <i class="fa-solid fa-face-smile"></i> Mark Satisfied (संतुष्ट)
+          </button>
+          <button id="modal-mark-unsatisfied-btn" class="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1 transition">
+            <i class="fa-solid fa-face-frown"></i> Mark Unsatisfied (असंतुष्ट)
+          </button>
+        </div>
+      </div>
+
+      <!-- Modal Body: Chronological Call Timeline -->
+      <div class="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1 custom-scroll bg-slate-50">
+        <div class="flex items-center justify-between">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500">
+            Recorded Calls History (<span id="modal-call-count">0</span> Calls)
+          </h3>
+          <span class="text-xs text-slate-400">Order: Oldest to Newest</span>
+        </div>
+        
+        <div id="modal-recordings-timeline" class="space-y-3">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="p-3 sm:p-4 bg-white border-t border-slate-200 flex items-center justify-between shrink-0">
+        <button id="modal-delete-entire-comp-btn" class="text-xs text-red-600 hover:text-red-800 font-semibold flex items-center gap-1 transition">
+          <i class="fa-solid fa-trash-can"></i> Delete Entire Complaint & Recordings
+        </button>
+        <button onclick="closeComplaintModal()" class="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-bold transition">
+          Close
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- MODAL 2: Dedicated Phone Number Call History                   -->
+  <!-- ============================================================== -->
+  <div id="phone-history-modal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+    <div class="bg-white w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+      
+      <!-- Phone Modal Header -->
+      <div class="p-4 sm:p-5 bg-gradient-to-r from-emerald-900 to-slate-900 text-white flex items-start justify-between gap-3 shrink-0">
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-emerald-500 flex items-center justify-center text-white text-sm shadow">
+              <i class="fa-solid fa-phone"></i>
+            </div>
+            <h2 class="text-lg font-bold font-mono tracking-tight" id="phone-modal-number">
+              +91 ----------
+            </h2>
+          </div>
+          <p class="text-xs text-emerald-200/80" id="phone-modal-consumer-names">
+            Associated Consumer Name(s)
+          </p>
+        </div>
+        <button onclick="closePhoneModal()" class="text-slate-400 hover:text-white p-1 rounded-lg transition text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- Summary KPI Strip for this Phone -->
+      <div class="bg-slate-100 p-3 sm:px-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
+        <div class="flex items-center gap-4">
+          <div>
+            <span class="text-slate-500">Total Calls:</span>
+            <span class="font-bold text-slate-800 ml-1" id="phone-modal-total-calls">0</span>
+          </div>
+          <div>
+            <span class="text-slate-500">Satisfied:</span>
+            <span class="font-bold text-emerald-700 ml-1" id="phone-modal-satisfied-count">0</span>
+          </div>
+          <div>
+            <span class="text-slate-500">Unsatisfied:</span>
+            <span class="font-bold text-rose-700 ml-1" id="phone-modal-unsatisfied-count">0</span>
+          </div>
+        </div>
+        <div id="phone-modal-linked-complaints" class="flex flex-wrap items-center gap-1.5">
+          <!-- Clickable chips for linked complaints -->
+        </div>
+      </div>
+
+      <!-- Modal Body: Recordings List for this Phone -->
+      <div class="p-4 sm:p-5 overflow-y-auto space-y-3 flex-1 custom-scroll bg-slate-50" id="phone-modal-recordings-list">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="p-3 sm:p-4 bg-white border-t border-slate-200 flex items-center justify-end shrink-0">
+        <button onclick="closePhoneModal()" class="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-bold transition">
+          Close
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- MODAL 3: Direct Phone / Complaint Quick Lookup                 -->
+  <!-- ============================================================== -->
+  <div id="quick-lookup-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-md rounded-2xl shadow-xl border border-slate-200 p-5 space-y-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-sm font-bold">
+            <i class="fa-solid fa-magnifying-glass"></i>
+          </div>
+          <h3 class="text-base font-bold text-slate-800" id="lookup-modal-title">Direct Lookup</h3>
+        </div>
+        <button onclick="closeLookupModal()" class="text-slate-400 hover:text-slate-600 text-sm">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-500" id="lookup-modal-desc">
+        Enter a 10-digit Phone Number or Complaint Number to view its full history:
+      </p>
+
+      <form id="lookup-modal-form" class="space-y-3">
+        <input 
+          type="text" 
+          id="lookup-modal-input" 
+          placeholder="e.g. 9876543210 or MV051126..." 
+          class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          required
+        />
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <button type="button" onclick="closeLookupModal()" class="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition">
+            Cancel
+          </button>
+          <button type="submit" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow transition flex items-center gap-1.5">
+            <i class="fa-solid fa-arrow-right"></i> Open History
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <script src="/app.js"></script>
 </body>

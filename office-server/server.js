@@ -450,6 +450,88 @@ app.post('/api/complaints/:complaint_no/satisfaction', async (req, res) => {
   }
 });
 
+// 4a. Get Single Complaint Details & its entire Call History
+app.get('/api/complaints/:complaint_no', async (req, res) => {
+  try {
+    const { complaint_no } = req.params;
+    const meta = await get(
+      'SELECT complaint_no, consumer_name, consumer_phone, area, substation, feeder, complaint_type, complaint_date, last_activity_at FROM complaints_meta WHERE complaint_no = ?',
+      [complaint_no]
+    );
+
+    const recordings = await all(
+      `SELECT id, complaint_no, call_target, phone_number, contact_name, operator_name, operator_id, 
+              call_time, duration_seconds, file_name, file_size_bytes, call_outcome, actual_problem, 
+              operator_notes, consumer_satisfaction, created_at 
+       FROM call_recordings 
+       WHERE complaint_no = ? 
+       ORDER BY call_time ASC, id ASC`,
+      [complaint_no]
+    );
+
+    if (!meta && recordings.length === 0) {
+      return res.status(404).json({ error: 'Complaint not found' });
+    }
+
+    res.json({
+      complaint: meta || {
+        complaint_no,
+        consumer_name: recordings[0]?.contact_name || 'Consumer',
+        consumer_phone: recordings[0]?.phone_number || '',
+      },
+      recordings,
+    });
+  } catch (err) {
+    console.error('[API] Error fetching single complaint:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4b. Get All Call Recordings for a Specific Phone Number across complaints
+app.get('/api/phone/:phone/recordings', async (req, res) => {
+  try {
+    const rawPhone = req.params.phone;
+    const cleanPhone = rawPhone.replace(/\D/g, '').slice(-10);
+    if (!cleanPhone || cleanPhone.length < 5) {
+      return res.status(400).json({ error: 'Valid phone number is required' });
+    }
+
+    const recordings = await all(
+      `SELECT r.id, r.complaint_no, r.call_target, r.phone_number, r.contact_name, 
+              r.operator_name, r.operator_id, r.call_time, r.duration_seconds, 
+              r.file_name, r.file_size_bytes, r.call_outcome, r.actual_problem, 
+              r.operator_notes, r.consumer_satisfaction, r.created_at,
+              c.consumer_name, c.area, c.substation, c.feeder, c.complaint_type, c.complaint_date
+       FROM call_recordings r
+       LEFT JOIN complaints_meta c ON r.complaint_no = c.complaint_no
+       WHERE r.phone_number = ? OR r.phone_number LIKE ?
+       ORDER BY r.call_time DESC, r.id DESC`,
+      [cleanPhone, `%${cleanPhone}`]
+    );
+
+    const uniqueComplaints = [...new Set(recordings.map((r) => r.complaint_no).filter(Boolean))];
+    const names = [...new Set(recordings.map((r) => r.contact_name || r.consumer_name).filter(Boolean))];
+    const totalCalls = recordings.length;
+    const satisfiedCalls = recordings.filter((r) => (r.consumer_satisfaction || '').toUpperCase() === 'SATISFIED').length;
+    const unsatisfiedCalls = recordings.filter((r) => (r.consumer_satisfaction || '').toUpperCase() === 'UNSATISFIED').length;
+    const totalDurationSeconds = recordings.reduce((acc, r) => acc + (r.duration_seconds || 0), 0);
+
+    res.json({
+      phone: cleanPhone,
+      names,
+      totalCalls,
+      uniqueComplaints,
+      satisfiedCalls,
+      unsatisfiedCalls,
+      totalDurationSeconds,
+      recordings,
+    });
+  } catch (err) {
+    console.error('[API] Error fetching phone recordings:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 5. Query Complaints Thread View (1 Complaint -> All its recordings)
 app.get('/api/complaints', async (req, res) => {
   try {
@@ -591,7 +673,9 @@ app.get('/api/stats', async (req, res) => {
         COUNT(id) as total_calls_today,
         COUNT(DISTINCT complaint_no) as total_complaints_today,
         COALESCE(SUM(duration_seconds), 0) as total_duration_today,
-        COALESCE(SUM(file_size_bytes), 0) as total_bytes_today
+        COALESCE(SUM(file_size_bytes), 0) as total_bytes_today,
+        SUM(CASE WHEN consumer_satisfaction = 'SATISFIED' THEN 1 ELSE 0 END) as satisfied_today,
+        SUM(CASE WHEN consumer_satisfaction = 'UNSATISFIED' THEN 1 ELSE 0 END) as unsatisfied_today
        FROM call_recordings
        WHERE date(call_time) = date(?)`,
       [today]
@@ -606,20 +690,29 @@ app.get('/api/stats', async (req, res) => {
     );
 
     const allTimeStats = await get(
-      `SELECT COUNT(id) as total_calls, COUNT(DISTINCT complaint_no) as total_complaints, SUM(file_size_bytes) as total_bytes FROM call_recordings`
+      `SELECT COUNT(id) as total_calls, 
+              COUNT(DISTINCT complaint_no) as total_complaints, 
+              SUM(file_size_bytes) as total_bytes,
+              SUM(CASE WHEN consumer_satisfaction = 'SATISFIED' THEN 1 ELSE 0 END) as total_satisfied,
+              SUM(CASE WHEN consumer_satisfaction = 'UNSATISFIED' THEN 1 ELSE 0 END) as total_unsatisfied
+       FROM call_recordings`
     );
 
     res.json({
       today: {
         date: today,
-        calls: todayStats.total_calls_today,
-        complaints: todayStats.total_complaints_today,
+        calls: todayStats.total_calls_today || 0,
+        complaints: todayStats.total_complaints_today || 0,
+        satisfied: todayStats.satisfied_today || 0,
+        unsatisfied: todayStats.unsatisfied_today || 0,
         durationMinutes: Math.round((todayStats.total_duration_today || 0) / 60),
         storageMB: ((todayStats.total_bytes_today || 0) / (1024 * 1024)).toFixed(2),
       },
       allTime: {
-        totalCalls: allTimeStats.total_calls,
-        totalComplaints: allTimeStats.total_complaints,
+        totalCalls: allTimeStats.total_calls || 0,
+        totalComplaints: allTimeStats.total_complaints || 0,
+        totalSatisfied: allTimeStats.total_satisfied || 0,
+        totalUnsatisfied: allTimeStats.total_unsatisfied || 0,
         totalStorageMB: ((allTimeStats.total_bytes || 0) / (1024 * 1024)).toFixed(2),
       },
       operators: operatorBreakdown,
